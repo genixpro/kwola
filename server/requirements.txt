@@ -1,0 +1,5 @@
+mitmproxy
+selenium
+requests
+numpy
+

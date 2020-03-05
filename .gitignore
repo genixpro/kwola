@@ -1,0 +1,6 @@
+server/node_modules
+.idea
+server/package-lock.json
+server/venv
+*.egg-info
+*__pycache__*
