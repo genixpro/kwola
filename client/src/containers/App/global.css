@@ -1,0 +1,59 @@
+/********** Add Your Global CSS Here **********/
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+a,
+p,
+li,
+input,
+textarea,
+span,
+div,
+button,
+html,
+body,
+html a {
+  font-family: 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.004);
+}
+
+a,
+button,
+li,
+span {
+  -webkit-tap-highlight-color: transparent;
+}
+
+ul {
+  margin: 0;
+}
+
+.scrollbar-track {
+  background: rgba(222, 222, 222, 0.15) !important;
+}
+
+.scrollbar-track-x {
+  height: 5px !important;
+}
+
+.scrollbar-track-y {
+  width: 5px !important;
+}
+
+.scrollbar-thumb {
+  border-radius: 0 !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+}
+
+.scrollbar-thumb-x {
+  height: 5px !important;
+}
+
+.scrollbar-thumb-y {
+  width: 5px !important;
+}

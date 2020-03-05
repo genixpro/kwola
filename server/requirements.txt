@@ -2,4 +2,9 @@ mitmproxy
 selenium
 requests
 numpy
-
+flask_restful
+flask
+flask_jwt_extended
+gunicorn
+mongoengine
+flask-cors

@@ -48,7 +48,7 @@ setup(
             'main = kwola:main',
         ],
         'console_scripts': [
-            'appraisal_train_classifier = appraisal.bin.train_document_classifier:main'
+
         ]
     },
 )

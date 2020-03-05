@@ -4,3 +4,6 @@ server/package-lock.json
 server/venv
 *.egg-info
 *__pycache__*
+client/node_modules
+
+
