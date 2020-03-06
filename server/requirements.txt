@@ -8,3 +8,5 @@ flask_jwt_extended
 gunicorn
 mongoengine
 flask-cors
+celery
+celery[redis]

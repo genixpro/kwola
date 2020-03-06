@@ -15,9 +15,6 @@ export default function reducer(state = initState, action) {
         error: false
       };
     case actions.APPLICATION_LIST_SUCCESS_RESULT:
-
-      console.log("success", action);
-
       return {
         ...state,
         applications: action.applications,

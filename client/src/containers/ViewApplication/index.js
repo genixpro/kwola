@@ -31,6 +31,10 @@ class ViewApplication extends Component {
         store.dispatch(action.requestApplication(this.props.match.params.id));
     }
 
+    launchTestingSequenceButtonClicked() {
+        store.dispatch(action.requestNewTestingSequence(this.props.match.params.id));
+    }
+
     render() {
         const { result } = this.state;
         return (
@@ -70,7 +74,7 @@ class ViewApplication extends Component {
                                         <Row>
                                         <FullColumn>
                                                 <DemoWrapper>
-                                                    <Button variant="extended" color="primary">
+                                                    <Button variant="extended" color="primary" onClick={() => this.launchTestingSequenceButtonClicked()}>
                                                         Launch New Testing Sequence
                                                         <Icon className="rightIcon">send</Icon>
                                                     </Button>
