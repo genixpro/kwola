@@ -1,7 +1,8 @@
 import actions from './actions';
 
 const initState = {
-  applications: [],
+  application: null,
+  testingSequences: [],
   loading: false,
   error: false
 };
@@ -16,16 +17,19 @@ export default function reducer(state = initState, action) {
       };
     case actions.APPLICATION_SUCCESS_RESULT:
 
+      // console.log(action);
+
       return {
         ...state,
-        applications: action.applications,
+        application: action.application,
+        testingSequences: action.testingSequences,
         loading: false,
         error: false
       };
     case actions.APPLICATION_ERROR_RESULT:
       return {
         ...state,
-        applications: [],
+        application: [],
         loading: false,
         error: true
       };

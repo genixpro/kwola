@@ -5,8 +5,9 @@ import axios from "axios";
 function* fetchApplication(action) {
   try {
     const response = yield axios.get(`/api/application/${action._id}`);
+    const otherResponse = yield axios.get(`/api/application/${action._id}/testing_sequences`);
 
-    yield put({type: "APPLICATION_SUCCESS_RESULT", applications: response.data.applications});
+    yield put({type: "APPLICATION_SUCCESS_RESULT", application: response.data, testingSequences: otherResponse.data.testingSequences});
 
   } catch (e) {
     yield put({type: "APPLICATION_ERROR_RESULT", message: e.message});
