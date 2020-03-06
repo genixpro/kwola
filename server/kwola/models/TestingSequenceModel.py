@@ -1,5 +1,6 @@
 from mongoengine import *
 import datetime
+from .ExecutionTraceModel import ExecutionTrace
 
 class TestingSequenceModel(Document):
 
@@ -12,4 +13,5 @@ class TestingSequenceModel(Document):
 
     status = StringField(default="fresh")
 
+    executionTraces = ListField(GenericReferenceField(ExecutionTrace))
 
