@@ -1,5 +1,6 @@
 from .BaseError import BaseError
 from mongoengine import *
+import hashlib
 
 
 class ExceptionError(BaseError):
@@ -10,4 +11,12 @@ class ExceptionError(BaseError):
     stacktrace = StringField()
 
     message = StringField()
+
+    def computeHash(self):
+        hasher = hashlib.md5()
+        hasher.update(self.stacktrace)
+
+        return hasher.hexdigest()
+
+
 

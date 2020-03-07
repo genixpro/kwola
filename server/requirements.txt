@@ -10,3 +10,11 @@ mongoengine
 flask-cors
 celery
 celery[redis]
+torch
+scipy
+pandas
+scikit-learn
+scikit-image
+
+opencv-python
+torchvision

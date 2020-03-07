@@ -1,7 +1,6 @@
 from mongoengine import *
 import datetime
 
-
 class BaseError(EmbeddedDocument):
     """
         This model is a base class for all different kinds of errors that can be detected by the Kwola engine.
@@ -11,3 +10,6 @@ class BaseError(EmbeddedDocument):
 
     type = StringField()
 
+
+    def computeHash(self):
+        raise NotImplementedError()

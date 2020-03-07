@@ -14,31 +14,42 @@ class ExecutionTrace(Document):
 
     branchExecutionTrace = ListField(IntField())
 
-    networkTrafficTrace = ListField(IntField())
+    startCumulativeBranchExecutionTrace = ListField(IntField())
 
-    dataChangeTrace = ListField(IntField())
+    networkTrafficTrace = ListField(StringField())
 
-    beforeScreenshot = StringField()
+    startScreenshotHash = StringField()
 
-    afterScreenshot = StringField()
+    finishScreenshotHash = StringField()
+
+    frameNumber = IntField()
 
     startURL = StringField()
 
     finishURL = StringField()
 
+    didActionSucceed = BooleanField()
+
     didErrorOccur = BooleanField()
+
+    didNewErrorOccur = BooleanField()
 
     didCodeExecute = BooleanField()
 
     didNewBranchesExecute = BooleanField()
 
-    didDataChange = BooleanField()
+    hadNetworkTraffic = BooleanField()
 
-    didNewDataFieldsChange = BooleanField()
+    hadNewNetworkTraffic = BooleanField()
 
     didScreenshotChange = BooleanField()
 
+    isScreenshotNew = BooleanField()
+
     didURLChange = BooleanField()
 
-    cumulativeBranchCoverage = FloatField()
+    isURLNew = BooleanField()
 
+    hadLogOutput = BooleanField()
+
+    cumulativeBranchCoverage = FloatField()

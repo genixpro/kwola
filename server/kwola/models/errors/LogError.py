@@ -1,5 +1,6 @@
 from .BaseError import BaseError
 from mongoengine import *
+import hashlib
 
 
 class LogError(BaseError):
@@ -12,3 +13,10 @@ class LogError(BaseError):
 
     logLevel = StringField()
 
+
+
+    def computeHash(self):
+        hasher = hashlib.md5()
+        hasher.update(self.message)
+
+        return hasher.hexdigest()
