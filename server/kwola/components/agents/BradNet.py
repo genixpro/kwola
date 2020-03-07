@@ -18,36 +18,49 @@ Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if 
 
 
 class BradNet(nn.Module):
-    def __init__(self, branchFeatureSize, numActions):
+    def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize):
         super(BradNet, self).__init__()
 
-        self.branchStampEdgeSize = 10
+        self.branchStampEdgeSize = 20
 
-        self.stampProjection = nn.Linear(branchFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
+        self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
 
         self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=64)
 
         self.rewardConvolution = nn.Conv2d(64, numActions, 1, stride=1, padding=0, bias=False)
 
+        self.predictedExecutionTraceLinear = nn.Sequential(
+            nn.Linear(64, executionTracePredictorSize),
+            nn.Sigmoid()
+        )
+
         self.numActions = numActions
 
     def forward(self, data):
-        outWidth = data['image'].shape[3]
-        outHeight = data['image'].shape[2]
+        width = data['image'].shape[3]
+        height = data['image'].shape[2]
 
-        stamp = self.stampProjection(data['branchFeature'])
+        stamp = self.stampProjection(data['additionalFeature'])
 
-        stampTiler = stamp.reshape([self.branchStampEdgeSize, self.branchStampEdgeSize]).repeat([int(outHeight / self.branchStampEdgeSize) + 1, int(outWidth / self.branchStampEdgeSize) + 1])
-        stampLayer = stampTiler[:outHeight, :outWidth].reshape([1, 1, outHeight, outWidth])
+        stampTiler = stamp.reshape([self.branchStampEdgeSize, self.branchStampEdgeSize]).repeat([int(height / self.branchStampEdgeSize) + 1, int(width / self.branchStampEdgeSize) + 1])
+        stampLayer = stampTiler[:height, :width].reshape([1, 1, height, width])
 
         # Replace the saturation layer on the image with the stamp data layer
         merged = torch.cat([stampLayer, data['image']], dim=1)
 
         output = self.mainModel(merged)
 
+        featureMap = output['out']
+
         rewards = self.rewardConvolution(output['out'])
 
-        return rewards
+        action_index = rewards.reshape([-1, width * height * self.numActions]).argmax(1).data[0]
+        action_type, action_x, action_y = self.actionIndexToActionDetails(width, height, action_index)
+
+        featuresForTrace = featureMap[:, :, action_y, action_x]
+        predictedTrace = self.predictedExecutionTraceLinear(featuresForTrace)
+
+        return rewards, predictedTrace
 
 
     def feature_size(self):
@@ -60,24 +73,24 @@ class BradNet(nn.Module):
     def actionIndexToActionDetails(self, width, height, action_index):
         action_type = action_index % self.numActions
 
-        action_x = int(action_index % (width * self.numActions))
+        action_x = int(int(action_index % (width * self.numActions)) / self.numActions)
         action_y = int(action_index / (width * self.numActions))
 
         return action_type, action_x, action_y
 
 
-    def predict(self, image, branchFeature, epsilon):
+    def predict(self, image, additionalFeatures, epsilon):
         width = image.shape[2]
         height = image.shape[1]
 
         if random.random() > epsilon:
             image = Variable(torch.FloatTensor(np.float32(image)).unsqueeze(0), volatile=True            )
 
-            q_value = self.forward({"image": image, "branchFeature": Variable(torch.FloatTensor(branchFeature), volatile=True) })
+            q_value, predictedTrace = self.forward({"image": image, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures), volatile=True)})
 
             action_index = q_value.reshape([-1, width * height * self.numActions]).argmax(1).data[0]
 
-            return self.actionIndexToActionDetails(width, height, action_index)
+            return self.actionIndexToActionDetails(width, height, action_index), predictedTrace
         else:
 
             action_type = random.randrange(self.numActions)

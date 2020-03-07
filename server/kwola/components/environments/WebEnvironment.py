@@ -73,6 +73,7 @@ class WebEnvironment(BaseEnvironment):
         self.lastScreenshotHash = screenHash
 
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(self.extractBranchTrace())
+        self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
 
     def __del__(self):
@@ -227,6 +228,7 @@ class WebEnvironment(BaseEnvironment):
 
         executionTrace.branchExecutionTrace = branchExecutionVector.tolist()
         executionTrace.startCumulativeBranchExecutionTrace = self.lastCumulativeBranchExecutionVector.tolist()
+        executionTrace.startDecayingExecutionTrace = self.decayingExecutionTrace.tolist()
 
         executionTrace.networkTrafficTrace = list(self.pathTracer.recentPaths)
 
@@ -255,6 +257,9 @@ class WebEnvironment(BaseEnvironment):
 
         executionTrace.hadLogOutput = bool(executionTrace.logOutput)
         executionTrace.cumulativeBranchCoverage = float(np.count_nonzero(cumulativeBranchExecutionVector)) / len(cumulativeBranchExecutionVector)
+
+        # Update the decaying execution trace to use as input for the next round
+        self.decayingExecutionTrace = np.maximum(self.decayingExecutionTrace * 0.95, np.minimum(np.ones_like(branchExecutionVector), branchExecutionVector))
 
         self.lastBranchTrace = branchTrace
         self.lastCumulativeBranchExecutionVector = cumulativeBranchExecutionVector

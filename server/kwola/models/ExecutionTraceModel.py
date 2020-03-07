@@ -12,9 +12,11 @@ class ExecutionTrace(Document):
 
     logOutput = StringField()
 
-    branchExecutionTrace = ListField(IntField())
-
     startCumulativeBranchExecutionTrace = ListField(IntField())
+
+    startDecayingExecutionTrace = ListField(FloatField())
+
+    branchExecutionTrace = ListField(IntField())
 
     networkTrafficTrace = ListField(StringField())
 

@@ -68,7 +68,7 @@ class DeepLearningAgent(BaseAgent):
 
         rect = environment.screenshotSize()
 
-        self.model = BradNet(self.environment.branchFeatureSize(), len(self.actions))
+        self.model = BradNet(self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize())
 
         self.model = self.model.cuda()
         # self.model = self.model
@@ -93,10 +93,10 @@ class DeepLearningAgent(BaseAgent):
         return hueLightnessImage
 
 
-    def getBranchFeature(self):
-        feature = numpy.minimum(self.environment.lastCumulativeBranchExecutionVector, numpy.ones_like(self.environment.lastCumulativeBranchExecutionVector))
-        return feature
-
+    def getAdditionalFeatures(self):
+        branchFeature = numpy.minimum(self.environment.lastCumulativeBranchExecutionVector, numpy.ones_like(self.environment.lastCumulativeBranchExecutionVector))
+        decayingExecutionTraceFeature = self.environment.decayingExecutionTrace
+        return numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
 
     def nextBestAction(self):
@@ -107,9 +107,9 @@ class DeepLearningAgent(BaseAgent):
         """
         epsilon = 0.5
         image = self.getImage()
-        branchFeature = self.getBranchFeature()
+        additionalFeatures = self.getAdditionalFeatures()
 
-        actionInfo = self.model.predict(image, branchFeature, epsilon)
+        actionInfo, predictedTrace = self.model.predict(image, additionalFeatures, epsilon)
 
         action = self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
 
@@ -169,13 +169,17 @@ class DeepLearningAgent(BaseAgent):
         shuffledTraceFrameList = list(zip(testingSequence.executionTraces, frames, discountedRewards))
         random.shuffle(shuffledTraceFrameList)
 
-        losses = []
+        rewardLosses = []
+        tracePredictionLosses = []
+        totalLosses = []
         for trace, frame, discountedReward in shuffledTraceFrameList:
-            branchFeature = numpy.array(trace.startCumulativeBranchExecutionTrace)
+            branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
+            decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
+            additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
             frame = torch.unsqueeze(Variable(torch.Tensor(frame)), 0)
 
-            q_values = self.model({"image": frame, "branchFeature": Variable(torch.FloatTensor(branchFeature), volatile=True) })
+            q_values, predictedTrace = self.model({"image": frame, "additionalFeature": Variable(torch.FloatTensor(additionalFeature), volatile=True) })
 
             width = frame.shape[3]
             height = frame.shape[2]
@@ -189,20 +193,34 @@ class DeepLearningAgent(BaseAgent):
 
             q_value = q_values.gather(1, action_index).squeeze(1)
 
-            loss = (q_value - Variable(torch.FloatTensor(numpy.array([discountedReward], dtype=numpy.float32) ))).pow(2).mean()
+            rewardLoss = (q_value - Variable(torch.FloatTensor(numpy.array([discountedReward], dtype=numpy.float32) ))).pow(2).mean()
+
+            executionTrace = numpy.array(trace.branchExecutionTrace)
+            executionTrace = numpy.minimum(executionTrace, numpy.ones_like(executionTrace))
+            tracePredictionLoss = (predictedTrace - Variable(torch.FloatTensor(executionTrace))).pow(2).mean()
+
+            totalLoss = rewardLoss + tracePredictionLoss
 
             self.optimizer.zero_grad()
-            loss.backward()
+            totalLoss.backward()
             self.optimizer.step()
 
-            lossValue = float(loss.data.item())
+            rewardLoss = float(rewardLoss.data.item())
+            tracePredictionLoss = float(tracePredictionLoss.data.item())
+            totalLoss = float(totalLoss.data.item())
 
-            losses.append(lossValue)
+            rewardLosses.append(rewardLoss)
+            tracePredictionLosses.append(tracePredictionLoss)
+            totalLosses.append(totalLoss)
 
-        averageLoss = numpy.mean(losses)
+        averageRewardLoss = numpy.mean(rewardLosses)
+        averageTracePredictionLoss = numpy.mean(tracePredictionLosses)
+        averageTotalLoss = numpy.mean(totalLosses)
 
         totalReward = float(numpy.sum(present_rewards))
 
         print(testingSequence.id)
         print("Total Reward", float(totalReward))
-        print("Average Loss:", averageLoss)
+        print("Average Reward Loss:", averageRewardLoss)
+        print("Average Trace Predicton Loss:", averageTracePredictionLoss)
+        print("Average Total Loss:", averageTotalLoss)
