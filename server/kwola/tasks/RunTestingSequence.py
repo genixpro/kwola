@@ -13,7 +13,7 @@ import os
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     environment = WebEnvironment()
 
-    stepsRemaining = 10
+    stepsRemaining = 100
 
     testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
 
