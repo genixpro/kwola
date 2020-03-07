@@ -18,23 +18,18 @@ Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if 
 
 
 class BradNet(nn.Module):
-    def __init__(self, imageInputShape, branchFeatureSize):
+    def __init__(self, branchFeatureSize, numActions):
         super(BradNet, self).__init__()
-
-        self.width = int(imageInputShape[2])
-        self.height = int(imageInputShape[1])
-
-        self.imageInputShape = imageInputShape
 
         self.branchStampEdgeSize = 10
 
         self.stampProjection = nn.Linear(branchFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
 
-        self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=32)
+        self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=64)
 
-        self.rewardConvolution = nn.Conv2d(32, 1, 1, stride=1, padding=0, bias=False)
+        self.rewardConvolution = nn.Conv2d(64, numActions, 1, stride=1, padding=0, bias=False)
 
-
+        self.numActions = numActions
 
     def forward(self, data):
         outWidth = data['image'].shape[3]
@@ -59,28 +54,35 @@ class BradNet(nn.Module):
         return self.features(autograd.Variable(torch.zeros(1, *self.imageInputShape))).view(1, -1).size(1)
 
 
+    def actionDetailsToActionIndex(self, width, height, action_type, action_x, action_y):
+        return action_type + action_x * self.numActions + action_y * width * self.numActions
+
+    def actionIndexToActionDetails(self, width, height, action_index):
+        action_type = action_index % self.numActions
+
+        action_x = int(action_index % (width * self.numActions))
+        action_y = int(action_index / (width * self.numActions))
+
+        return action_type, action_x, action_y
+
 
     def predict(self, image, branchFeature, epsilon):
-        outWidth = image.shape[2]
-        outHeight = image.shape[1]
+        width = image.shape[2]
+        height = image.shape[1]
 
         if random.random() > epsilon:
-            image = Variable(torch.FloatTensor(np.float32(image)).unsqueeze(0), volatile=True)
-            # image = torch.FloatTensor(np.float32(image)).unsqueeze(0)
+            image = Variable(torch.FloatTensor(np.float32(image)).unsqueeze(0), volatile=True            )
 
             q_value = self.forward({"image": image, "branchFeature": Variable(torch.FloatTensor(branchFeature), volatile=True) })
 
-            action_index = q_value.reshape([-1, outWidth * outHeight]).argmax(1).data[0]
+            action_index = q_value.reshape([-1, width * height * self.numActions]).argmax(1).data[0]
 
-            action_x = int(action_index / outHeight)
-            action_y = int(action_index % outHeight)
-
-            return action_index, [action_x, action_y]
+            return self.actionIndexToActionDetails(width, height, action_index)
         else:
-            action_x = random.randrange(outWidth)
-            action_y = random.randrange(outHeight)
 
-            action_index = action_x * outHeight + action_y
+            action_type = random.randrange(self.numActions)
+            action_x = random.randrange(width)
+            action_y = random.randrange(height)
 
-            return action_index, [action_x, action_y]
+            return action_type, action_x, action_y
 

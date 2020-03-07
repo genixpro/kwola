@@ -14,6 +14,10 @@ import numpy
 import skimage
 import skimage.transform
 import skimage.color
+from kwola.models.actions.ClickTapAction import ClickTapAction
+from kwola.models.actions.RightClickAction import RightClickAction
+from kwola.models.actions.TypeAction import TypeAction
+from kwola.models.actions.WaitAction import WaitAction
 
 from .BradNet import BradNet
 
@@ -27,7 +31,7 @@ class DeepLearningAgent(BaseAgent):
     """
 
     def __init__(self):
-        pass
+        super().__init__()
 
         self.num_frames = 1400000
         self.batch_size = 32
@@ -64,7 +68,7 @@ class DeepLearningAgent(BaseAgent):
 
         rect = environment.screenshotSize()
 
-        self.model = BradNet([3, rect['height'], rect['width']], self.environment.branchFeatureSize())
+        self.model = BradNet(self.environment.branchFeatureSize(), len(self.actions))
 
         self.model = self.model.cuda()
         # self.model = self.model
@@ -107,9 +111,7 @@ class DeepLearningAgent(BaseAgent):
 
         actionInfo = self.model.predict(image, branchFeature, epsilon)
 
-        action = ClickTapAction(x=actionInfo[1][0], y=actionInfo[1][1])
-
-        print("Click", action.x, action.y)
+        action = self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
 
         return action
 
@@ -178,9 +180,9 @@ class DeepLearningAgent(BaseAgent):
             width = frame.shape[3]
             height = frame.shape[2]
 
-            q_values = q_values.reshape([-1, height * width])
+            q_values = q_values.reshape([-1, height * width * len(self.actions)])
 
-            action_index = int(trace.actionPerformed.x * height + trace.actionPerformed.y)
+            action_index = self.model.actionDetailsToActionIndex(width, height, self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
             action_index = Variable(torch.LongTensor(numpy.array([action_index], dtype=numpy.int32)))
 
             action_index = action_index.unsqueeze(0)
@@ -204,4 +206,3 @@ class DeepLearningAgent(BaseAgent):
         print(testingSequence.id)
         print("Total Reward", float(totalReward))
         print("Average Loss:", averageLoss)
-

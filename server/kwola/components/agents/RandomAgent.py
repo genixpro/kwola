@@ -1,5 +1,8 @@
 from .BaseAgent import BaseAgent
 from kwola.models.actions.ClickTapAction import ClickTapAction
+from kwola.models.actions.RightClickAction import RightClickAction
+from kwola.models.actions.TypeAction import TypeAction
+from kwola.models.actions.WaitAction import WaitAction
 import random
 
 class RandomAgent(BaseAgent):
@@ -8,8 +11,7 @@ class RandomAgent(BaseAgent):
         not do anything remotely intelligent.
     """
     def __init__(self):
-        pass
-
+        super().__init__()
 
 
     def load(self):
@@ -36,16 +38,22 @@ class RandomAgent(BaseAgent):
         :return:
         """
 
-    def nextBestAction(self, screenshot):
+        self.environment = environment
+
+    def nextBestAction(self):
         """
             Return the next best action predicted by the agent.
             :param screenshot:
             :return:
         """
-        x = random.randint(500)
-        y = random.randint(500)
+        rect = self.environment.screenshotSize()
 
-        action = ClickTapAction(x=x, y=y)
+        x = random.randint(0, rect['width'])
+        y = random.randint(0, rect['height'])
+
+        actionIndex = random.randint(0, len(self.actionsSorted)-1)
+
+        action = self.actions[self.actionsSorted[actionIndex]](x=x, y=y)
 
         return action
 

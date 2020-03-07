@@ -8,7 +8,5 @@ class ClickTapAction(BaseAction):
         used when testing mobile.
     """
 
-    x = FloatField()
-    y = FloatField()
-
+    times = IntField() # Number of times to click / tap in one spot. Can be 1, 2 or 3`
 

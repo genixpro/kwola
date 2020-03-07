@@ -3,16 +3,17 @@ from kwola.components.environments.WebEnvironment import WebEnvironment
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
+from kwola.components.agents.RandomAgent import RandomAgent
 import random
 from datetime import datetime
 from bson import ObjectId
 import os
 
 @app.task
-def runTestingSequence(testingSequenceId):
+def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     environment = WebEnvironment()
 
-    stepsRemaining = 100
+    stepsRemaining = 10
 
     testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
 
@@ -25,7 +26,11 @@ def runTestingSequence(testingSequenceId):
     errorHashes = set()
     uniqueErrors = []
 
-    agent = DeepLearningAgent()
+    if shouldBeRandom:
+        agent = RandomAgent()
+    else:
+        agent = DeepLearningAgent()
+
     agent.initialize(environment)
     agent.load()
 

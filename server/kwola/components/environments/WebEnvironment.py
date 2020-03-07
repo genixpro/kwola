@@ -8,6 +8,8 @@ from mitmproxy.tools.dump import DumpMaster
 from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
 from kwola.components.proxy.PathTracer import PathTracer
 from kwola.models.actions.ClickTapAction import ClickTapAction
+from kwola.models.actions.RightClickAction import RightClickAction
+from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
 from kwola.models.ExecutionTraceModel import ExecutionTrace
 import selenium.common.exceptions
@@ -51,7 +53,7 @@ class WebEnvironment(BaseEnvironment):
         chrome_options.headless = True
 
         capabilities = webdriver.DesiredCapabilities.CHROME
-        capabilities['loggingPrefs'] = { 'browser':'ALL' }
+        capabilities['loggingPrefs'] = {'browser': 'ALL'}
         proxyConfig = Proxy()
         proxyConfig.proxy_type = ProxyType.MANUAL
         proxyConfig.http_proxy = f"localhost:{self.proxyPort}"
@@ -173,12 +175,35 @@ class WebEnvironment(BaseEnvironment):
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
-                    actionChain.click()
+                    if action.times == 1:
+                        print("Clicking", action.x, action.y)
+                        actionChain.click()
+                    elif action.times == 2:
+                        print("Double Clicking", action.x, action.y)
+                        actionChain.double_click()
+
                     actionChain.perform()
 
+            if isinstance(action, RightClickAction):
+                    print("Right Clicking", action.x, action.y)
+                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
+                    actionChain.move_by_offset(action.x, action.y)
+                    actionChain.context_click()
+                    actionChain.perform()
+
+            if isinstance(action, TypeAction):
+                    print("Typing", action.text, "at", action.x, action.y)
+                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
+                    actionChain.move_by_offset(action.x, action.y)
+                    actionChain.send_keys(action.text)
+                    actionChain.perform()
 
             if isinstance(action, WaitAction):
+                print("Waiting for ", action.time)
                 time.sleep(action.time)
+
         except selenium.common.exceptions.MoveTargetOutOfBoundsException:
             print("Running action failed!")
 
