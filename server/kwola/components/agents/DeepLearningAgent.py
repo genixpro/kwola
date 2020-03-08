@@ -87,75 +87,89 @@ class DeepLearningAgent(BaseAgent):
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
 
-    def getImage(self):
-        image = cv2.imdecode(numpy.frombuffer(self.environment.driver.get_screenshot_as_png(), numpy.uint8), -1)
 
-        width = image.shape[0]
-        height = image.shape[1]
+    def getImage(self):
+        images = self.environment.getImages()
+
+        width = images[0].shape[0]
+        height = images[0].shape[1]
 
         # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
 
         # Convert to HSL representation, but discard the saturation layer
-        image = skimage.color.rgb2hsv(image[:, :, :3])
+        converted = []
+        for image in images:
+            image = skimage.color.rgb2hsv(image[:, :, :3])
+            swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
+            hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
+            converted.append(hueLightnessImage)
 
-        swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
-
-        hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
-
-        return hueLightnessImage
-
+        return numpy.array(converted)
 
     def getAdditionalFeatures(self):
-        branchFeature = numpy.minimum(self.environment.lastCumulativeBranchExecutionVector, numpy.ones_like(self.environment.lastCumulativeBranchExecutionVector))
-        decayingExecutionTraceFeature = self.environment.decayingExecutionTrace
-        return numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
+        branchFeature = self.environment.getBranchFeatures()
+        decayingExecutionTraceFeature = self.environment.getExecutionTraceFeatures()
 
+        return numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=1)
 
-    def nextBestAction(self):
+    def nextBestActions(self):
         """
             Return the next best action predicted by the agent.
+
             # :param environment:
             :return:
         """
         epsilon = 0.5
-        image = self.getImage()
+        images = self.getImage()
         additionalFeatures = self.getAdditionalFeatures()
 
-        width = image.shape[2]
-        height = image.shape[1]
+        # print(images.shape)
+
+        width = images.shape[3]
+        height = images.shape[2]
 
         if random.random() > epsilon:
-            image = Variable(torch.FloatTensor(numpy.array(image)).unsqueeze(0))
+            images = Variable(torch.FloatTensor(images))
 
-            q_value, predictedTrace = self.model({"image": image, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures))})
+            q_values, predictedTrace = self.model({"image": images, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures))})
 
-            action_index = q_value.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data[0]
+            actionIndexes = q_values.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
 
-            actionInfo = BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), action_index)
+            actionInfoList = [
+                BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndex)
+                for actionIndex in actionIndexes
+            ]
+
         else:
+            actionInfoList = []
 
-            action_type = random.randrange(len(self.actionsSorted))
-            action_x = random.randrange(width)
-            action_y = random.randrange(height)
+            for n in range(self.environment.numberParallelSessions()):
+                actionType = random.randrange(len(self.actionsSorted))
+                actionX = random.randrange(width)
+                actionY = random.randrange(height)
 
-            actionInfo = (action_type, action_x, action_y)
-            predictedTrace = None
+                actionInfo = (actionType, actionX, actionY)
+                actionInfoList.append(actionInfo)
 
-        action = self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
+        actions = [
+            self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
+            for actionInfo in actionInfoList
+        ]
 
-        return action
+        return actions
 
 
-    def prepareBatchesForTestingSequence(self, testingSequence):
+    def prepareBatchesForExecutionSession(self, testingSequence, executionSession):
         """
             This function prepares batches that can be fed to the neural network.
 
             :param testingSequence:
+            :param executionSession:
             :return:
         """
         frames = []
 
-        cap = cv2.VideoCapture(f'/home/bradley/{str(testingSequence.id)}.mp4')
+        cap = cv2.VideoCapture(f'/home/bradley/{str(testingSequence.id)}-{executionSession.tabNumber}.mp4')
 
         while (cap.isOpened()):
             ret, frame = cap.read()
@@ -173,10 +187,10 @@ class DeepLearningAgent(BaseAgent):
 
         # First compute the present reward at each time step
         presentRewards = []
-        for trace in testingSequence.executionTraces:
+        for trace in executionSession.executionTraces:
             if trace.didActionSucceed == False:
                 presentRewards.append(-0.1)
-            elif trace.didNewBranchesExecute or trace.hadNewNetworkTraffic or trace.isURLNew or trace.isScreenshotNew:
+            elif trace.didNewBranchesExecute or trace.isURLNew or trace.isScreenshotNew:
                 presentRewards.append(0.2)
             else:
                 presentRewards.append(0.0)
@@ -195,7 +209,7 @@ class DeepLearningAgent(BaseAgent):
         discountedRewards.reverse()
         presentRewards.reverse()
 
-        shuffledTraceFrameList = list(zip(testingSequence.executionTraces, frames, discountedRewards, presentRewards))
+        shuffledTraceFrameList = list(zip(executionSession.executionTraces, frames, discountedRewards, presentRewards))
         random.shuffle(shuffledTraceFrameList)
 
         batches = []
@@ -248,6 +262,21 @@ class DeepLearningAgent(BaseAgent):
                 "discountedRewards": batchDiscountedRewards,
                 "presentRewards": batchPresentRewards
             })
+
+        return batches
+
+
+    def prepareBatchesForTestingSequence(self, testingSequence):
+        """
+            This function prepares batches that can be fed to the neural network.
+
+            :param testingSequence:
+            :return:
+        """
+        batches = []
+
+        for executionSession in testingSequence.executionSessions:
+            batches.extend(self.prepareBatchesForExecutionSession(testingSequence, executionSession))
 
         return batches
 

@@ -30,7 +30,9 @@ class TestingSequencesGroup(Resource):
             startTime=data['startTime'],
             endTime=data['endTime'],
             bugsFound=data['bugsFound'],
-            status=data['status']
+            status=data['status'],
+            executionSessions=[],
+            errors=[]
         )
 
         newTestingSequence.save()

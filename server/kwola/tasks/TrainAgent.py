@@ -11,9 +11,9 @@ import time
 def runRandomInitialization():
     print("Starting random testing sequences for initialization")
 
-    # Seed the pot with 50 random sequences
-    numInitializationSequences = 50
-    numWorkers = 10
+    # Seed the pot with 10 random sequences
+    numInitializationSequences = 10
+    numWorkers = 2
 
     futures = []
     with ProcessPoolExecutor(max_workers=numWorkers) as executor:
@@ -31,6 +31,7 @@ def runRandomInitialization():
         for future in as_completed(futures[:int(numInitializationSequences/2)]):
             result = future.result()
             print("Random Testing Sequence Completed")
+
     print("Random initialization completed")
 
 

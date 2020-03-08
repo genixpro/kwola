@@ -31,10 +31,14 @@ def runTrainingStep():
     environment = WebEnvironment()
 
     testSequences = list(TestingSequenceModel.objects(status="completed").only('id'))
+    if len(testSequences) == 0:
+        print("Error, no test sequences in db to train on for training step.")
+        return
 
     agent = DeepLearningAgent()
     agent.initialize(environment)
     agent.load()
+
 
     try:
         batchFutures = []
@@ -66,6 +70,7 @@ def runTrainingStep():
                     tracePredictionLosses.append(tracePredictionLoss)
                     totalLosses.append(totalLoss)
                     totalReward += batchReward
+                print("Completed", len(batches), "batches")
 
         averageRewardLoss = numpy.mean(rewardLosses)
         averageTracePredictionLoss = numpy.mean(tracePredictionLosses)

@@ -2,6 +2,7 @@ from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
+from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.components.agents.RandomAgent import RandomAgent
 import random
@@ -11,7 +12,7 @@ import os
 
 @app.task
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
-    environment = WebEnvironment()
+    environment = WebEnvironment(numberParallelSessions=16)
 
     stepsRemaining = 100
 
@@ -21,7 +22,10 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     testSequence.status = "running"
     testSequence.save()
 
-    executionTraces = []
+    executionSessions = [
+        ExecutionSession(startTime=datetime.now(), endTime=None, tabNumber=sessionN, executionTraces=[])
+        for sessionN in range(environment.numberParallelSessions())
+    ]
 
     errorHashes = set()
     uniqueErrors = []
@@ -37,26 +41,28 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     while stepsRemaining > 0:
         stepsRemaining -= 1
 
-        action = agent.nextBestAction()
+        actions = agent.nextBestActions()
 
-        trace = environment.runAction(action)
-        trace.save()
+        traces = environment.runActions(actions)
+        for sessionN, trace in enumerate(traces):
+            trace.save()
 
-        executionTraces.append(trace)
+            executionSessions[sessionN].executionTraces.append(trace)
 
-        for error in trace.errorsDetected:
-            hash = error.computeHash()
+            for error in trace.errorsDetected:
+                hash = error.computeHash()
 
-            if hash not in errorHashes:
-                errorHashes.add(hash)
-                uniqueErrors.append(error)
-
-    videoPath = environment.createMovie()
+                if hash not in errorHashes:
+                    errorHashes.add(hash)
+                    uniqueErrors.append(error)
 
 
-    with open(videoPath, 'rb') as origFile:
-        with open(f'/home/bradley/{str(testSequence.id)}.mp4', "wb") as cloneFile:
-            cloneFile.write(origFile.read())
+    videoPaths = environment.createMovies()
+
+    for sessionN, videoPath in enumerate(videoPaths):
+        with open(videoPath, 'rb') as origFile:
+            with open(f'/home/bradley/{str(testSequence.id)}-{sessionN}.mp4', "wb") as cloneFile:
+                cloneFile.write(origFile.read())
 
     testSequence.bugsFound = len(uniqueErrors)
     testSequence.errors = uniqueErrors
@@ -64,7 +70,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     testSequence.status = "completed"
 
     testSequence.endTime = datetime.now()
-    testSequence.executionTraces = executionTraces
+    testSequence.executionSessions = executionSessions
     testSequence.save()
 
     environment.shutdown()

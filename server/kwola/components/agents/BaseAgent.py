@@ -56,7 +56,7 @@ class BaseAgent:
         :return:
         """
 
-    def nextBestAction(self, screenshot):
+    def nextBestActions(self, screenshot):
         """
             Return the next best action predicted by the agent.
             :param screenshot:

@@ -40,20 +40,25 @@ class RandomAgent(BaseAgent):
 
         self.environment = environment
 
-    def nextBestAction(self):
+    def nextBestActions(self):
         """
             Return the next best action predicted by the agent.
             :param screenshot:
             :return:
         """
-        rect = self.environment.screenshotSize()
+        actions = []
 
-        x = random.randrange(0, rect['width'])
-        y = random.randrange(0, rect['height'])
+        for sessionN in range(self.environment.numberParallelSessions()):
+            rect = self.environment.screenshotSize()
 
-        actionIndex = random.randrange(0, len(self.actionsSorted))
+            x = random.randrange(0, rect['width'])
+            y = random.randrange(0, rect['height'])
 
-        action = self.actions[self.actionsSorted[actionIndex]](x=x, y=y)
+            actionIndex = random.randrange(0, len(self.actionsSorted))
 
-        return action
+            action = self.actions[self.actionsSorted[actionIndex]](x=x, y=y)
+
+            actions.append(action)
+
+        return actions
 

@@ -20,9 +20,11 @@ import os.path
 import hashlib
 from threading import Thread
 import asyncio
+import numpy
+import concurrent.futures
 import socket
 from contextlib import closing
-
+from .WebEnvironmentSession import WebEnvironmentSession
 
 
 class WebEnvironment(BaseEnvironment):
@@ -30,64 +32,32 @@ class WebEnvironment(BaseEnvironment):
         This class represents web / browser based environments. It will boot up a headless browser and use it to communicate
         with the software.
     """
-    def __init__(self, targetURL="http://172.17.0.2:3000/"):
+    def __init__(self, targetURL="http://172.17.0.2:3000/", numberParallelSessions = 4):
         self.targetURL = targetURL
-
-        self.lastScreenshotHash = None
-        self.lastProxyPaths = set()
-
-        self.allUrls = set()
-
-        self.frameNumber = 0
-
-        self.screenshotDirectory = tempfile.mkdtemp()
-        self.screenshotPaths = []
-        self.screenshotHashes = set()
 
         self.proxyPort = self.find_free_port()
 
         self.proxyThread = Thread(target=lambda: self.runProxyServer())
         self.proxyThread.start()
 
-        chrome_options = Options()
-        chrome_options.headless = True
+        # Hack, wait for proxy thread to start
+        time.sleep(1)
 
-        capabilities = webdriver.DesiredCapabilities.CHROME
-        capabilities['loggingPrefs'] = {'browser': 'ALL'}
-        proxyConfig = Proxy()
-        proxyConfig.proxy_type = ProxyType.MANUAL
-        proxyConfig.http_proxy = f"localhost:{self.proxyPort}"
-        proxyConfig.add_to_capabilities(capabilities)
+        def createSession(number):
+            return WebEnvironmentSession(targetURL, number, self.proxyPort, self.pathTracer)
 
-        self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            sessionFutures = [
+                executor.submit(createSession, sessionNumber) for sessionNumber in range(numberParallelSessions)
+            ]
 
-        self.driver.get(self.targetURL)
-
-        self.lastBranchTrace = self.extractBranchTrace()
-
-        self.allUrls.add(self.targetURL)
-        self.allUrls.add(self.driver.current_url)
-
-        screenHash = self.addScreenshot()
-        self.frameNumber += 1
-        self.screenshotHashes.add(screenHash)
-        self.lastScreenshotHash = screenHash
-
-        self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(self.extractBranchTrace())
-        self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
-
-    def __del__(self):
-        self.shutdown()
+        self.sessions = [
+            future.result() for future in sessionFutures
+        ]
 
     def shutdown(self):
-        # Cleanup the screenshot files
-        for filePath in self.screenshotPaths:
-            os.unlink(filePath)
-        self.screenshotPaths = []
-
-        if self.driver:
-            self.driver.quit()
-        self.driver = None
+        for session in self.sessions:
+            session.shutdown()
 
     def find_free_port(self):
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
@@ -107,7 +77,6 @@ class WebEnvironment(BaseEnvironment):
         opts = options.Options(listen_port=self.proxyPort)
         pconf = proxy.config.ProxyConfig(opts)
 
-
         m = DumpMaster(opts)
         m.server = proxy.server.ProxyServer(pconf)
         m.addons.add(self.codeRewriter)
@@ -115,170 +84,70 @@ class WebEnvironment(BaseEnvironment):
 
         m.run()
 
+    def screenshotSize(self):
+        return self.sessions[0].screenshotSize()
 
-    def addScreenshot(self):
-        fileName = f"kwola-screenshot-{self.frameNumber:05d}.png"
-
-        filePath = os.path.join(self.screenshotDirectory, fileName)
-
-        self.driver.save_screenshot(filePath)
-
-        hasher = hashlib.md5()
-        with open(filePath, 'rb') as imageFile:
-            buf = imageFile.read()
-            hasher.update(buf)
-
-        screenshotHash = hasher.hexdigest()
-
-        self.screenshotPaths.append(filePath)
-
-        return screenshotHash
-
-    def createMovie(self):
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', 'kwola-video.mp4'], cwd=self.screenshotDirectory)
-
-        return os.path.join(self.screenshotDirectory, "kwola-video.mp4")
-
-
-    def extractBranchTrace(self):
-        # The JavaScript that we want to inject. This will extract out the Kwola debug information.
-        injected_javascript = (
-            'return window.kwolaCounters;'
-        )
-
-        result = self.driver.execute_script(injected_javascript)
-
-        return result
 
     def branchFeatureSize(self):
-        return len(self.lastCumulativeBranchExecutionVector)
-
-    def computeCumulativeBranchExecutionVector(self, branchTrace):
-        cumulativeBranchExecutionVector = np.array([])
-
-        for fileName in sorted(branchTrace.keys()):
-            if fileName in self.lastBranchTrace:
-                counterVector = branchTrace[fileName]
-                cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.array(counterVector)])
-
-        return cumulativeBranchExecutionVector
+        return self.sessions[0].branchFeatureSize()
 
 
-    def runAction(self, action):
-        executionTrace = ExecutionTrace()
-        executionTrace.actionPerformed = action
-        executionTrace.errorsDetected = []
-        executionTrace.startURL = self.driver.current_url
+    def getImages(self):
+        tabImages = [
+            tab.getImage()
+            for tab in self.sessions
+        ]
 
-        startLogCount = len(self.driver.get_log('browser'))
+        return np.array(tabImages)
 
-        self.pathTracer.recentPaths = set()
 
-        success = True
+    def getBranchFeatures(self):
+        tabFeatures = [
+            tab.getBranchFeature()
+            for tab in self.sessions
+        ]
 
-        try:
-            if isinstance(action, ClickTapAction):
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
-                    actionChain.move_by_offset(action.x, action.y)
-                    if action.times == 1:
-                        print("Clicking", action.x, action.y)
-                        actionChain.click()
-                    elif action.times == 2:
-                        print("Double Clicking", action.x, action.y)
-                        actionChain.double_click()
+        return np.array(tabFeatures)
 
-                    actionChain.perform()
 
-            if isinstance(action, RightClickAction):
-                    print("Right Clicking", action.x, action.y)
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
-                    actionChain.move_by_offset(action.x, action.y)
-                    actionChain.context_click()
-                    actionChain.perform()
+    def getExecutionTraceFeatures(self):
+        tabFeatures = [
+            tab.getExecutionTraceFeature()
+            for tab in self.sessions
+        ]
 
-            if isinstance(action, TypeAction):
-                    print("Typing", action.text, "at", action.x, action.y)
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
-                    actionChain.move_by_offset(action.x, action.y)
-                    actionChain.send_keys(action.text)
-                    actionChain.perform()
+        return np.array(tabFeatures)
 
-            if isinstance(action, WaitAction):
-                print("Waiting for ", action.time, "at", action.x, action.y)
-                time.sleep(action.time)
 
-        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            print("Running action failed!")
+    def numberParallelSessions(self):
+        return len(self.sessions)
 
-            success = False
 
-        executionTrace.didActionSucceed = success
+    def runActions(self, actions):
+        """
+            Run a single action on each of the browser tabs within this environment.
 
-        screenHash = self.addScreenshot()
+            :param actions:
+            :return:
+        """
 
-        branchTrace = self.extractBranchTrace()
+        resultFutures = []
 
-        cumulativeProxyPaths = self.pathTracer.seenPaths
-        newProxyPaths = cumulativeProxyPaths.difference(self.lastProxyPaths)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for tab, action in zip(self.sessions, actions):
+                resultFuture = executor.submit(tab.runAction, action)
+                resultFutures.append(resultFuture)
 
-        cumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(branchTrace)
+        results = [
+            resultFuture.result() for resultFuture in resultFutures
+        ]
+        return results
 
-        if self.lastCumulativeBranchExecutionVector is not None:
-            branchExecutionVector = cumulativeBranchExecutionVector - self.lastCumulativeBranchExecutionVector
-        else:
-            branchExecutionVector = cumulativeBranchExecutionVector
 
-        executionTrace.branchExecutionTrace = branchExecutionVector.tolist()
-        executionTrace.startCumulativeBranchExecutionTrace = self.lastCumulativeBranchExecutionVector.tolist()
-        executionTrace.startDecayingExecutionTrace = self.decayingExecutionTrace.tolist()
+    def createMovies(self):
+        moviePaths = [
+            tab.createMovie()
+            for tab in self.sessions
+        ]
 
-        executionTrace.networkTrafficTrace = list(self.pathTracer.recentPaths)
-
-        executionTrace.startScreenshotHash = self.lastScreenshotHash
-        executionTrace.finishScreenshotHash = screenHash
-        executionTrace.frameNumber = self.frameNumber
-
-        executionTrace.logOutput = "\n".join(list(self.driver.get_log('browser'))[startLogCount:])
-        executionTrace.finishURL = self.driver.current_url
-
-        executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-        executionTrace.didNewErrorOccur = False
-        executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
-
-        if self.lastCumulativeBranchExecutionVector is not None:
-            executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
-        else:
-            executionTrace.didNewBranchesExecute = True
-
-        executionTrace.hadNetworkTraffic = len(self.pathTracer.recentPaths) > 0
-        executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
-        executionTrace.didScreenshotChange = screenHash != self.lastScreenshotHash
-        executionTrace.isScreenshotNew = screenHash not in self.screenshotHashes
-        executionTrace.didURLChange = executionTrace.startURL != executionTrace.finishURL
-        executionTrace.isURLNew = executionTrace.finishURL not in self.allUrls
-
-        executionTrace.hadLogOutput = bool(executionTrace.logOutput)
-        executionTrace.cumulativeBranchCoverage = float(np.count_nonzero(cumulativeBranchExecutionVector)) / len(cumulativeBranchExecutionVector)
-
-        # Update the decaying execution trace to use as input for the next round
-        self.decayingExecutionTrace = np.maximum(self.decayingExecutionTrace * 0.95, np.minimum(np.ones_like(branchExecutionVector), branchExecutionVector))
-
-        self.lastBranchTrace = branchTrace
-        self.lastCumulativeBranchExecutionVector = cumulativeBranchExecutionVector
-        self.allUrls.add(self.driver.current_url)
-
-        self.lastScreenshotHash = screenHash
-        self.screenshotHashes.add(screenHash)
-
-        self.lastProxyPaths = set(self.pathTracer.seenPaths)
-
-        self.frameNumber += 1
-
-        return executionTrace
-
-    def screenshotSize(self):
-        rect = self.driver.get_window_rect()
-        return rect
+        return np.array(moviePaths)

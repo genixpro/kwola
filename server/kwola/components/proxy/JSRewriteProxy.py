@@ -33,6 +33,10 @@ class JSRewriteProxy:
         hasher.update(bytes(flow.request.path, 'utf8'))
         hasher.update(fileData)
 
+        # Ignore it if its a 304 not modified error. These are fine.
+        if flow.response.status_code == 304:
+            return
+
         fileHash = hasher.hexdigest()
         try:
             if '.js' in flow.request.path:
