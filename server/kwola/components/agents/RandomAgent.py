@@ -48,10 +48,10 @@ class RandomAgent(BaseAgent):
         """
         rect = self.environment.screenshotSize()
 
-        x = random.randint(0, rect['width'])
-        y = random.randint(0, rect['height'])
+        x = random.randrange(0, rect['width'])
+        y = random.randrange(0, rect['height'])
 
-        actionIndex = random.randint(0, len(self.actionsSorted)-1)
+        actionIndex = random.randrange(0, len(self.actionsSorted))
 
         action = self.actions[self.actionsSorted[actionIndex]](x=x, y=y)
 

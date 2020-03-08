@@ -24,6 +24,8 @@ def runTrainingStep():
 
     agent.save()
 
+    environment.shutdown()
+
     return ""
 
 

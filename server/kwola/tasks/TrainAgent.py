@@ -5,46 +5,40 @@ from kwola.models.TestingSequenceModel import TestingSequenceModel
 from .RunTrainingStep import runTrainingStep
 from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 
-
-
-@app.task
-def trainAgent():
+def runRandomInitialization():
     print("Starting random testing sequences for initialization")
 
-    # Seed the pot with 10 random sequences
-    # initializationSequences = 10
-    initializationSequences = 1
+    # Seed the pot with 50 random sequences
+    numInitializationSequences = 50
+    numWorkers = 10
+
     futures = []
-    # with ProcessPoolExecutor(max_workers=10) as executor:
+    with ProcessPoolExecutor(max_workers=numWorkers) as executor:
+        for n in range(numInitializationSequences):
+            sequence = TestingSequenceModel()
+            sequence.save()
 
-    for n in range(initializationSequences):
-        sequence = TestingSequenceModel()
-        sequence.save()
+            future = executor.submit(runTestingSequence, str(sequence.id), True)
+            futures.append(future)
 
-        # future = executor.submit(runTestingSequence, str(sequence.id), True)
-        # futures.append(future)
-
-
-        runTestingSequence(str(sequence.id), True)
-
-        # We leave a gap in the start time between each process to provide time for startup
-        # time.sleep(30)
-
-    # for future in futures:
-    #     result = future.result()
-    #     print("Random Testing Sequence Completed")
-
+        for future in as_completed(futures[:int(numInitializationSequences/2)]):
+            result = future.result()
+            print("Random Testing Sequence Completed")
     print("Random initialization completed")
 
+
+def runMainTrainingLoop():
     sequencesNeeded = 1000
     sequencesCompleted = 0
     while sequencesCompleted < sequencesNeeded:
 
         sequence = TestingSequenceModel()
         sequence.save()
+
+        print("Starting Training Step")
 
         runTrainingStep()
 
@@ -55,6 +49,12 @@ def trainAgent():
         print("Testing Sequence Completed")
 
         sequencesCompleted += 1
+
+
+@app.task
+def trainAgent():
+    # runRandomInitialization()
+    runMainTrainingLoop()
 
 
 

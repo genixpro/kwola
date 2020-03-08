@@ -53,6 +53,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
 
     videoPath = environment.createMovie()
 
+
     with open(videoPath, 'rb') as origFile:
         with open(f'/home/bradley/{str(testSequence.id)}.mp4', "wb") as cloneFile:
             cloneFile.write(origFile.read())
@@ -65,6 +66,10 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     testSequence.endTime = datetime.now()
     testSequence.executionTraces = executionTraces
     testSequence.save()
+
+    environment.shutdown()
+
+    print("Finished Running Testing Sequence! Yay!")
 
     return ""
 

@@ -2,11 +2,13 @@ from mitmproxy import ctx
 import subprocess
 import io
 from mitmproxy.script import concurrent
+import redis
+import hashlib
 
 
 class JSRewriteProxy:
     def __init__(self):
-        self.cache = {}
+        self.cache = redis.Redis(db=2)
 
     def request(self, flow):
         flow.request.headers['Accept-Encoding'] = 'identity'
@@ -26,13 +28,19 @@ class JSRewriteProxy:
             The full HTTP response has been read.
         """
 
+        fileData = bytes(flow.response.data.content)
+        hasher = hashlib.md5()
+        hasher.update(bytes(flow.request.path, 'utf8'))
+        hasher.update(fileData)
+
+        fileHash = hasher.hexdigest()
         try:
             if '.js' in flow.request.path:
-                if flow.request.path in self.cache:
-                    transformed = self.cache[flow.request.path]
+                cached = self.cache.get(fileHash)
 
-                    flow.response.data.headers['Content-Length'] = str(len(transformed))
-                    flow.response.data.content = transformed
+                if cached is not None:
+                    flow.response.data.headers['Content-Length'] = str(len(cached))
+                    flow.response.data.content = cached
                     return
 
                 filename = str(flow.request.path).split("/")[-1]
@@ -46,7 +54,7 @@ class JSRewriteProxy:
                 else:
                     transformed = result.stdout
 
-                    self.cache[flow.request.path] = transformed
+                    self.cache.set(fileHash, transformed)
 
                     flow.response.data.headers['Content-Length'] = str(len(transformed))
                     flow.response.data.content = transformed

@@ -25,12 +25,39 @@ class BradNet(nn.Module):
 
         self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
 
-        self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=64)
+        self.pixelFeatureCount = 32
 
-        self.rewardConvolution = nn.Conv2d(64, numActions, 1, stride=1, padding=0, bias=False)
+        self.innerSize = 64
+
+        self.peakInnerSize = 128
+
+        # self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=self.pixelFeatureCount)
+        self.mainModel = nn.Sequential(
+            nn.Conv2d(3, self.innerSize, kernel_size=3, stride=1, dilation=2, padding=2),
+            nn.ReLU(),
+            nn.BatchNorm2d(self.innerSize),
+
+            nn.Conv2d(self.innerSize, self.innerSize, kernel_size=5, stride=1, dilation=2, padding=4),
+            nn.ReLU(),
+            nn.BatchNorm2d(self.innerSize),
+
+            nn.Conv2d(self.innerSize, self.peakInnerSize, kernel_size=3, stride=1, dilation=1, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(self.peakInnerSize),
+
+            nn.Conv2d(self.peakInnerSize, self.innerSize, kernel_size=5, stride=1, dilation=2, padding=4),
+            nn.ReLU(),
+            nn.BatchNorm2d(self.innerSize),
+
+            nn.Conv2d(self.innerSize, self.pixelFeatureCount, kernel_size=3, stride=1, dilation=1, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(self.pixelFeatureCount),
+        )
+
+        self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, 1, stride=1, padding=0, bias=False)
 
         self.predictedExecutionTraceLinear = nn.Sequential(
-            nn.Linear(64, executionTracePredictorSize),
+            nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
             nn.Sigmoid()
         )
 
@@ -42,25 +69,51 @@ class BradNet(nn.Module):
 
         stamp = self.stampProjection(data['additionalFeature'])
 
-        stampTiler = stamp.reshape([self.branchStampEdgeSize, self.branchStampEdgeSize]).repeat([int(height / self.branchStampEdgeSize) + 1, int(width / self.branchStampEdgeSize) + 1])
-        stampLayer = stampTiler[:height, :width].reshape([1, 1, height, width])
+        stampTiler = stamp.reshape([-1, self.branchStampEdgeSize, self.branchStampEdgeSize]).repeat([1, int(height / self.branchStampEdgeSize) + 1, int(width / self.branchStampEdgeSize) + 1])
+        stampLayer = stampTiler[:, :height, :width].reshape([-1, 1, height, width])
 
         # Replace the saturation layer on the image with the stamp data layer
         merged = torch.cat([stampLayer, data['image']], dim=1)
 
+        print("Forward", merged.shape)
         output = self.mainModel(merged)
 
-        featureMap = output['out']
+        featureMap = output
 
-        rewards = self.rewardConvolution(output['out'])
+        rewards = self.rewardConvolution(output)
 
-        action_index = rewards.reshape([-1, width * height * self.numActions]).argmax(1).data[0]
-        action_type, action_x, action_y = self.actionIndexToActionDetails(width, height, action_index)
+        action_types = []
+        action_xs = []
+        action_ys = []
+        if 'action_type' in data:
+            action_types = data['action_type']
+            action_xs = data['action_x']
+            action_ys = data['action_y']
+        else:
+            action_indexes = rewards.reshape([-1, width * height * self.numActions]).argmax(1).data
 
-        featuresForTrace = featureMap[:, :, action_y, action_x]
-        predictedTrace = self.predictedExecutionTraceLinear(featuresForTrace)
+            for index in action_indexes:
+                action_type, action_x, action_y = self.actionIndexToActionDetails(width, height, index)
 
-        return rewards, predictedTrace
+                action_types.append(action_type)
+                action_xs.append(action_x)
+                action_ys.append(action_y)
+
+        forwardFeatures = []
+        for index, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
+
+            # temp fix
+            action_x = min(action_x, width-1)
+            action_y = min(action_y, height-1)
+
+            featuresForTrace = featureMap[index, :, int(action_y), int(action_x)].unsqueeze(0)
+            forwardFeatures.append(featuresForTrace)
+
+        joinedFeatures = torch.cat(forwardFeatures, dim=0)
+
+        predictedTraces = self.predictedExecutionTraceLinear(joinedFeatures)
+
+        return rewards, predictedTraces
 
 
     def feature_size(self):
@@ -84,9 +137,9 @@ class BradNet(nn.Module):
         height = image.shape[1]
 
         if random.random() > epsilon:
-            image = Variable(torch.FloatTensor(np.float32(image)).unsqueeze(0), volatile=True            )
+            image = Variable(torch.FloatTensor(np.array(image)).unsqueeze(0))
 
-            q_value, predictedTrace = self.forward({"image": image, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures), volatile=True)})
+            q_value, predictedTrace = self.forward({"image": image, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures))})
 
             action_index = q_value.reshape([-1, width * height * self.numActions]).argmax(1).data[0]
 
@@ -97,5 +150,5 @@ class BradNet(nn.Module):
             action_x = random.randrange(width)
             action_y = random.randrange(height)
 
-            return action_type, action_x, action_y
+            return (action_type, action_x, action_y), None
 

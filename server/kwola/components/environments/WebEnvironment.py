@@ -69,20 +69,25 @@ class WebEnvironment(BaseEnvironment):
         self.allUrls.add(self.driver.current_url)
 
         screenHash = self.addScreenshot()
+        self.frameNumber += 1
         self.screenshotHashes.add(screenHash)
         self.lastScreenshotHash = screenHash
 
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(self.extractBranchTrace())
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
-
     def __del__(self):
-        # Cleanup the screenshot files
-        for path in self.screenshotPaths:
-            os.unlink(path)
+        self.shutdown()
 
-        self.driver.quit()
-        # self.proxyThread.kill
+    def shutdown(self):
+        # Cleanup the screenshot files
+        for filePath in self.screenshotPaths:
+            os.unlink(filePath)
+        self.screenshotPaths = []
+
+        if self.driver:
+            self.driver.quit()
+        self.driver = None
 
     def find_free_port(self):
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
