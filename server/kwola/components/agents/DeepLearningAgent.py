@@ -14,6 +14,7 @@ import numpy
 import skimage
 import skimage.transform
 import skimage.color
+import concurrent.futures
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
@@ -91,20 +92,18 @@ class DeepLearningAgent(BaseAgent):
     def getImage(self):
         images = self.environment.getImages()
 
-        width = images[0].shape[0]
-        height = images[0].shape[1]
+        convertedImageFutures = []
 
-        # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for image in images:
+                convertedImageFuture = executor.submit(processRawImageParallel, image)
+                convertedImageFutures.append(convertedImageFuture)
 
-        # Convert to HSL representation, but discard the saturation layer
-        converted = []
-        for image in images:
-            image = skimage.color.rgb2hsv(image[:, :, :3])
-            swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
-            hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
-            converted.append(hueLightnessImage)
+        convertedImages = [
+            convertedImageFuture.result() for convertedImageFuture in convertedImageFutures
+        ]
 
-        return numpy.array(converted)
+        return numpy.array(convertedImages)
 
     def getAdditionalFeatures(self):
         branchFeature = self.environment.getBranchFeatures()
@@ -119,7 +118,7 @@ class DeepLearningAgent(BaseAgent):
             # :param environment:
             :return:
         """
-        epsilon = 0.5
+        epsilon = 0.
         images = self.getImage()
         additionalFeatures = self.getAdditionalFeatures()
 
@@ -273,12 +272,11 @@ class DeepLearningAgent(BaseAgent):
             :param testingSequence:
             :return:
         """
-        batches = []
 
         for executionSession in testingSequence.executionSessions:
-            batches.extend(self.prepareBatchesForExecutionSession(testingSequence, executionSession))
-
-        return batches
+            sequenceBatches = self.prepareBatchesForExecutionSession(testingSequence, executionSession)
+            for batch in sequenceBatches:
+                yield batch
 
 
 
@@ -330,3 +328,13 @@ class DeepLearningAgent(BaseAgent):
         batchReward = float(numpy.sum(batch['presentRewards']))
 
         return rewardLoss, tracePredictionLoss, totalLoss, batchReward
+
+
+def processRawImageParallel(rawImage):
+    # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
+
+    # Convert to HSL representation, but discard the saturation layer
+    image = skimage.color.rgb2hsv(rawImage[:, :, :3])
+    swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
+    hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
+    return hueLightnessImage

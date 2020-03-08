@@ -39,20 +39,19 @@ def runMainTrainingLoop():
     sequencesNeeded = 1000
     sequencesCompleted = 0
     while sequencesCompleted < sequencesNeeded:
-        print("Starting Training Step")
-
-        runTrainingStep()
-
-        print("Training Step Completed")
 
         print("Starting New Testing Sequence")
-
         sequence = TestingSequenceModel()
         sequence.save()
-
         runTestingSequence(str(sequence.id), shouldBeRandom=False)
-
         print("Testing Sequence Completed")
+
+
+
+        print("Starting Training Step")
+        runTrainingStep()
+        print("Training Step Completed")
+
 
         sequencesCompleted += 1
 

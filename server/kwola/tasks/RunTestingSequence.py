@@ -14,7 +14,7 @@ import os
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     environment = WebEnvironment(numberParallelSessions=16)
 
-    stepsRemaining = 100
+    stepsRemaining = 10
 
     testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
 
@@ -70,6 +70,10 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     testSequence.status = "completed"
 
     testSequence.endTime = datetime.now()
+
+    for session in executionSessions:
+        session.save()
+
     testSequence.executionSessions = executionSessions
     testSequence.save()
 

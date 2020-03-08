@@ -93,13 +93,17 @@ class WebEnvironment(BaseEnvironment):
 
 
     def getImages(self):
-        tabImages = [
-            tab.getImage()
-            for tab in self.sessions
+        imageFutures = []
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for session in self.sessions:
+                resultFuture = executor.submit(session.getImage)
+                imageFutures.append(resultFuture)
+
+        images = [
+            imageFuture.result() for imageFuture in imageFutures
         ]
-
-        return np.array(tabImages)
-
+        return images
 
     def getBranchFeatures(self):
         tabFeatures = [

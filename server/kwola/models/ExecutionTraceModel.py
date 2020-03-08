@@ -2,6 +2,7 @@ from mongoengine import *
 import datetime
 from .actions.BaseAction import BaseAction
 from .errors.BaseError import BaseError
+import numpy
 
 class ExecutionTrace(Document):
     time = DateField()
@@ -137,7 +138,7 @@ class ExecutionTrace(Document):
         newArray = []
 
         for value in array:
-            if type(value) == "int" or type(value) == "float":
+            if isinstance(value, int) or isinstance(value, float):
                 newArray.extend([0] * int(value))
             elif isinstance(value, list):
                 newArray.extend(value)
@@ -145,4 +146,4 @@ class ExecutionTrace(Document):
                 print(f"ExecutionTrace.decompressArray Error! Unexpected value of type {type(value)} while decompressing array.")
 
 
-        return newArray
+        return numpy.array(newArray)

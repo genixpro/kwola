@@ -17,28 +17,35 @@ import os
 def prepareBatchesParallel(testingSequenceId):
     testSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequenceId)).first()
     agent = DeepLearningAgent()
-    batches = agent.prepareBatchesForTestingSequence(testSequence)
 
-    fileName = tempfile.mktemp(".bin")
+    batchFileNames = []
+    for batch in agent.prepareBatchesForTestingSequence(testSequence):
+        fileName = tempfile.mktemp(".bin")
 
-    with open(fileName, 'wb') as batchFile:
-        pickle.dump(batches, batchFile)
+        with open(fileName, 'wb') as batchFile:
+            pickle.dump(batch, batchFile)
 
-    return fileName
+        batchFileNames.append(fileName)
+
+    return batchFileNames
 
 @app.task
 def runTrainingStep():
-    environment = WebEnvironment()
-
     testSequences = list(TestingSequenceModel.objects(status="completed").only('id'))
     if len(testSequences) == 0:
         print("Error, no test sequences in db to train on for training step.")
         return
 
+    environment = WebEnvironment()
+
     agent = DeepLearningAgent()
     agent.initialize(environment)
     agent.load()
 
+    environment.shutdown()
+
+    # Force it to destroy now to save memory
+    del environment
 
     try:
         batchFutures = []
@@ -54,23 +61,24 @@ def runTrainingStep():
                 batchFutures.append(batchFuture)
 
             for batchFuture in concurrent.futures.as_completed(batchFutures):
-                batchFilename = batchFuture.result()
+                batchFilenames = batchFuture.result()
+                random.shuffle(batchFilenames)
 
-                with open(batchFilename, 'rb') as batchFile:
-                    batches = pickle.load(batchFile)
-
-                os.unlink(batchFilename)
-
-                random.shuffle(batches)
                 totalReward = 0
-                for batch in batches:
+                for batchFilename in batchFilenames:
+                    with open(batchFilename, 'rb') as batchFile:
+                        batch = pickle.load(batchFile)
+
+                    os.unlink(batchFilename)
+
                     rewardLoss, tracePredictionLoss, totalLoss, batchReward = agent.learnFromBatch(batch)
 
                     rewardLosses.append(rewardLoss)
                     tracePredictionLosses.append(tracePredictionLoss)
                     totalLosses.append(totalLoss)
                     totalReward += batchReward
-                print("Completed", len(batches), "batches")
+
+                print("Completed", len(batchFilenames), "batches")
 
         averageRewardLoss = numpy.mean(rewardLosses)
         averageTracePredictionLoss = numpy.mean(tracePredictionLosses)
@@ -87,8 +95,6 @@ def runTrainingStep():
         traceback.print_exc()
 
     agent.save()
-
-    environment.shutdown()
 
     return ""
 
