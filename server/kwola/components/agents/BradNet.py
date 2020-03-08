@@ -97,7 +97,7 @@ class BradNet(nn.Module):
             action_indexes = rewards.reshape([-1, width * height * self.numActions]).argmax(1).data
 
             for index in action_indexes:
-                action_type, action_x, action_y = self.actionIndexToActionDetails(width, height, index)
+                action_type, action_x, action_y = BradNet.actionIndexToActionDetails(width, height, self.numActions, index)
 
                 action_types.append(action_type)
                 action_xs.append(action_x)
@@ -124,15 +124,18 @@ class BradNet(nn.Module):
         return self.features(autograd.Variable(torch.zeros(1, *self.imageInputShape))).view(1, -1).size(1)
 
 
-    def actionDetailsToActionIndex(self, width, height, action_type, action_x, action_y):
-        return action_type + action_x * self.numActions + action_y * width * self.numActions
+    @staticmethod
+    def actionDetailsToActionIndex(width, height, numActions, action_type, action_x, action_y):
+        return action_type + action_x * numActions + action_y * width * numActions
 
-    def actionIndexToActionDetails(self, width, height, action_index):
-        action_type = action_index % self.numActions
 
-        action_x = int(int(action_index % (width * self.numActions)) / self.numActions)
+    @staticmethod
+    def actionIndexToActionDetails(width, height, numActions, action_index):
+        action_type = action_index % numActions
 
-        action_y = int(action_index / (width * self.numActions))
+        action_x = int(int(action_index % (width * numActions)) / numActions)
+
+        action_y = int(action_index / (width * numActions))
 
         return action_type, action_x, action_y
 

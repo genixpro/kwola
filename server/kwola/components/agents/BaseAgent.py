@@ -62,12 +62,3 @@ class BaseAgent:
             :param screenshot:
             :return:
         """
-
-    def learnFromTestingSequence(self, testingSequence):
-        """
-            Runs the backward pass / gradient update so the algorithm can learn from all the memories in the given testing sequence
-
-            :param testingSequence:
-            :return:
-        """
-

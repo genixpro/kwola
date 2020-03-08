@@ -46,7 +46,7 @@ class DeepLearningAgent(BaseAgent):
         super().__init__()
 
         self.num_frames = 1400000
-        self.batch_size = 1
+        self.batchSize = 1
         self.gamma = 0.50
         self.frameStart = 7200
 
@@ -131,7 +131,7 @@ class DeepLearningAgent(BaseAgent):
 
             action_index = q_value.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data[0]
 
-            actionInfo = self.model.actionIndexToActionDetails(width, height, action_index)
+            actionInfo = BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), action_index)
         else:
 
             action_type = random.randrange(len(self.actionsSorted))
@@ -146,14 +146,13 @@ class DeepLearningAgent(BaseAgent):
         return action
 
 
-    def learnFromTestingSequence(self, testingSequence):
+    def prepareBatchesForTestingSequence(self, testingSequence):
         """
-            Runs the backward pass / gradient update so the algorithm can learn from all the memories in the given testing sequence
+            This function prepares batches that can be fed to the neural network.
 
             :param testingSequence:
             :return:
         """
-
         frames = []
 
         cap = cv2.VideoCapture(f'/home/bradley/{str(testingSequence.id)}.mp4')
@@ -173,39 +172,35 @@ class DeepLearningAgent(BaseAgent):
                 break
 
         # First compute the present reward at each time step
-        present_rewards = []
+        presentRewards = []
         for trace in testingSequence.executionTraces:
             if trace.didActionSucceed == False:
-                present_rewards.append(-0.1)
+                presentRewards.append(-0.1)
             elif trace.didNewBranchesExecute or trace.hadNewNetworkTraffic or trace.isURLNew or trace.isScreenshotNew:
-                present_rewards.append(0.2)
+                presentRewards.append(0.2)
             else:
-                present_rewards.append(0.0)
+                presentRewards.append(0.0)
 
         discountRate = 0.95
 
         # Now compute the discounted reward
         discountedRewards = []
-        present_rewards.reverse()
+        presentRewards.reverse()
         current = 0
-        for reward in present_rewards:
+        for reward in presentRewards:
             current *= discountRate
             current += reward
             discountedRewards.append(current)
 
         discountedRewards.reverse()
-        present_rewards.reverse()
+        presentRewards.reverse()
 
-        shuffledTraceFrameList = list(zip(testingSequence.executionTraces, frames, discountedRewards))
+        shuffledTraceFrameList = list(zip(testingSequence.executionTraces, frames, discountedRewards, presentRewards))
         random.shuffle(shuffledTraceFrameList)
 
-        rewardLosses = []
-        tracePredictionLosses = []
-        totalLosses = []
-        width = None
-        height = None
+        batches = []
 
-        for batch in grouper(self.batch_size, shuffledTraceFrameList):
+        for batch in grouper(self.batchSize, shuffledTraceFrameList):
             batchFrames = []
             batchAdditionalFeatures = []
             batchActionTypes = []
@@ -214,8 +209,9 @@ class DeepLearningAgent(BaseAgent):
             batchActionIndexes = []
             batchExecutionTraces = []
             batchDiscountedRewards = []
+            batchPresentRewards = []
 
-            for trace, frame, discountedReward in batch:
+            for trace, frame, discountedReward, presentReward in batch:
                 width = frame.shape[2]
                 height = frame.shape[1]
 
@@ -226,7 +222,7 @@ class DeepLearningAgent(BaseAgent):
                 batchFrames.append(frame)
                 batchAdditionalFeatures.append(additionalFeature)
 
-                action_index = self.model.actionDetailsToActionIndex(width, height, self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
+                action_index = BradNet.actionDetailsToActionIndex(width, height, len(self.actionsSorted), self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
 
                 batchActionTypes.append(trace.actionPerformed.type)
                 batchActionXs.append(trace.actionPerformed.x)
@@ -239,56 +235,69 @@ class DeepLearningAgent(BaseAgent):
                 batchExecutionTraces.append(executionTrace)
 
                 batchDiscountedRewards.append(discountedReward)
+                batchPresentRewards.append(presentReward)
 
-            q_values, predictedTraces = self.model({
-                "image": Variable(torch.FloatTensor(numpy.array(batchFrames))),
-                "additionalFeature": Variable(torch.FloatTensor(batchAdditionalFeatures)),
-                "action_type": batchActionTypes,
-                "action_x": batchActionXs,
-                "action_y": batchActionYs
+            batches.append({
+                "frames": batchFrames,
+                "additionalFeatures": batchAdditionalFeatures,
+                "actionTypes": batchActionTypes,
+                "actionXs": batchActionXs,
+                "actionYs": batchActionYs,
+                "actionIndexes": batchActionIndexes,
+                "executionTraces": batchExecutionTraces,
+                "discountedRewards": batchDiscountedRewards,
+                "presentRewards": batchPresentRewards
             })
 
-            q_values = q_values.reshape([-1, height * width * len(self.actions)])
+        return batches
 
-            action_indexes = Variable(torch.LongTensor(numpy.array(batchActionIndexes, dtype=numpy.int32)))
-            action_indexes = action_indexes.unsqueeze(1)
 
-            q_value = q_values.gather(1, action_indexes).squeeze(1)
 
-            print(batchDiscountedRewards)
-            torchBatchDiscountedRewards = Variable(torch.FloatTensor(numpy.array(batchDiscountedRewards) ))
-            #
-            print(q_value)
-            print(q_value.shape)
-            print(torchBatchDiscountedRewards)
-            print(torchBatchDiscountedRewards.shape)
+    def learnFromBatch(self, batch):
+        """
+            Runs backprop on the neural network with the given batch.
 
-            rewardLoss = (q_value - torchBatchDiscountedRewards).pow(2).mean()
+            :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingSequence
+            :return:
+        """
+        width = batch['frames'][0].shape[2]
+        height = batch['frames'][0].shape[1]
 
-            tracePredictionLoss = (predictedTraces - Variable(torch.FloatTensor(batchExecutionTraces))).pow(2).mean()
+        q_values, predictedTraces = self.model({
+            "image": Variable(torch.FloatTensor(numpy.array(batch['frames']))),
+            "additionalFeature": Variable(torch.FloatTensor(batch['additionalFeatures'])),
+            "action_type": batch['actionTypes'],
+            "action_x": batch['actionXs'],
+            "action_y": batch['actionYs']
+        })
 
-            totalLoss = rewardLoss + tracePredictionLoss
+        q_values = q_values.reshape([-1, height * width * len(self.actions)])
 
-            self.optimizer.zero_grad()
-            totalLoss.backward()
-            self.optimizer.step()
+        action_indexes = Variable(torch.LongTensor(numpy.array(batch['actionIndexes'], dtype=numpy.int32)))
+        action_indexes = action_indexes.unsqueeze(1)
 
-            rewardLoss = float(rewardLoss.data.item())
-            tracePredictionLoss = float(tracePredictionLoss.data.item())
-            totalLoss = float(totalLoss.data.item())
+        q_value = q_values.gather(1, action_indexes).squeeze(1)
 
-            rewardLosses.append(rewardLoss)
-            tracePredictionLosses.append(tracePredictionLoss)
-            totalLosses.append(totalLoss)
+        torchBatchDiscountedRewards = Variable(torch.FloatTensor(numpy.array(batch['discountedRewards'])))
+        #
+        print(q_value)
+        print(q_value.shape)
+        print(torchBatchDiscountedRewards)
+        print(torchBatchDiscountedRewards.shape)
 
-        averageRewardLoss = numpy.mean(rewardLosses)
-        averageTracePredictionLoss = numpy.mean(tracePredictionLosses)
-        averageTotalLoss = numpy.mean(totalLosses)
+        rewardLoss = (q_value - torchBatchDiscountedRewards).pow(2).mean()
 
-        totalReward = float(numpy.sum(present_rewards))
+        tracePredictionLoss = (predictedTraces - Variable(torch.FloatTensor(batch['executionTraces']))).pow(2).mean()
 
-        print(testingSequence.id)
-        print("Total Reward", float(totalReward))
-        print("Average Reward Loss:", averageRewardLoss)
-        print("Average Trace Predicton Loss:", averageTracePredictionLoss)
-        print("Average Total Loss:", averageTotalLoss)
+        totalLoss = rewardLoss + tracePredictionLoss
+
+        self.optimizer.zero_grad()
+        totalLoss.backward()
+        self.optimizer.step()
+
+        rewardLoss = float(rewardLoss.data.item())
+        tracePredictionLoss = float(tracePredictionLoss.data.item())
+        totalLoss = float(totalLoss.data.item())
+        batchReward = float(numpy.sum(batch['presentRewards']))
+
+        return rewardLoss, tracePredictionLoss, totalLoss, batchReward
