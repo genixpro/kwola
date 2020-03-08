@@ -18,14 +18,15 @@ def runTrainingStep():
     agent.initialize(environment)
     agent.load()
 
-    random.shuffle(testSequences)
+    for repeat in range(10):
+        random.shuffle(testSequences)
 
-    for sequence in testSequences:
-        try:
-            agent.learnFromTestingSequence(sequence)
-        except Exception as e:
-            print("Error occurred while learning sequence!")
-            traceback.print_exc()
+        for sequence in testSequences[:5]:
+            try:
+                agent.learnFromTestingSequence(sequence)
+            except Exception as e:
+                print(f"Error occurred while learning sequence on object {str(sequence.id)}!")
+                traceback.print_exc()
 
     agent.save()
 

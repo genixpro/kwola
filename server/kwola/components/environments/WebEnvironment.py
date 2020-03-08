@@ -135,7 +135,7 @@ class WebEnvironment(BaseEnvironment):
         return screenshotHash
 
     def createMovie(self):
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '20', '-pix_fmt', 'yuv420p', 'kwola-video.mp4'], cwd=self.screenshotDirectory)
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', 'kwola-video.mp4'], cwd=self.screenshotDirectory)
 
         return os.path.join(self.screenshotDirectory, "kwola-video.mp4")
 
@@ -207,7 +207,7 @@ class WebEnvironment(BaseEnvironment):
                     actionChain.perform()
 
             if isinstance(action, WaitAction):
-                print("Waiting for ", action.time)
+                print("Waiting for ", action.time, "at", action.x, action.y)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException:

@@ -177,7 +177,7 @@ class DeepLearningAgent(BaseAgent):
         for trace in testingSequence.executionTraces:
             if trace.didActionSucceed == False:
                 present_rewards.append(-0.1)
-            elif trace.didNewBranchesExecute:
+            elif trace.didNewBranchesExecute or trace.hadNewNetworkTraffic or trace.isURLNew or trace.isScreenshotNew:
                 present_rewards.append(0.2)
             else:
                 present_rewards.append(0.0)

@@ -24,6 +24,10 @@ def runRandomInitialization():
             future = executor.submit(runTestingSequence, str(sequence.id), True)
             futures.append(future)
 
+            # Add in a delay for each successive task so that they parallelize smoother
+            # without fighting for CPU during the startup of that task
+            time.sleep(3)
+
         for future in as_completed(futures[:int(numInitializationSequences/2)]):
             result = future.result()
             print("Random Testing Sequence Completed")
@@ -34,15 +38,16 @@ def runMainTrainingLoop():
     sequencesNeeded = 1000
     sequencesCompleted = 0
     while sequencesCompleted < sequencesNeeded:
-
-        sequence = TestingSequenceModel()
-        sequence.save()
-
         print("Starting Training Step")
 
         runTrainingStep()
 
         print("Training Step Completed")
+
+        print("Starting New Testing Sequence")
+
+        sequence = TestingSequenceModel()
+        sequence.save()
 
         runTestingSequence(str(sequence.id), shouldBeRandom=False)
 
