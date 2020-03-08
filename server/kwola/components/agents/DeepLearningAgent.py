@@ -22,10 +22,11 @@ import itertools
 
 from .BradNet import BradNet
 
-USE_CUDA = torch.cuda.is_available()
-Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
+# USE_CUDA = torch.cuda.is_available()
+# Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
 # Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs) if USE_CUDA else autograd.Variable(*args, **kwargs)
 
+Variable = lambda x:x.cuda()
 
 def grouper(n, iterable):
     """Chunks an iterable into sublists"""
@@ -45,7 +46,7 @@ class DeepLearningAgent(BaseAgent):
         super().__init__()
 
         self.num_frames = 1400000
-        self.batch_size = 8
+        self.batch_size = 1
         self.gamma = 0.50
         self.frameStart = 7200
 
@@ -97,7 +98,7 @@ class DeepLearningAgent(BaseAgent):
         # Convert to HSL representation, but discard the saturation layer
         image = skimage.color.rgb2hsv(image[:, :, :3])
 
-        swapped = numpy.swapaxes(image, 0, 2)
+        swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
 
         hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
 
@@ -120,12 +121,29 @@ class DeepLearningAgent(BaseAgent):
         image = self.getImage()
         additionalFeatures = self.getAdditionalFeatures()
 
-        actionInfo, predictedTrace = self.model.predict(image, additionalFeatures, epsilon)
+        width = image.shape[2]
+        height = image.shape[1]
+
+        if random.random() > epsilon:
+            image = Variable(torch.FloatTensor(numpy.array(image)).unsqueeze(0))
+
+            q_value, predictedTrace = self.model({"image": image, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures))})
+
+            action_index = q_value.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data[0]
+
+            actionInfo = self.model.actionIndexToActionDetails(width, height, action_index)
+        else:
+
+            action_type = random.randrange(len(self.actionsSorted))
+            action_x = random.randrange(width)
+            action_y = random.randrange(height)
+
+            actionInfo = (action_type, action_x, action_y)
+            predictedTrace = None
 
         action = self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
 
         return action
-
 
 
     def learnFromTestingSequence(self, testingSequence):
@@ -187,16 +205,17 @@ class DeepLearningAgent(BaseAgent):
         width = None
         height = None
 
-        for chunk in grouper(self.batch_size, shuffledTraceFrameList):
-            frames = []
-            additionalFeatures = []
-            action_types = []
-            action_xs = []
-            action_ys = []
-            action_indexes = []
-            executionTraces = []
+        for batch in grouper(self.batch_size, shuffledTraceFrameList):
+            batchFrames = []
+            batchAdditionalFeatures = []
+            batchActionTypes = []
+            batchActionXs = []
+            batchActionYs = []
+            batchActionIndexes = []
+            batchExecutionTraces = []
+            batchDiscountedRewards = []
 
-            for trace, frame, discountedReward in chunk:
+            for trace, frame, discountedReward in batch:
                 width = frame.shape[2]
                 height = frame.shape[1]
 
@@ -204,39 +223,49 @@ class DeepLearningAgent(BaseAgent):
                 decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
                 additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
-                frames.append(frame)
-                additionalFeatures.append(additionalFeature)
+                batchFrames.append(frame)
+                batchAdditionalFeatures.append(additionalFeature)
 
                 action_index = self.model.actionDetailsToActionIndex(width, height, self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
 
-                action_types.append(trace.actionPerformed.type)
-                action_xs.append(trace.actionPerformed.x)
-                action_ys.append(trace.actionPerformed.y)
-                action_indexes.append(action_index)
+                batchActionTypes.append(trace.actionPerformed.type)
+                batchActionXs.append(trace.actionPerformed.x)
+                batchActionYs.append(trace.actionPerformed.y)
+                batchActionIndexes.append(action_index)
 
                 executionTrace = numpy.array(trace.branchExecutionTrace)
                 executionTrace = numpy.minimum(executionTrace, numpy.ones_like(executionTrace))
 
-                executionTraces.append(executionTrace)
+                batchExecutionTraces.append(executionTrace)
+
+                batchDiscountedRewards.append(discountedReward)
 
             q_values, predictedTraces = self.model({
-                "image": Variable(torch.FloatTensor(numpy.array(frames))),
-                "additionalFeature": Variable(torch.FloatTensor(additionalFeatures)),
-                "action_type": action_types,
-                "action_x": action_xs,
-                "action_y": action_ys
+                "image": Variable(torch.FloatTensor(numpy.array(batchFrames))),
+                "additionalFeature": Variable(torch.FloatTensor(batchAdditionalFeatures)),
+                "action_type": batchActionTypes,
+                "action_x": batchActionXs,
+                "action_y": batchActionYs
             })
 
             q_values = q_values.reshape([-1, height * width * len(self.actions)])
 
-            action_index = Variable(torch.LongTensor(numpy.array(action_indexes, dtype=numpy.int32)))
-            action_index = action_index.unsqueeze(1)
+            action_indexes = Variable(torch.LongTensor(numpy.array(batchActionIndexes, dtype=numpy.int32)))
+            action_indexes = action_indexes.unsqueeze(1)
 
-            q_value = q_values.gather(1, action_index).squeeze(1)
+            q_value = q_values.gather(1, action_indexes).squeeze(1)
 
-            rewardLoss = (q_value - Variable(torch.FloatTensor(numpy.array([discountedReward], dtype=numpy.float32) ))).pow(2).mean()
+            print(batchDiscountedRewards)
+            torchBatchDiscountedRewards = Variable(torch.FloatTensor(numpy.array(batchDiscountedRewards) ))
+            #
+            print(q_value)
+            print(q_value.shape)
+            print(torchBatchDiscountedRewards)
+            print(torchBatchDiscountedRewards.shape)
 
-            tracePredictionLoss = (predictedTraces - Variable(torch.FloatTensor(executionTraces))).pow(2).mean()
+            rewardLoss = (q_value - torchBatchDiscountedRewards).pow(2).mean()
+
+            tracePredictionLoss = (predictedTraces - Variable(torch.FloatTensor(batchExecutionTraces))).pow(2).mean()
 
             totalLoss = rewardLoss + tracePredictionLoss
 

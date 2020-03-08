@@ -5,6 +5,7 @@ from kwola.models.TestingSequenceModel import TestingSequenceModel
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 import random
 from datetime import datetime
+import traceback
 
 
 @app.task
@@ -20,7 +21,11 @@ def runTrainingStep():
     random.shuffle(testSequences)
 
     for sequence in testSequences:
-        agent.learnFromTestingSequence(sequence)
+        try:
+            agent.learnFromTestingSequence(sequence)
+        except Exception as e:
+            print("Error occurred while learning sequence!")
+            traceback.print_exc()
 
     agent.save()
 

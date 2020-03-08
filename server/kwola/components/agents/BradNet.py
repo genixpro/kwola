@@ -11,10 +11,11 @@ import scipy.signal
 import pandas
 from torchvision import models
 
-USE_CUDA = torch.cuda.is_available()
-Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
+# USE_CUDA = torch.cuda.is_available()
+# Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
 # Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs) if USE_CUDA else autograd.Variable(*args, **kwargs)
 
+Variable = lambda x:x.cuda()
 
 
 class BradNet(nn.Module):
@@ -77,8 +78,9 @@ class BradNet(nn.Module):
         # Replace the saturation layer on the image with the stamp data layer
         merged = torch.cat([stampLayer, data['image']], dim=1)
 
-        print("Forward", merged.shape)
+        # print("Forward", merged.shape)
         output = self.mainModel(merged)
+        # print("Output", output.shape)
 
         featureMap = output
 
@@ -129,28 +131,8 @@ class BradNet(nn.Module):
         action_type = action_index % self.numActions
 
         action_x = int(int(action_index % (width * self.numActions)) / self.numActions)
+
         action_y = int(action_index / (width * self.numActions))
 
         return action_type, action_x, action_y
-
-
-    def predict(self, image, additionalFeatures, epsilon):
-        width = image.shape[2]
-        height = image.shape[1]
-
-        if random.random() > epsilon:
-            image = Variable(torch.FloatTensor(np.array(image)).unsqueeze(0))
-
-            q_value, predictedTrace = self.forward({"image": image, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures))})
-
-            action_index = q_value.reshape([-1, width * height * self.numActions]).argmax(1).data[0]
-
-            return self.actionIndexToActionDetails(width, height, action_index), predictedTrace
-        else:
-
-            action_type = random.randrange(self.numActions)
-            action_x = random.randrange(width)
-            action_y = random.randrange(height)
-
-            return (action_type, action_x, action_y), None
 
