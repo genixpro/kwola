@@ -45,7 +45,7 @@ class DeepLearningAgent(BaseAgent):
         super().__init__()
 
         self.num_frames = 1400000
-        self.batch_size = 1
+        self.batch_size = 8
         self.gamma = 0.50
         self.frameStart = 7200
 

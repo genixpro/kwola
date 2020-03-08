@@ -21,7 +21,7 @@ class BradNet(nn.Module):
     def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize):
         super(BradNet, self).__init__()
 
-        self.branchStampEdgeSize = 20
+        self.branchStampEdgeSize = 10
 
         self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
 
@@ -33,28 +33,30 @@ class BradNet(nn.Module):
 
         # self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=self.pixelFeatureCount)
         self.mainModel = nn.Sequential(
-            nn.Conv2d(3, self.innerSize, kernel_size=3, stride=1, dilation=2, padding=2),
+            nn.Conv2d(3, self.innerSize, kernel_size=3, stride=2, dilation=1, padding=1),
             nn.ReLU(),
             nn.BatchNorm2d(self.innerSize),
 
-            nn.Conv2d(self.innerSize, self.innerSize, kernel_size=5, stride=1, dilation=2, padding=4),
+            nn.Conv2d(self.innerSize, self.innerSize, kernel_size=3, stride=2, dilation=1, padding=1),
             nn.ReLU(),
             nn.BatchNorm2d(self.innerSize),
 
-            nn.Conv2d(self.innerSize, self.peakInnerSize, kernel_size=3, stride=1, dilation=1, padding=1),
+            nn.Conv2d(self.innerSize, self.peakInnerSize, kernel_size=3, stride=2, dilation=1, padding=1),
             nn.ReLU(),
             nn.BatchNorm2d(self.peakInnerSize),
 
-            nn.Conv2d(self.peakInnerSize, self.innerSize, kernel_size=5, stride=1, dilation=2, padding=4),
+            nn.Conv2d(self.peakInnerSize, self.innerSize, kernel_size=5, stride=1, dilation=3, padding=6),
             nn.ReLU(),
             nn.BatchNorm2d(self.innerSize),
 
-            nn.Conv2d(self.innerSize, self.pixelFeatureCount, kernel_size=3, stride=1, dilation=1, padding=1),
+            nn.Conv2d(self.innerSize, self.pixelFeatureCount, kernel_size=5, stride=1, dilation=1, padding=2),
             nn.ReLU(),
             nn.BatchNorm2d(self.pixelFeatureCount),
+
+            torch.nn.Upsample(scale_factor=8)
         )
 
-        self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, 1, stride=1, padding=0, bias=False)
+        self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
 
         self.predictedExecutionTraceLinear = nn.Sequential(
             nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
