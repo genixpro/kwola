@@ -1,26 +1,11 @@
 from .BaseEnvironment import BaseEnvironment
-from selenium import webdriver
-from selenium.webdriver.common.proxy import Proxy, ProxyType
-from selenium.webdriver.chrome.options import Options
 import time
 import numpy as np
 from mitmproxy.tools.dump import DumpMaster
 from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
 from kwola.components.proxy.PathTracer import PathTracer
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.actions.RightClickAction import RightClickAction
-from kwola.models.actions.TypeAction import TypeAction
-from kwola.models.actions.WaitAction import WaitAction
-from kwola.models.ExecutionTraceModel import ExecutionTrace
-import selenium.common.exceptions
-import tempfile
-import subprocess
-import os
-import os.path
-import hashlib
 from threading import Thread
 import asyncio
-import numpy
 import concurrent.futures
 import socket
 from contextlib import closing
@@ -35,7 +20,26 @@ class WebEnvironment(BaseEnvironment):
     def __init__(self, targetURL="http://172.17.0.2:3000/", numberParallelSessions = 4):
         self.targetURL = targetURL
 
-        self.proxyPort = self.find_free_port()
+        self.startProxyServer()
+
+        def createSession(number):
+            return WebEnvironmentSession(targetURL, number, self.proxyPort, self.pathTracer)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            sessionFutures = [
+                executor.submit(createSession, sessionNumber) for sessionNumber in range(numberParallelSessions)
+            ]
+
+            self.sessions = [
+                future.result() for future in sessionFutures
+            ]
+
+    def shutdown(self):
+        for session in self.sessions:
+            session.shutdown()
+
+    def startProxyServer(self):
+        self.proxyPort = self.findFreePort()
 
         self.proxyThread = Thread(target=lambda: self.runProxyServer())
         self.proxyThread.start()
@@ -43,23 +47,7 @@ class WebEnvironment(BaseEnvironment):
         # Hack, wait for proxy thread to start
         time.sleep(1)
 
-        def createSession(number):
-            return WebEnvironmentSession(targetURL, number, self.proxyPort, self.pathTracer)
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            sessionFutures = [
-                executor.submit(createSession, sessionNumber) for sessionNumber in range(numberParallelSessions)
-            ]
-
-        self.sessions = [
-            future.result() for future in sessionFutures
-        ]
-
-    def shutdown(self):
-        for session in self.sessions:
-            session.shutdown()
-
-    def find_free_port(self):
+    def findFreePort(self):
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             s.bind(('', 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

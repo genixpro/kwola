@@ -7,79 +7,88 @@ from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.components.agents.RandomAgent import RandomAgent
 import random
 from datetime import datetime
+import traceback
 from bson import ObjectId
 import os
+from kwola.config import config
 
 @app.task
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
-    environment = WebEnvironment(numberParallelSessions=16)
+    print("Starting New Testing Sequence")
+    try:
+        environment = WebEnvironment(numberParallelSessions=16)
 
-    stepsRemaining = 10
+        stepsRemaining = 100
 
-    testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
+        testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
 
-    testSequence.startTime = datetime.now()
-    testSequence.status = "running"
-    testSequence.save()
+        testSequence.startTime = datetime.now()
+        testSequence.status = "running"
+        testSequence.save()
 
-    executionSessions = [
-        ExecutionSession(startTime=datetime.now(), endTime=None, tabNumber=sessionN, executionTraces=[])
-        for sessionN in range(environment.numberParallelSessions())
-    ]
+        executionSessions = [
+            ExecutionSession(startTime=datetime.now(), endTime=None, tabNumber=sessionN, executionTraces=[])
+            for sessionN in range(environment.numberParallelSessions())
+        ]
 
-    errorHashes = set()
-    uniqueErrors = []
+        errorHashes = set()
+        uniqueErrors = []
 
-    if shouldBeRandom:
-        agent = RandomAgent()
-    else:
-        agent = DeepLearningAgent()
+        if shouldBeRandom:
+            agent = RandomAgent()
+        else:
+            agent = DeepLearningAgent(whichGpu=None)
 
-    agent.initialize(environment)
-    agent.load()
+        agent.initialize(environment)
+        agent.load()
 
-    while stepsRemaining > 0:
-        stepsRemaining -= 1
+        while stepsRemaining > 0:
+            stepsRemaining -= 1
 
-        actions = agent.nextBestActions()
+            actions = agent.nextBestActions()
 
-        traces = environment.runActions(actions)
-        for sessionN, trace in enumerate(traces):
-            trace.save()
+            traces = environment.runActions(actions)
+            for sessionN, trace in enumerate(traces):
+                trace.save()
 
-            executionSessions[sessionN].executionTraces.append(trace)
+                executionSessions[sessionN].executionTraces.append(trace)
 
-            for error in trace.errorsDetected:
-                hash = error.computeHash()
+                for error in trace.errorsDetected:
+                    hash = error.computeHash()
 
-                if hash not in errorHashes:
-                    errorHashes.add(hash)
-                    uniqueErrors.append(error)
+                    if hash not in errorHashes:
+                        errorHashes.add(hash)
+                        uniqueErrors.append(error)
 
 
-    videoPaths = environment.createMovies()
+        videoPaths = environment.createMovies()
 
-    for sessionN, videoPath in enumerate(videoPaths):
-        with open(videoPath, 'rb') as origFile:
-            with open(f'/home/bradley/{str(testSequence.id)}-{sessionN}.mp4', "wb") as cloneFile:
-                cloneFile.write(origFile.read())
+        kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
 
-    testSequence.bugsFound = len(uniqueErrors)
-    testSequence.errors = uniqueErrors
+        for sessionN, videoPath in enumerate(videoPaths):
+            with open(videoPath, 'rb') as origFile:
+                with open(os.path.join(kwolaVideoDirectory, f'{str(testSequence.id)}-{sessionN}.mp4'), "wb") as cloneFile:
+                    cloneFile.write(origFile.read())
 
-    testSequence.status = "completed"
+        testSequence.bugsFound = len(uniqueErrors)
+        testSequence.errors = uniqueErrors
 
-    testSequence.endTime = datetime.now()
+        testSequence.status = "completed"
 
-    for session in executionSessions:
-        session.save()
+        testSequence.endTime = datetime.now()
 
-    testSequence.executionSessions = executionSessions
-    testSequence.save()
+        for session in executionSessions:
+            session.save()
 
-    environment.shutdown()
+        testSequence.executionSessions = executionSessions
+        testSequence.save()
 
-    print("Finished Running Testing Sequence! Yay!")
+        environment.shutdown()
+
+        print("Finished Running Testing Sequence!")
+    except Exception as e:
+        traceback.print_exc()
+        print("Unhandled exception occurred during testing sequence")
 
     return ""
 

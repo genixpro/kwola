@@ -9,6 +9,7 @@ import hashlib
 class JSRewriteProxy:
     def __init__(self):
         self.cache = redis.Redis(db=2)
+        self.memoryCache = {}
 
     def request(self, flow):
         flow.request.headers['Accept-Encoding'] = 'identity'
@@ -40,7 +41,11 @@ class JSRewriteProxy:
         fileHash = hasher.hexdigest()
         try:
             if '.js' in flow.request.path:
-                cached = self.cache.get(fileHash)
+                cached = self.memoryCache.get(fileHash)
+                if cached is None:
+                    cached = self.cache.get(fileHash)
+                    if cached is not None:
+                        self.memoryCache[fileHash] = cached
 
                 if cached is not None:
                     flow.response.data.headers['Content-Length'] = str(len(cached))
@@ -59,6 +64,7 @@ class JSRewriteProxy:
                     transformed = result.stdout
 
                     self.cache.set(fileHash, transformed)
+                    self.memoryCache[fileHash] = transformed
 
                     flow.response.data.headers['Content-Length'] = str(len(transformed))
                     flow.response.data.content = transformed

@@ -50,6 +50,9 @@ class WebEnvironmentSession(BaseEnvironment):
         self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
         self.driver.get(targetURL)
 
+        # HACK! give time for page to load before proceeding.
+        time.sleep(1)
+
         self.lastScreenshotHash = None
         self.lastProxyPaths = set()
 
@@ -126,7 +129,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
 
     def createMovie(self):
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', self.movieFileName()], cwd=self.screenshotDirectory)
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', self.movieFileName()], cwd=self.screenshotDirectory)
 
         return self.movieFilePath()
 
@@ -235,7 +238,7 @@ class WebEnvironmentSession(BaseEnvironment):
         executionTrace.tabNumber = self.tabNumber
         executionTrace.frameNumber = self.frameNumber
 
-        executionTrace.logOutput = "\n".join(list(self.driver.get_log('browser'))[startLogCount:])
+        executionTrace.logOutput = "\n".join([str(log) for log in self.driver.get_log('browser')][startLogCount:])
         executionTrace.finishURL = self.driver.current_url
 
         executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0

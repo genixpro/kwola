@@ -19,12 +19,18 @@ Variable = lambda x:x.cuda()
 
 
 class BradNet(nn.Module):
-    def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize):
+    def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize, whichGpu):
         super(BradNet, self).__init__()
 
         self.branchStampEdgeSize = 10
 
         self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
+        if whichGpu == "all":
+            self.stampProjection = nn.DataParallel(self.stampProjection)
+        elif whichGpu is None:
+            pass
+        else:
+            self.stampProjection = self.stampProjection.to(torch.device(f"cuda:{whichGpu}"))
 
         self.pixelFeatureCount = 32
 
@@ -56,13 +62,31 @@ class BradNet(nn.Module):
 
             torch.nn.Upsample(scale_factor=8)
         )
+        if whichGpu == "all":
+            self.mainModel = nn.DataParallel(self.mainModel)
+        elif whichGpu is None:
+            pass
+        else:
+            self.mainModel = self.mainModel.to(torch.device(f"cuda:{whichGpu}"))
 
         self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
+        if whichGpu == "all":
+            self.rewardConvolution = nn.DataParallel(self.rewardConvolution)
+        elif whichGpu is None:
+            pass
+        else:
+            self.rewardConvolution = self.rewardConvolution.to(torch.device(f"cuda:{whichGpu}"))
 
         self.predictedExecutionTraceLinear = nn.Sequential(
             nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
             nn.Sigmoid()
         )
+        if whichGpu == "all":
+            self.predictedExecutionTraceLinear = nn.DataParallel(self.predictedExecutionTraceLinear)
+        elif whichGpu is None:
+            pass
+        else:
+            self.predictedExecutionTraceLinear = self.predictedExecutionTraceLinear.to(torch.device(f"cuda:{whichGpu}"))
 
         self.numActions = numActions
 

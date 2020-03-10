@@ -8,6 +8,11 @@ import torch.nn.functional as F
 import scipy.signal
 import pandas
 import cv2
+import os
+import pickle
+import tempfile
+import bz2
+import os.path
 from kwola.models.actions.ClickTapAction import ClickTapAction
 import os.path
 import numpy
@@ -20,14 +25,9 @@ from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
 import itertools
+from kwola.config import config
 
 from .BradNet import BradNet
-
-# USE_CUDA = torch.cuda.is_available()
-# Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
-# Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs) if USE_CUDA else autograd.Variable(*args, **kwargs)
-
-Variable = lambda x:x.cuda()
 
 def grouper(n, iterable):
     """Chunks an iterable into sublists"""
@@ -43,13 +43,16 @@ class DeepLearningAgent(BaseAgent):
         This class represents a deep learning agent, which uses reinforcement learning to make the automated testing more effective
     """
 
-    def __init__(self):
+    def __init__(self, whichGpu="all"):
         super().__init__()
 
         self.num_frames = 1400000
-        self.batchSize = 1
+        self.batchSize = 20
         self.gamma = 0.50
-        self.frameStart = 7200
+        self.whichGpu = whichGpu
+        self.variableWrapperFunc = (lambda x:x.cuda()) if whichGpu is not None else (lambda x:x)
+
+        self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
 
     def load(self):
         """
@@ -58,8 +61,15 @@ class DeepLearningAgent(BaseAgent):
             :return:
         """
 
-        if os.path.exists("/home/bradley/kwola/deep_learning_model"):
-            self.model.load_state_dict(torch.load("/home/bradley/kwola/deep_learning_model"))
+        if os.path.exists(self.modelPath):
+            if self.whichGpu is None:
+                device = torch.device('cpu')
+                self.model.load_state_dict(torch.load(self.modelPath, map_location=device))
+            elif self.whichGpu != "all":
+                device = torch.device(f"cuda:{self.whichGpu}")
+                self.model.load_state_dict(torch.load(self.modelPath, map_location=device))
+            else:
+                self.model.load_state_dict(torch.load(self.modelPath))
 
     def save(self):
         """
@@ -67,7 +77,7 @@ class DeepLearningAgent(BaseAgent):
 
             :return:
         """
-        torch.save(self.model.state_dict(), "/home/bradley/kwola/deep_learning_model")
+        torch.save(self.model.state_dict(), self.modelPath)
 
 
     def initialize(self, environment):
@@ -81,9 +91,14 @@ class DeepLearningAgent(BaseAgent):
 
         rect = environment.screenshotSize()
 
-        self.model = BradNet(self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize())
+        self.model = BradNet(self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize(), whichGpu=self.whichGpu)
 
-        self.model = self.model.cuda()
+        if self.whichGpu == "all":
+            self.model = self.model.cuda()
+        elif self.whichGpu is None:
+            pass
+        else:
+            self.model = self.model.to(torch.device(f"cuda:{self.whichGpu}"))
         # self.model = self.model
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
@@ -118,7 +133,7 @@ class DeepLearningAgent(BaseAgent):
             # :param environment:
             :return:
         """
-        epsilon = 0.
+        epsilon = 0.50
         images = self.getImage()
         additionalFeatures = self.getAdditionalFeatures()
 
@@ -128,9 +143,9 @@ class DeepLearningAgent(BaseAgent):
         height = images.shape[2]
 
         if random.random() > epsilon:
-            images = Variable(torch.FloatTensor(images))
+            images = self.variableWrapperFunc(torch.FloatTensor(images))
 
-            q_values, predictedTrace = self.model({"image": images, "additionalFeature": Variable(torch.FloatTensor(additionalFeatures))})
+            q_values, predictedTrace = self.model({"image": images, "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(additionalFeatures))})
 
             actionIndexes = q_values.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
 
@@ -168,7 +183,8 @@ class DeepLearningAgent(BaseAgent):
         """
         frames = []
 
-        cap = cv2.VideoCapture(f'/home/bradley/{str(testingSequence.id)}-{executionSession.tabNumber}.mp4')
+        videoPath = config.getKwolaUserDataDirectory("videos")
+        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(testingSequence.id)}-{executionSession.tabNumber}.mp4'))
 
         while (cap.isOpened()):
             ret, frame = cap.read()
@@ -250,35 +266,25 @@ class DeepLearningAgent(BaseAgent):
                 batchDiscountedRewards.append(discountedReward)
                 batchPresentRewards.append(presentReward)
 
+            # Append an array with all the data to the list of batches.
+            # Add the same time we down-sample some of the data points to be more compact.
+            # We don't need a high precision for the image itself
             batches.append({
-                "frames": batchFrames,
-                "additionalFeatures": batchAdditionalFeatures,
+                "frames": numpy.array(batchFrames, dtype=numpy.float16),
+                "additionalFeatures": numpy.array(batchAdditionalFeatures, dtype=numpy.float16),
                 "actionTypes": batchActionTypes,
-                "actionXs": batchActionXs,
-                "actionYs": batchActionYs,
-                "actionIndexes": batchActionIndexes,
-                "executionTraces": batchExecutionTraces,
-                "discountedRewards": batchDiscountedRewards,
-                "presentRewards": batchPresentRewards
+                "actionXs": numpy.array(batchActionXs, dtype=numpy.int16),
+                "actionYs": numpy.array(batchActionYs, dtype=numpy.int16),
+                "actionIndexes": numpy.array(batchActionIndexes, dtype=numpy.int32),
+                "executionTraces": numpy.array(batchExecutionTraces, dtype=numpy.int8),
+                "discountedRewards": numpy.array(batchDiscountedRewards, dtype=numpy.float32),
+                "presentRewards": numpy.array(batchPresentRewards, dtype=numpy.float32)
             })
+            # print("Finished preparing batch #", len(batches), "for", str(executionSession.id))
+
+        # print("Finished preparing all batches for", str(executionSession.id))
 
         return batches
-
-
-    def prepareBatchesForTestingSequence(self, testingSequence):
-        """
-            This function prepares batches that can be fed to the neural network.
-
-            :param testingSequence:
-            :return:
-        """
-
-        for executionSession in testingSequence.executionSessions:
-            sequenceBatches = self.prepareBatchesForExecutionSession(testingSequence, executionSession)
-            for batch in sequenceBatches:
-                yield batch
-
-
 
     def learnFromBatch(self, batch):
         """
@@ -291,8 +297,8 @@ class DeepLearningAgent(BaseAgent):
         height = batch['frames'][0].shape[1]
 
         q_values, predictedTraces = self.model({
-            "image": Variable(torch.FloatTensor(numpy.array(batch['frames']))),
-            "additionalFeature": Variable(torch.FloatTensor(batch['additionalFeatures'])),
+            "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['frames']))),
+            "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
             "action_type": batch['actionTypes'],
             "action_x": batch['actionXs'],
             "action_y": batch['actionYs']
@@ -300,21 +306,21 @@ class DeepLearningAgent(BaseAgent):
 
         q_values = q_values.reshape([-1, height * width * len(self.actions)])
 
-        action_indexes = Variable(torch.LongTensor(numpy.array(batch['actionIndexes'], dtype=numpy.int32)))
+        action_indexes = self.variableWrapperFunc(torch.LongTensor(numpy.array(batch['actionIndexes'], dtype=numpy.int32)))
         action_indexes = action_indexes.unsqueeze(1)
 
         q_value = q_values.gather(1, action_indexes).squeeze(1)
 
-        torchBatchDiscountedRewards = Variable(torch.FloatTensor(numpy.array(batch['discountedRewards'])))
+        torchBatchDiscountedRewards = self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['discountedRewards'])))
         #
-        print(q_value)
-        print(q_value.shape)
-        print(torchBatchDiscountedRewards)
-        print(torchBatchDiscountedRewards.shape)
+        # print(q_value)
+        # print(q_value.shape)
+        # print(torchBatchDiscountedRewards)
+        # print(torchBatchDiscountedRewards.shape)
 
         rewardLoss = (q_value - torchBatchDiscountedRewards).pow(2).mean()
 
-        tracePredictionLoss = (predictedTraces - Variable(torch.FloatTensor(batch['executionTraces']))).pow(2).mean()
+        tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).pow(2).mean()
 
         totalLoss = rewardLoss + tracePredictionLoss
 

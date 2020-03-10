@@ -5,7 +5,7 @@ from kwola.models.TestingSequenceModel import TestingSequenceModel
 from .RunTrainingStep import runTrainingStep
 from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, wait
 import time
 
 def runRandomInitialization():
@@ -38,22 +38,24 @@ def runRandomInitialization():
 def runMainTrainingLoop():
     sequencesNeeded = 1000
     sequencesCompleted = 0
-    while sequencesCompleted < sequencesNeeded:
+    with ProcessPoolExecutor(max_workers=2) as executor:
+        while sequencesCompleted < sequencesNeeded:
+            futures = []
 
-        print("Starting New Testing Sequence")
-        sequence = TestingSequenceModel()
-        sequence.save()
-        runTestingSequence(str(sequence.id), shouldBeRandom=False)
-        print("Testing Sequence Completed")
+            trainingFuture = executor.submit(runTrainingStep)
+            futures.append(trainingFuture)
 
+            for testingSequences in range(3):
+                sequence = TestingSequenceModel()
+                sequence.save()
+                testingSequenceFuture = executor.submit(runTestingSequence, str(sequence.id), False)
+                futures.append(testingSequenceFuture)
 
+            wait(futures)
 
-        print("Starting Training Step")
-        runTrainingStep()
-        print("Training Step Completed")
+            print("Completed one parallel training loop! Hooray!")
 
-
-        sequencesCompleted += 1
+            sequencesCompleted += 1
 
 
 @app.task
