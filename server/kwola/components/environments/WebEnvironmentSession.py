@@ -184,8 +184,10 @@ class WebEnvironmentSession(BaseEnvironment):
             return document.elementFromPoint(arguments[0], arguments[1]);
             """, action.x, action.y)
 
-            executionTrace.cursor = element.value_of_css_property("cursor")
-            print("Cursor!!", executionTrace.cursor)
+            if element is not None:
+                executionTrace.cursor = element.value_of_css_property("cursor")
+            else:
+                executionTrace.cursor = None
 
             if isinstance(action, ClickTapAction):
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)

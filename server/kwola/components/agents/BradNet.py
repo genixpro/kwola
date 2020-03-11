@@ -73,7 +73,7 @@ class BradNet(nn.Module):
 
         self.predictedCursorLinear = nn.Sequential(
             nn.Linear(self.pixelFeatureCount, cursorCount),
-            nn.Softmax()
+            nn.Sigmoid()
         )
         self.predictedCursorLinearParallel = nn.DataParallel(self.predictedCursorLinear)
 

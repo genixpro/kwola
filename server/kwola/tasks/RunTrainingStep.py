@@ -68,6 +68,7 @@ def runTrainingStep():
     testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(25))
     if len(testSequences) == 0:
         print("Error, no test sequences in db to train on for training step.", flush=True)
+        print("==== Training Step Completed ====", flush=True)
         return
 
     executionSessions = []
