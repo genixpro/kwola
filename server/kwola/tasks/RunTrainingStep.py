@@ -129,15 +129,15 @@ def runTrainingStep():
 
                         print("Completed", iterationsCompleted, "batches")
 
-                    averageRewardLoss = numpy.mean(rewardLosses)
-                    averageTracePredictionLoss = numpy.mean(tracePredictionLosses)
-                    averageTotalLoss = numpy.mean(totalLosses)
+                    averageRewardLoss = numpy.mean(rewardLosses[-25:])
+                    averageTracePredictionLoss = numpy.mean(tracePredictionLosses[-25:])
+                    averageTotalLoss = numpy.mean(totalLosses[-25:])
 
                     # print(testingSequence.id)
                     # print("Total Reward", float(totalReward))
-                    print("Average Reward Loss:", averageRewardLoss)
-                    print("Average Trace Predicton Loss:", averageTracePredictionLoss)
-                    print("Average Total Loss:", averageTotalLoss)
+                    print("Moving Average Reward Loss:", averageRewardLoss)
+                    print("Moving Average Trace Predicton Loss:", averageTracePredictionLoss)
+                    print("Moving Average Total Loss:", averageTotalLoss)
 
         agent.save()
         print("Agent saved!")
@@ -150,6 +150,8 @@ def runTrainingStep():
         for file in files:
             os.unlink(os.path.join(batchDirectory, file))
         os.rmdir(batchDirectory)
+
+        del environment, agent
 
     print("Training Step Completed")
     return ""

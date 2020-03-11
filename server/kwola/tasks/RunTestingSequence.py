@@ -90,6 +90,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         traceback.print_exc()
         print("Unhandled exception occurred during testing sequence")
 
+    del environment, agent
+
     return ""
 
 

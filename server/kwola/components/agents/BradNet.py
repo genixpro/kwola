@@ -17,13 +17,10 @@ class BradNet(nn.Module):
 
         self.branchStampEdgeSize = 10
 
+        self.whichGpu = whichGpu
+
         self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
         self.stampProjectionParallel = nn.DataParallel(self.stampProjection)
-
-        if whichGpu == "all":
-            self.stampProjectionCurrent = self.stampProjectionParallel
-        else:
-            self.stampProjectionCurrent = self.stampProjection
 
         self.pixelFeatureCount = 32
 
@@ -56,30 +53,47 @@ class BradNet(nn.Module):
             torch.nn.Upsample(scale_factor=8)
         )
         self.mainModelParallel = nn.DataParallel(self.mainModel)
-        if whichGpu == "all":
-            self.mainModelCurrent = self.mainModelParallel
-        else:
-            self.mainModelCurrent = self.mainModel
 
 
         self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
         self.rewardConvolutionParallel = nn.DataParallel(self.rewardConvolution)
-        if whichGpu == "all":
-            self.rewardConvolutionCurrent = self.rewardConvolutionParallel
-        else:
-            self.rewardConvolutionCurrent = self.rewardConvolution
 
         self.predictedExecutionTraceLinear = nn.Sequential(
             nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
             nn.Sigmoid()
         )
         self.predictedExecutionTraceLinearParallel = nn.DataParallel(self.predictedExecutionTraceLinear)
-        if whichGpu == "all":
-            self.predictedExecutionTraceLinearCurrent = self.predictedExecutionTraceLinearParallel
-        else:
-            self.predictedExecutionTraceLinearCurrent = self.predictedExecutionTraceLinear
 
         self.numActions = numActions
+
+    @property
+    def stampProjectionCurrent(self):
+        if self.whichGpu == "all":
+            return self.stampProjectionParallel
+        else:
+            return self.stampProjection
+
+    @property
+    def mainModelCurrent(self):
+        if self.whichGpu == "all":
+            return self.mainModelParallel
+        else:
+            return self.mainModel
+
+    @property
+    def rewardConvolutionCurrent(self):
+        if self.whichGpu == "all":
+            return self.rewardConvolutionParallel
+        else:
+            return self.rewardConvolution
+
+    @property
+    def predictedExecutionTraceLinearCurrent(self):
+        if self.whichGpu == "all":
+            return self.predictedExecutionTraceLinearParallel
+        else:
+            return self.predictedExecutionTraceLinear
+
 
     def forward(self, data):
         width = data['image'].shape[3]
