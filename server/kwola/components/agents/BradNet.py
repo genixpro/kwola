@@ -53,9 +53,11 @@ class BradNet(nn.Module):
         )
         self.mainModelParallel = nn.DataParallel(self.mainModel)
 
+        self.presentRewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
+        self.presentRewardConvolutionParallel = nn.DataParallel(self.presentRewardConvolution)
 
-        self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
-        self.rewardConvolutionParallel = nn.DataParallel(self.rewardConvolution)
+        self.discountedFutureRewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
+        self.discountedFutureRewardConvolutionParallel = nn.DataParallel(self.discountedFutureRewardConvolution)
 
         self.predictedExecutionTraceLinear = nn.Sequential(
             nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
@@ -80,11 +82,20 @@ class BradNet(nn.Module):
             return self.mainModel
 
     @property
-    def rewardConvolutionCurrent(self):
+    def presentRewardConvolutionCurrent(self):
         if self.whichGpu == "all":
-            return self.rewardConvolutionParallel
+            return self.presentRewardConvolutionParallel
         else:
-            return self.rewardConvolution
+            return self.presentRewardConvolution
+
+
+    @property
+    def discountedFutureRewardConvolutionCurrent(self):
+        if self.whichGpu == "all":
+            return self.discountedFutureRewardConvolutionParallel
+        else:
+            return self.discountedFutureRewardConvolution
+
 
     @property
     def predictedExecutionTraceLinearCurrent(self):
@@ -106,13 +117,15 @@ class BradNet(nn.Module):
         # Replace the saturation layer on the image with the stamp data layer
         merged = torch.cat([stampLayer, data['image']], dim=1)
 
-        # print("Forward", merged.shape)
+        # print("Forward", merged.shape, flush=True)
         output = self.mainModelCurrent(merged)
-        # print("Output", output.shape)
+        # print("Output", output.shape, flush=True)
 
         featureMap = output
 
-        rewards = self.rewardConvolutionCurrent(output)
+        presentRewards = self.presentRewardConvolutionCurrent(output)
+        discountFutureRewards = self.discountedFutureRewardConvolutionCurrent(output)
+        totalReward = presentRewards + discountFutureRewards
 
         action_types = []
         action_xs = []
@@ -122,7 +135,7 @@ class BradNet(nn.Module):
             action_xs = data['action_x']
             action_ys = data['action_y']
         else:
-            action_indexes = rewards.reshape([-1, width * height * self.numActions]).argmax(1).data
+            action_indexes = totalReward.reshape([-1, width * height * self.numActions]).argmax(1).data
 
             for index in action_indexes:
                 action_type, action_x, action_y = BradNet.actionIndexToActionDetails(width, height, self.numActions, index)
@@ -145,7 +158,7 @@ class BradNet(nn.Module):
 
         predictedTraces = self.predictedExecutionTraceLinearCurrent(joinedFeatures)
 
-        return rewards, predictedTraces
+        return presentRewards, discountFutureRewards, predictedTraces
 
 
     def feature_size(self):

@@ -13,7 +13,7 @@ import os
 from kwola.config import config
 
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
-    print("Starting New Testing Sequence")
+    print("Starting New Testing Sequence", flush=True)
     try:
         environment = WebEnvironment(numberParallelSessions=16)
 

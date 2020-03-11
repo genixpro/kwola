@@ -19,6 +19,7 @@ import numpy
 import skimage
 import skimage.transform
 import skimage.color
+import skimage.segmentation
 import concurrent.futures
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
@@ -47,7 +48,7 @@ class DeepLearningAgent(BaseAgent):
         super().__init__()
 
         self.num_frames = 1400000
-        self.batchSize = 20
+        self.batchSize = 16
         self.gamma = 0.50
         self.whichGpu = whichGpu
         self.variableWrapperFunc = (lambda x:x.cuda()) if whichGpu is not None else (lambda x:x)
@@ -143,12 +144,14 @@ class DeepLearningAgent(BaseAgent):
             images = self.variableWrapperFunc(torch.FloatTensor(images))
             additionalFeatures = self.variableWrapperFunc(torch.FloatTensor(self.getAdditionalFeatures()))
 
-            q_values, predictedTrace = self.model({"image": images, "additionalFeature": additionalFeatures})
+            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace = self.model({"image": images, "additionalFeature": additionalFeatures})
+
+            totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
             # cv2.imshow('image', numpy.array(q_values[0, 0, :, :]))
             # cv2.waitKey(50)
 
-            actionIndexes = q_values.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
+            actionIndexes = totalRewardPredictions.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
 
             actionInfoList = [
                 BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndex)
@@ -207,28 +210,59 @@ class DeepLearningAgent(BaseAgent):
         # First compute the present reward at each time step
         presentRewards = []
         for trace in executionSession.executionTraces:
-            if trace.didActionSucceed == False:
-                presentRewards.append(-0.1)
-            elif trace.didNewBranchesExecute or trace.isURLNew or trace.isScreenshotNew:
-                presentRewards.append(0.2)
+            tracePresentReward = 0.0
+
+            if not trace.didActionSucceed:
+                tracePresentReward -= 0.02
+
+            if trace.didCodeExecute:
+                tracePresentReward += 0.001
             else:
-                presentRewards.append(0.0)
+                tracePresentReward -= -0.01
+
+            if trace.didNewBranchesExecute:
+                tracePresentReward += 0.30
+
+            if trace.hadNetworkTraffic:
+                tracePresentReward += 0.001
+
+            if trace.hadNewNetworkTraffic:
+                tracePresentReward += 0.10
+
+            if trace.didScreenshotChange:
+                tracePresentReward += 0.001
+            else:
+                tracePresentReward -= -0.01
+
+            if trace.isScreenshotNew:
+                tracePresentReward += 0.005
+
+            if trace.didURLChange:
+                tracePresentReward += 0.001
+
+            if trace.isURLNew:
+                tracePresentReward += 0.01
+
+            if trace.hadLogOutput:
+                tracePresentReward += 0.001
+
+            presentRewards.append(tracePresentReward)
 
         discountRate = 0.95
 
         # Now compute the discounted reward
-        discountedRewards = []
+        discountedFutureRewards = []
         presentRewards.reverse()
         current = 0
         for reward in presentRewards:
             current *= discountRate
+            discountedFutureRewards.append(current)
             current += reward
-            discountedRewards.append(current)
 
-        discountedRewards.reverse()
+        discountedFutureRewards.reverse()
         presentRewards.reverse()
 
-        shuffledTraceFrameList = list(zip(executionSession.executionTraces, frames, discountedRewards, presentRewards))
+        shuffledTraceFrameList = list(zip(executionSession.executionTraces, frames, discountedFutureRewards, presentRewards))
         random.shuffle(shuffledTraceFrameList)
 
         batches = []
@@ -241,10 +275,11 @@ class DeepLearningAgent(BaseAgent):
             batchActionYs = []
             batchActionIndexes = []
             batchExecutionTraces = []
-            batchDiscountedRewards = []
+            batchDiscountedFutureRewards = []
             batchPresentRewards = []
+            batchRewardPixelMasks = []
 
-            for trace, frame, discountedReward, presentReward in batch:
+            for trace, frame, discountedFutureReward, presentReward in batch:
                 width = frame.shape[2]
                 height = frame.shape[1]
 
@@ -267,8 +302,14 @@ class DeepLearningAgent(BaseAgent):
 
                 batchExecutionTraces.append(executionTrace)
 
-                batchDiscountedRewards.append(discountedReward)
+                batchDiscountedFutureRewards.append(discountedFutureReward)
                 batchPresentRewards.append(presentReward)
+
+                # We use flood-segmentation on the original image to select which pixels we will update reward values for.
+                # This works great on UIs because the elements always have big areas of solid-color which respond in the same
+                # way.
+                rewardPixelMask = skimage.segmentation.flood(frame[1], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
+                batchRewardPixelMasks.append(rewardPixelMask)
 
             # Append an array with all the data to the list of batches.
             # Add the same time we down-sample some of the data points to be more compact.
@@ -281,12 +322,13 @@ class DeepLearningAgent(BaseAgent):
                 "actionYs": numpy.array(batchActionYs, dtype=numpy.int16),
                 "actionIndexes": numpy.array(batchActionIndexes, dtype=numpy.int32),
                 "executionTraces": numpy.array(batchExecutionTraces, dtype=numpy.int8),
-                "discountedRewards": numpy.array(batchDiscountedRewards, dtype=numpy.float32),
-                "presentRewards": numpy.array(batchPresentRewards, dtype=numpy.float32)
+                "discountedFutureRewards": numpy.array(batchDiscountedFutureRewards, dtype=numpy.float32),
+                "presentRewards": numpy.array(batchPresentRewards, dtype=numpy.float32),
+                "rewardPixelMasks": numpy.array(batchRewardPixelMasks, dtype=numpy.uint8)
             })
-            # print("Finished preparing batch #", len(batches), "for", str(executionSession.id))
+            # print("Finished preparing batch #", len(batches), "for", str(executionSession.id), flush=True)
 
-        # print("Finished preparing all batches for", str(executionSession.id))
+        # print("Finished preparing all batches for", str(executionSession.id), flush=True)
 
         return batches
 
@@ -300,7 +342,7 @@ class DeepLearningAgent(BaseAgent):
         width = batch['frames'][0].shape[2]
         height = batch['frames'][0].shape[1]
 
-        q_values, predictedTraces = self.model({
+        presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces = self.model({
             "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['frames']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
             "action_type": batch['actionTypes'],
@@ -308,36 +350,70 @@ class DeepLearningAgent(BaseAgent):
             "action_y": batch['actionYs']
         })
 
-        q_values = q_values.reshape([-1, height * width * len(self.actions)])
+        # totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
+        # presentRewardPredictions = presentRewardPredictions.reshape([-1, height * width * len(self.actions)])
+        # discountedFutureRewardPredictions = discountedFutureRewardPredictions.reshape([-1, height * width * len(self.actions)])
 
-        action_indexes = self.variableWrapperFunc(torch.LongTensor(numpy.array(batch['actionIndexes'], dtype=numpy.int32)))
-        action_indexes = action_indexes.unsqueeze(1)
+        # action_indexes = self.variableWrapperFunc(torch.LongTensor(numpy.array(batch['actionIndexes'], dtype=numpy.int32)))
+        # action_indexes = action_indexes.unsqueeze(1)
 
-        q_value = q_values.gather(1, action_indexes).squeeze(1)
+        # print(batch['frames'].shape)
+        # print(action_indexes.shape)
+        # print(presentRewardPredictions.shape)
+        # print(discountedFutureRewardPredictions.shape)
 
-        torchBatchDiscountedRewards = self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['discountedRewards'])))
-        #
-        # print(q_value)
-        # print(q_value.shape)
-        # print(torchBatchDiscountedRewards)
-        # print(torchBatchDiscountedRewards.shape)
+        totalRewardLosses = []
+        presentRewardLosses = []
+        discountedFutureRewardLosses = []
 
-        rewardLoss = (q_value - torchBatchDiscountedRewards).pow(2).mean()
+        for presentRewardImage, discountedFutureRewardImage, rewardPixelMask, presentReward, discountedFutureReward, actionType in zip(presentRewardPredictions, discountedFutureRewardPredictions, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes']):
+            if len(totalRewardLosses) == 0:
+                cv2.imshow('image', rewardPixelMask * 200)
+                cv2.waitKey(50)
+
+                # cv2.imshow('image2', presentRewardImage[0] * 200)
+                # cv2.waitKey(50)
+
+            rewardPixelMask = self.variableWrapperFunc(torch.IntTensor(rewardPixelMask))
+            # actionType = self.variableWrapperFunc(torch.IntTensor(actionType))
+
+            presentRewardsFiltered = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
+            discountedFutureRewardsFiltered = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
+
+            torchBatchPresentRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * self.variableWrapperFunc(torch.FloatTensor([presentReward])) * rewardPixelMask
+            torchBatchDiscountedFutureRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * self.variableWrapperFunc(torch.FloatTensor([discountedFutureReward])) * rewardPixelMask
+
+            countPixelMask = (rewardPixelMask.sum())
+
+            presentRewardLoss = (presentRewardsFiltered - torchBatchPresentRewards).pow(2).sum() / countPixelMask
+            discountedFutureRewardLoss = (discountedFutureRewardsFiltered - torchBatchDiscountedFutureRewards).pow(2).sum() / countPixelMask
+
+            sampleLoss = presentRewardLoss + discountedFutureRewardLoss
+            totalRewardLosses.append(sampleLoss.unsqueeze(0))
+
+            presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
+            discountedFutureRewardLosses.append(discountedFutureRewardLoss.unsqueeze(0))
 
         tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).pow(2).mean()
 
-        totalLoss = rewardLoss + tracePredictionLoss
+        totalRewardLoss = torch.mean(torch.cat(totalRewardLosses))
+        presentRewardLoss = torch.mean(torch.cat(presentRewardLosses))
+        discountedFutureRewardLoss = torch.mean(torch.cat(discountedFutureRewardLosses))
+
+        totalLoss = totalRewardLoss + tracePredictionLoss
 
         self.optimizer.zero_grad()
         totalLoss.backward()
         self.optimizer.step()
 
-        rewardLoss = float(rewardLoss.data.item())
+        totalRewardLoss = float(totalRewardLoss.data.item())
+        presentRewardLoss = float(presentRewardLoss.data.item())
+        discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
         tracePredictionLoss = float(tracePredictionLoss.data.item())
         totalLoss = float(totalLoss.data.item())
         batchReward = float(numpy.sum(batch['presentRewards']))
 
-        return rewardLoss, tracePredictionLoss, totalLoss, batchReward
+        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, totalLoss, batchReward
 
 
 def processRawImageParallel(rawImage):

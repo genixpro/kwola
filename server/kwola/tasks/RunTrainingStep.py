@@ -64,10 +64,10 @@ def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
 
 
 def runTrainingStep():
-    print("Starting Training Step")
+    print("Starting Training Step", flush=True)
     testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(25))
     if len(testSequences) == 0:
-        print("Error, no test sequences in db to train on for training step.")
+        print("Error, no test sequences in db to train on for training step.", flush=True)
         return
 
     executionSessions = []
@@ -93,7 +93,9 @@ def runTrainingStep():
 
     try:
         batchFutures = []
-        rewardLosses = []
+        totalRewardLosses = []
+        presentRewardLosses = []
+        discountedFutureRewardLosses = []
         tracePredictionLosses = []
         totalLosses = []
         iterationsCompleted = 0
@@ -118,9 +120,11 @@ def runTrainingStep():
                     for batch in batches:
                         totalReward = 0
 
-                        rewardLoss, tracePredictionLoss, totalLoss, batchReward = agent.learnFromBatch(batch)
+                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, totalLoss, batchReward = agent.learnFromBatch(batch)
 
-                        rewardLosses.append(rewardLoss)
+                        totalRewardLosses.append(totalRewardLoss)
+                        presentRewardLosses.append(presentRewardLoss)
+                        discountedFutureRewardLosses.append(discountedFutureRewardLoss)
                         tracePredictionLosses.append(tracePredictionLoss)
                         totalLosses.append(totalLoss)
                         totalReward += batchReward
@@ -128,21 +132,25 @@ def runTrainingStep():
 
                         print("Completed", iterationsCompleted, "batches", flush=True)
 
-                    averageRewardLoss = numpy.mean(rewardLosses[-25:])
+                    averageTotalRewardLoss = numpy.mean(totalRewardLosses[-25:])
+                    averagePresentRewardLoss = numpy.mean(presentRewardLosses[-25:])
+                    averageDiscountedFutureRewardLoss = numpy.mean(discountedFutureRewardLosses[-25:])
                     averageTracePredictionLoss = numpy.mean(tracePredictionLosses[-25:])
                     averageTotalLoss = numpy.mean(totalLosses[-25:])
 
                     # print(testingSequence.id)
                     # print("Total Reward", float(totalReward))
-                    print("Moving Average Reward Loss:", averageRewardLoss)
-                    print("Moving Average Trace Predicton Loss:", averageTracePredictionLoss)
+                    print("Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
+                    print("Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
+                    print("Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
+                    print("Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
                     print("Moving Average Total Loss:", averageTotalLoss, flush=True)
 
         agent.save()
-        print("Agent saved!")
+        print("Agent saved!", flush=True)
 
     except Exception as e:
-        print(f"Error occurred while learning sequence!")
+        print(f"Error occurred while learning sequence!", flush=True)
         traceback.print_exc()
     finally:
         files = os.listdir(batchDirectory)
