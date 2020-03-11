@@ -5,9 +5,9 @@ from .errors.BaseError import BaseError
 
 class ExecutionSession(Document):
 
-    startTime = DateField(max_length=200, required=False)
+    startTime = DateTimeField(max_length=200, required=False)
 
-    endTime = DateField(max_length=200, required=False)
+    endTime = DateTimeField(max_length=200, required=False)
 
     executionTraces = ListField(GenericReferenceField())
 

@@ -63,10 +63,9 @@ def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
     return list(batches)
 
 
-@app.task
 def runTrainingStep():
     print("Starting Training Step")
-    testSequences = list(TestingSequenceModel.objects(status="completed").only('executionSessions'))
+    testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(25))
     if len(testSequences) == 0:
         print("Error, no test sequences in db to train on for training step.")
         return
@@ -156,4 +155,13 @@ def runTrainingStep():
     print("Training Step Completed")
     return ""
 
+
+@app.task
+def runTrainingStepTask():
+    runTrainingStep()
+
+
+
+if __name__ == "__main__":
+    runTrainingStep()
 

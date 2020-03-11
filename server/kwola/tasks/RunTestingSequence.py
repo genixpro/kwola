@@ -12,7 +12,6 @@ from bson import ObjectId
 import os
 from kwola.config import config
 
-@app.task
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     print("Starting New Testing Sequence")
     try:
@@ -94,4 +93,14 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
 
     return ""
 
+@app.task
+def runTestingSequenceTask(testingSequenceId, shouldBeRandom=False):
+    runTestingSequence(testingSequenceId, shouldBeRandom)
+
+
+if __name__ == "__main__":
+    sequence = TestingSequenceModel()
+    sequence.save()
+
+    runTestingSequence(str(sequence.id), False)
 

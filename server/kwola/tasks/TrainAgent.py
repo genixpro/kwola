@@ -7,6 +7,7 @@ from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait
 import time
+import subprocess
 
 def runRandomInitialization():
     print("Starting random testing sequences for initialization")
@@ -35,22 +36,25 @@ def runRandomInitialization():
     print("Random initialization completed")
 
 
+def runTrainingSubprocess():
+    subprocess.run(["python3", "-m", "kwola.tasks.RunTrainingStep"])
+
+def runTestingSubprocess():
+    subprocess.run(["python3", "-m", "kwola.tasks.RunTestingSequence"])
+
 def runMainTrainingLoop():
     sequencesNeeded = 1000
     sequencesCompleted = 0
     numTestSequencesPerTrainingStep = 1
-    with ProcessPoolExecutor(max_workers=2) as executor:
-        while sequencesCompleted < sequencesNeeded:
+    while sequencesCompleted < sequencesNeeded:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = []
 
-            trainingFuture = executor.submit(runTrainingStep)
+            trainingFuture = executor.submit(runTrainingSubprocess)
             futures.append(trainingFuture)
 
             for testingSequences in range(numTestSequencesPerTrainingStep):
-                sequence = TestingSequenceModel()
-                sequence.save()
-                testingSequenceFuture = executor.submit(runTestingSequence, str(sequence.id), False)
-                futures.append(testingSequenceFuture)
+                futures.append(executor.submit(runTestingSubprocess))
 
             wait(futures)
 
