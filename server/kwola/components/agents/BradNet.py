@@ -154,16 +154,20 @@ class BradNet(nn.Module):
 
     @staticmethod
     def actionDetailsToActionIndex(width, height, numActions, action_type, action_x, action_y):
-        return action_type + action_x * numActions + action_y * width * numActions
+        return action_type * width * height \
+               + action_y * width\
+               + action_x
 
 
     @staticmethod
     def actionIndexToActionDetails(width, height, numActions, action_index):
-        action_type = action_index % numActions
+        action_type = int(action_index / (width * height))
 
-        action_x = int(int(action_index % (width * numActions)) / numActions)
+        index_within_type = int(action_index % (width * height))
 
-        action_y = int(action_index / (width * numActions))
+        action_y = int(index_within_type / width)
+
+        action_x = int(index_within_type % width)
 
         return action_type, action_x, action_y
 

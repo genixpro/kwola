@@ -48,6 +48,13 @@ class WebEnvironmentSession(BaseEnvironment):
         proxyConfig.add_to_capabilities(capabilities)
 
         self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
+
+        window_size = self.driver.execute_script("""
+            return [window.outerWidth - window.innerWidth + arguments[0],
+              window.outerHeight - window.innerHeight + arguments[1]];
+            """, 800, 600)
+        self.driver.set_window_size(*window_size)
+
         self.driver.get(targetURL)
 
         # HACK! give time for page to load before proceeding.

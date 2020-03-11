@@ -39,11 +39,14 @@ def runRandomInitialization():
     print("Random initialization completed")
 
 def recursiveKillProcess(process):
-    parent = psutil.Process(process.pid)
-    children = parent.children(recursive=True)
-    children.append(parent)
-    for p in children:
-        p.send_signal(9)
+    try:
+        parent = psutil.Process(process.pid)
+        children = parent.children(recursive=True)
+        children.append(parent)
+        for p in children:
+            p.send_signal(9)
+    except psutil.NoSuchProcess:
+        pass
 
 def waitOnProcess(process, finishText):
     atexit.register(lambda: process.kill())
@@ -62,11 +65,9 @@ def waitOnProcess(process, finishText):
 
         print("", sep="", end="", flush=True)
 
-        try:
-            if elapsedSeconds > 600:
-                recursiveKillProcess(process)
-        except psutil.NoSuchProcess:
-            pass
+        if elapsedSeconds > 600:
+            recursiveKillProcess(process)
+        
         time.sleep(0.002)
 
     # DESTROY IT!

@@ -145,6 +145,9 @@ class DeepLearningAgent(BaseAgent):
 
             q_values, predictedTrace = self.model({"image": images, "additionalFeature": additionalFeatures})
 
+            # cv2.imshow('image', numpy.array(q_values[0, 0, :, :]))
+            # cv2.waitKey(50)
+
             actionIndexes = q_values.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
 
             actionInfoList = [
