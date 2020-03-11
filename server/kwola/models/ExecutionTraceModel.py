@@ -53,6 +53,8 @@ class ExecutionTrace(Document):
 
     cumulativeBranchCoverage = FloatField()
 
+    cursor = StringField()
+
     # This field is compressed using a transparent algorithm that makes sparse arrays smaller
     startCumulativeBranchExecutionTraceCompressed = ListField()
 

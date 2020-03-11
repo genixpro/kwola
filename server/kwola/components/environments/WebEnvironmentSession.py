@@ -180,6 +180,13 @@ class WebEnvironmentSession(BaseEnvironment):
         success = True
 
         try:
+            element = self.driver.execute_script("""
+            return document.elementFromPoint(arguments[0], arguments[1]);
+            """, action.x, action.y)
+
+            executionTrace.cursor = element.value_of_css_property("cursor")
+            print("Cursor!!", executionTrace.cursor)
+
             if isinstance(action, ClickTapAction):
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)

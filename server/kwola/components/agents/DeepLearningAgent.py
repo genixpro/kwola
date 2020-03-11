@@ -55,6 +55,46 @@ class DeepLearningAgent(BaseAgent):
 
         self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
 
+        self.cursors = [
+            "alias",
+            "all-scroll",
+            "auto",
+            "cell",
+            "context-menu",
+            "col-resize",
+            "copy",
+            "crosshair",
+            "default",
+            "e-resize",
+            "ew-resize",
+            "grab",
+            "grabbing",
+            "help",
+            "move",
+            "n-resize",
+            "ne-resize",
+            "nesw-resize",
+            "ns-resize",
+            "nw-resize",
+            "nwse-resize",
+            "no-drop",
+            "none",
+            "not-allowed",
+            "pointer",
+            "progress",
+            "row-resize",
+            "s-resize",
+            "se-resize",
+            "sw-resize",
+            "text",
+            "url",
+            "w-resize",
+            "wait",
+            "zoom-in",
+            "zoom-out",
+            "none"
+        ]
+
     def load(self):
         """
             Loads the agent from db / disk
@@ -92,7 +132,7 @@ class DeepLearningAgent(BaseAgent):
 
         rect = environment.screenshotSize()
 
-        self.model = BradNet(self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize(), whichGpu=self.whichGpu)
+        self.model = BradNet(self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize(), 12, len(self.cursors), whichGpu=self.whichGpu)
 
         if self.whichGpu == "all":
             self.model = self.model.cuda()
@@ -144,7 +184,7 @@ class DeepLearningAgent(BaseAgent):
             images = self.variableWrapperFunc(torch.FloatTensor(images))
             additionalFeatures = self.variableWrapperFunc(torch.FloatTensor(self.getAdditionalFeatures()))
 
-            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace = self.model({"image": images, "additionalFeature": additionalFeatures})
+            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures = self.model({"image": images, "additionalFeature": additionalFeatures})
 
             totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
@@ -262,7 +302,21 @@ class DeepLearningAgent(BaseAgent):
         discountedFutureRewards.reverse()
         presentRewards.reverse()
 
-        shuffledTraceFrameList = list(zip(executionSession.executionTraces, frames, discountedFutureRewards, presentRewards))
+        # Create the decaying future execution trace for the prediction algorithm
+        tracesReversed = list(executionSession.executionTraces)
+        tracesReversed.reverse()
+        currentTrace = numpy.zeros_like(executionSession.executionTraces[0].branchExecutionTrace)
+        executionTraceDiscountRate = 0.90
+        executionTraces = []
+        for trace in tracesReversed:
+            executionTrace = numpy.array(trace.branchExecutionTrace)
+            currentTrace *= executionTraceDiscountRate
+            currentTrace += numpy.minimum(executionTrace, numpy.ones_like(executionTrace))
+            executionTraces.append(executionTrace)
+
+        executionTraces.reverse()
+
+        shuffledTraceFrameList = list(zip(executionSession.executionTraces, frames, discountedFutureRewards, presentRewards, executionTraces))
         random.shuffle(shuffledTraceFrameList)
 
         batches = []
@@ -278,8 +332,10 @@ class DeepLearningAgent(BaseAgent):
             batchDiscountedFutureRewards = []
             batchPresentRewards = []
             batchRewardPixelMasks = []
+            batchExecutionFeatures = []
+            batchCursors = []
 
-            for trace, frame, discountedFutureReward, presentReward in batch:
+            for trace, frame, discountedFutureReward, presentReward, executionTrace in batch:
                 width = frame.shape[2]
                 height = frame.shape[1]
 
@@ -297,8 +353,28 @@ class DeepLearningAgent(BaseAgent):
                 batchActionYs.append(trace.actionPerformed.y)
                 batchActionIndexes.append(action_index)
 
-                executionTrace = numpy.array(trace.branchExecutionTrace)
-                executionTrace = numpy.minimum(executionTrace, numpy.ones_like(executionTrace))
+                cursorVector = [0] * len(self.cursors)
+                if trace.cursor in self.cursors:
+                    cursorVector[self.cursors.index(trace.cursor)] = 1
+                else:
+                    cursorVector[self.cursors.index("none")] = 1
+
+                batchCursors.append(cursorVector)
+
+                executionFeatures = [
+                    trace.didActionSucceed,
+                    trace.didErrorOccur,
+                    trace.didNewErrorOccur,
+                    trace.didCodeExecute,
+                    trace.didNewBranchesExecute,
+                    trace.hadNetworkTraffic,
+                    trace.hadNewNetworkTraffic,
+                    trace.didScreenshotChange,
+                    trace.isScreenshotNew,
+                    trace.didURLChange,
+                    trace.isURLNew,
+                    trace.hadLogOutput,
+                ]
 
                 batchExecutionTraces.append(executionTrace)
 
@@ -310,6 +386,8 @@ class DeepLearningAgent(BaseAgent):
                 # way.
                 rewardPixelMask = skimage.segmentation.flood(frame[1], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
                 batchRewardPixelMasks.append(rewardPixelMask)
+
+                batchExecutionFeatures.append(executionFeatures)
 
             # Append an array with all the data to the list of batches.
             # Add the same time we down-sample some of the data points to be more compact.
@@ -324,7 +402,9 @@ class DeepLearningAgent(BaseAgent):
                 "executionTraces": numpy.array(batchExecutionTraces, dtype=numpy.int8),
                 "discountedFutureRewards": numpy.array(batchDiscountedFutureRewards, dtype=numpy.float32),
                 "presentRewards": numpy.array(batchPresentRewards, dtype=numpy.float32),
-                "rewardPixelMasks": numpy.array(batchRewardPixelMasks, dtype=numpy.uint8)
+                "rewardPixelMasks": numpy.array(batchRewardPixelMasks, dtype=numpy.uint8),
+                "executionFeatures": numpy.array(batchExecutionFeatures, dtype=numpy.uint8),
+                "cursors": numpy.array(batchCursors, dtype=numpy.uint8)
             })
             # print("Finished preparing batch #", len(batches), "for", str(executionSession.id), flush=True)
 
@@ -342,7 +422,7 @@ class DeepLearningAgent(BaseAgent):
         width = batch['frames'][0].shape[2]
         height = batch['frames'][0].shape[1]
 
-        presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces = self.model({
+        presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures = self.model({
             "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['frames']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
             "action_type": batch['actionTypes'],
@@ -350,43 +430,34 @@ class DeepLearningAgent(BaseAgent):
             "action_y": batch['actionYs']
         })
 
-        # totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
-        # presentRewardPredictions = presentRewardPredictions.reshape([-1, height * width * len(self.actions)])
-        # discountedFutureRewardPredictions = discountedFutureRewardPredictions.reshape([-1, height * width * len(self.actions)])
-
-        # action_indexes = self.variableWrapperFunc(torch.LongTensor(numpy.array(batch['actionIndexes'], dtype=numpy.int32)))
-        # action_indexes = action_indexes.unsqueeze(1)
-
-        # print(batch['frames'].shape)
-        # print(action_indexes.shape)
-        # print(presentRewardPredictions.shape)
-        # print(discountedFutureRewardPredictions.shape)
-
         totalRewardLosses = []
         presentRewardLosses = []
+        targetHomogenizationLosses = []
         discountedFutureRewardLosses = []
 
-        for presentRewardImage, discountedFutureRewardImage, rewardPixelMask, presentReward, discountedFutureReward, actionType in zip(presentRewardPredictions, discountedFutureRewardPredictions, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes']):
-            if len(totalRewardLosses) == 0:
-                cv2.imshow('image', rewardPixelMask * 200)
-                cv2.waitKey(50)
-
-                # cv2.imshow('image2', presentRewardImage[0] * 200)
-                # cv2.waitKey(50)
+        for presentRewardImage, discountedFutureRewardImage, pixelFeatureImage, rewardPixelMask, presentReward, discountedFutureReward, actionType in zip(presentRewardPredictions, discountedFutureRewardPredictions, predictedPixelFeatures, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes']):
+            # if len(totalRewardLosses) == 0:
+            #     cv2.imshow('image', rewardPixelMask * 200)
+            #     cv2.waitKey(50)
 
             rewardPixelMask = self.variableWrapperFunc(torch.IntTensor(rewardPixelMask))
             # actionType = self.variableWrapperFunc(torch.IntTensor(actionType))
 
-            presentRewardsFiltered = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
-            discountedFutureRewardsFiltered = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
+            presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
+            discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
 
             torchBatchPresentRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * self.variableWrapperFunc(torch.FloatTensor([presentReward])) * rewardPixelMask
             torchBatchDiscountedFutureRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * self.variableWrapperFunc(torch.FloatTensor([discountedFutureReward])) * rewardPixelMask
 
             countPixelMask = (rewardPixelMask.sum())
 
-            presentRewardLoss = (presentRewardsFiltered - torchBatchPresentRewards).pow(2).sum() / countPixelMask
-            discountedFutureRewardLoss = (discountedFutureRewardsFiltered - torchBatchDiscountedFutureRewards).pow(2).sum() / countPixelMask
+            presentRewardLoss = (presentRewardsMasked - torchBatchPresentRewards).pow(2).sum() / countPixelMask
+            discountedFutureRewardLoss = (discountedFutureRewardsMasked - torchBatchDiscountedFutureRewards).pow(2).sum() / countPixelMask
+
+            # Target Homogenization loss - basically, all of the features for the masked area should produce similar features
+            pixelFeaturesImageMasked = pixelFeatureImage * rewardPixelMask
+            averageFeatures = (pixelFeaturesImageMasked.sum(1).sum(1) / countPixelMask).unsqueeze(1).unsqueeze(1)
+            targetHomogenizationLoss = (pixelFeaturesImageMasked - averageFeatures).pow(2).sum() / countPixelMask
 
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
@@ -394,13 +465,20 @@ class DeepLearningAgent(BaseAgent):
             presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
             discountedFutureRewardLosses.append(discountedFutureRewardLoss.unsqueeze(0))
 
-        tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).pow(2).mean()
+            targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
+
+        tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).mean()
+
+        predictedExecutionFeaturesLoss = (predictedExecutionFeatures - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).mean()
+
+        predictedCursorLoss = (predictedCursors - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).mean()
 
         totalRewardLoss = torch.mean(torch.cat(totalRewardLosses))
         presentRewardLoss = torch.mean(torch.cat(presentRewardLosses))
         discountedFutureRewardLoss = torch.mean(torch.cat(discountedFutureRewardLosses))
+        targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
 
-        totalLoss = totalRewardLoss + tracePredictionLoss
+        totalLoss = totalRewardLoss + tracePredictionLoss + predictedExecutionFeaturesLoss + targetHomogenizationLoss + predictedCursorLoss
 
         self.optimizer.zero_grad()
         totalLoss.backward()
@@ -410,10 +488,13 @@ class DeepLearningAgent(BaseAgent):
         presentRewardLoss = float(presentRewardLoss.data.item())
         discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
         tracePredictionLoss = float(tracePredictionLoss.data.item())
+        predictedExecutionFeaturesLoss = float(predictedExecutionFeaturesLoss.data.item())
+        targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
+        predictedCursorLoss = float(predictedCursorLoss.data.item())
         totalLoss = float(totalLoss.data.item())
         batchReward = float(numpy.sum(batch['presentRewards']))
 
-        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, totalLoss, batchReward
+        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, batchReward
 
 
 def processRawImageParallel(rawImage):

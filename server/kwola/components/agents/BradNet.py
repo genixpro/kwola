@@ -12,7 +12,7 @@ import pandas
 from torchvision import models
 
 class BradNet(nn.Module):
-    def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize, whichGpu):
+    def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount, whichGpu):
         super(BradNet, self).__init__()
 
         self.branchStampEdgeSize = 10
@@ -65,6 +65,18 @@ class BradNet(nn.Module):
         )
         self.predictedExecutionTraceLinearParallel = nn.DataParallel(self.predictedExecutionTraceLinear)
 
+        self.predictedExecutionFeaturesLinear = nn.Sequential(
+            nn.Linear(self.pixelFeatureCount, executionFeaturePredictorSize),
+            nn.Sigmoid()
+        )
+        self.predictedExecutionFeaturesLinearParallel = nn.DataParallel(self.predictedExecutionFeaturesLinear)
+
+        self.predictedCursorLinear = nn.Sequential(
+            nn.Linear(self.pixelFeatureCount, cursorCount),
+            nn.Softmax()
+        )
+        self.predictedCursorLinearParallel = nn.DataParallel(self.predictedCursorLinear)
+
         self.numActions = numActions
 
     @property
@@ -104,6 +116,21 @@ class BradNet(nn.Module):
         else:
             return self.predictedExecutionTraceLinear
 
+    @property
+    def predictedExecutionFeaturesLinearCurrent(self):
+        if self.whichGpu == "all":
+            return self.predictedExecutionFeaturesLinearParallel
+        else:
+            return self.predictedExecutionFeaturesLinear
+
+
+    @property
+    def predictedCursorLinearCurrent(self):
+        if self.whichGpu == "all":
+            return self.predictedCursorLinearParallel
+        else:
+            return self.predictedCursorLinear
+
 
     def forward(self, data):
         width = data['image'].shape[3]
@@ -118,13 +145,11 @@ class BradNet(nn.Module):
         merged = torch.cat([stampLayer, data['image']], dim=1)
 
         # print("Forward", merged.shape, flush=True)
-        output = self.mainModelCurrent(merged)
+        pixelFeatureMap = self.mainModelCurrent(merged)
         # print("Output", output.shape, flush=True)
 
-        featureMap = output
-
-        presentRewards = self.presentRewardConvolutionCurrent(output)
-        discountFutureRewards = self.discountedFutureRewardConvolutionCurrent(output)
+        presentRewards = self.presentRewardConvolutionCurrent(pixelFeatureMap)
+        discountFutureRewards = self.discountedFutureRewardConvolutionCurrent(pixelFeatureMap)
         totalReward = presentRewards + discountFutureRewards
 
         action_types = []
@@ -144,21 +169,23 @@ class BradNet(nn.Module):
                 action_xs.append(action_x)
                 action_ys.append(action_y)
 
-        forwardFeatures = []
+        forwardFeaturesForAuxillaryLosses = []
         for index, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
 
             # temp fix
             action_x = min(action_x, width-1)
             action_y = min(action_y, height-1)
 
-            featuresForTrace = featureMap[index, :, int(action_y), int(action_x)].unsqueeze(0)
-            forwardFeatures.append(featuresForTrace)
+            featuresForAuxillaryLosses = pixelFeatureMap[index, :, int(action_y), int(action_x)].unsqueeze(0)
+            forwardFeaturesForAuxillaryLosses.append(featuresForAuxillaryLosses)
 
-        joinedFeatures = torch.cat(forwardFeatures, dim=0)
+        joinedFeatures = torch.cat(forwardFeaturesForAuxillaryLosses, dim=0)
 
         predictedTraces = self.predictedExecutionTraceLinearCurrent(joinedFeatures)
+        predictedExecutionFeatures = self.predictedExecutionFeaturesLinearCurrent(joinedFeatures)
+        predictedCursor = self.predictedCursorLinearCurrent(joinedFeatures)
 
-        return presentRewards, discountFutureRewards, predictedTraces
+        return presentRewards, discountFutureRewards, predictedTraces, predictedExecutionFeatures, predictedCursor, pixelFeatureMap
 
 
     def feature_size(self):

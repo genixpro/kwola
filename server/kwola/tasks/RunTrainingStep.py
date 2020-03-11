@@ -97,6 +97,9 @@ def runTrainingStep():
         presentRewardLosses = []
         discountedFutureRewardLosses = []
         tracePredictionLosses = []
+        executionFeaturesLosses = []
+        targetHomogenizationLosses = []
+        predictedCursorLosses = []
         totalLosses = []
         iterationsCompleted = 0
         iterationsNeeded = 500
@@ -120,12 +123,15 @@ def runTrainingStep():
                     for batch in batches:
                         totalReward = 0
 
-                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, totalLoss, batchReward = agent.learnFromBatch(batch)
+                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, batchReward = agent.learnFromBatch(batch)
 
                         totalRewardLosses.append(totalRewardLoss)
                         presentRewardLosses.append(presentRewardLoss)
                         discountedFutureRewardLosses.append(discountedFutureRewardLoss)
                         tracePredictionLosses.append(tracePredictionLoss)
+                        executionFeaturesLosses.append(executionFeaturesLoss)
+                        targetHomogenizationLosses.append(targetHomogenizationLoss)
+                        predictedCursorLosses.append(predictedCursorLoss)
                         totalLosses.append(totalLoss)
                         totalReward += batchReward
                         iterationsCompleted += 1
@@ -136,6 +142,9 @@ def runTrainingStep():
                     averagePresentRewardLoss = numpy.mean(presentRewardLosses[-25:])
                     averageDiscountedFutureRewardLoss = numpy.mean(discountedFutureRewardLosses[-25:])
                     averageTracePredictionLoss = numpy.mean(tracePredictionLosses[-25:])
+                    averageExecutionFeatureLoss = numpy.mean(executionFeaturesLosses[-25:])
+                    averageTargetHomogenizationLoss = numpy.mean(targetHomogenizationLosses[-25:])
+                    averagePredictedCursorLoss = numpy.mean(predictedCursorLosses[-25:])
                     averageTotalLoss = numpy.mean(totalLosses[-25:])
 
                     # print(testingSequence.id)
@@ -144,6 +153,9 @@ def runTrainingStep():
                     print("Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
                     print("Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
                     print("Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
+                    print("Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
+                    print("Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
+                    print("Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
                     print("Moving Average Total Loss:", averageTotalLoss, flush=True)
 
         agent.save()
