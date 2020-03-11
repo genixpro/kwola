@@ -113,7 +113,7 @@ def runTrainingStep():
                     # Request another session be prepared
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
 
-                    print("Training on execution session with ", len(batches), " batches")
+                    print("Training on execution session with ", len(batches), " batches", flush=True)
 
                     for batch in batches:
                         totalReward = 0
@@ -126,7 +126,7 @@ def runTrainingStep():
                         totalReward += batchReward
                         iterationsCompleted += 1
 
-                        print("Completed", iterationsCompleted, "batches")
+                        print("Completed", iterationsCompleted, "batches", flush=True)
 
                     averageRewardLoss = numpy.mean(rewardLosses[-25:])
                     averageTracePredictionLoss = numpy.mean(tracePredictionLosses[-25:])
@@ -136,7 +136,7 @@ def runTrainingStep():
                     # print("Total Reward", float(totalReward))
                     print("Moving Average Reward Loss:", averageRewardLoss)
                     print("Moving Average Trace Predicton Loss:", averageTracePredictionLoss)
-                    print("Moving Average Total Loss:", averageTotalLoss)
+                    print("Moving Average Total Loss:", averageTotalLoss, flush=True)
 
         agent.save()
         print("Agent saved!")
@@ -150,9 +150,10 @@ def runTrainingStep():
             os.unlink(os.path.join(batchDirectory, file))
         os.rmdir(batchDirectory)
 
-        del environment, agent
+        del agent
 
-    print("Training Step Completed")
+    # This print statement will trigger the parent manager process to kill this process.
+    print("==== Training Step Completed ====", flush=True)
     return ""
 
 

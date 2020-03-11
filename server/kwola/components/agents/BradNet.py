@@ -28,7 +28,6 @@ class BradNet(nn.Module):
 
         self.peakInnerSize = 128
 
-        # self.mainModel = models.segmentation.fcn_resnet50(pretrained=False, progress=True, num_classes=self.pixelFeatureCount)
         self.mainModel = nn.Sequential(
             nn.Conv2d(3, self.innerSize, kernel_size=3, stride=2, dilation=1, padding=1),
             nn.ReLU(),

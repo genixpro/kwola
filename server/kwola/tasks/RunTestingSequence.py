@@ -58,6 +58,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                     if hash not in errorHashes:
                         errorHashes.add(hash)
                         uniqueErrors.append(error)
+            print("", end="", sep="", flush=True)
 
 
         videoPaths = environment.createMovies()
@@ -83,13 +84,14 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         testSequence.save()
 
         environment.shutdown()
-
-        print("Finished Running Testing Sequence!")
     except Exception as e:
         traceback.print_exc()
-        print("Unhandled exception occurred during testing sequence")
+        print("Unhandled exception occurred during testing sequence", flush=True)
 
     del environment, agent
+
+    # This print statement will trigger the parent manager process to kill this process.
+    print("==== Finished Running Testing Sequence! ====", flush=True)
 
     return ""
 

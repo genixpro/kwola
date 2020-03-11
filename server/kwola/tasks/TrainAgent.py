@@ -7,7 +7,10 @@ from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait
 import time
+import psutil
 import subprocess
+import datetime
+import atexit
 
 def runRandomInitialization():
     print("Starting random testing sequences for initialization")
@@ -35,32 +38,79 @@ def runRandomInitialization():
 
     print("Random initialization completed")
 
+def recursiveKillProcess(process):
+    parent = psutil.Process(process.pid)
+    children = parent.children(recursive=True)
+    children.append(parent)
+    for p in children:
+        p.send_signal(9)
+
+def waitOnProcess(process, finishText):
+    atexit.register(lambda: process.kill())
+
+    output = ''
+    startTime = datetime.datetime.now()
+    while process.returncode is None and (finishText not in output):
+        nextChars = str(process.stdout.readline(), 'utf8')
+        elapsedSeconds = (datetime.datetime.now() - startTime).total_seconds()
+        for nextChar in nextChars:
+            if nextChar == chr(127):
+                output = output[:-1]  # Erase the last character from the output.
+            else:
+                output += nextChar
+                print(nextChar, sep="", end="")
+
+        print("", sep="", end="", flush=True)
+
+        try:
+            if elapsedSeconds > 600:
+                recursiveKillProcess(process)
+        except psutil.NoSuchProcess:
+            pass
+        time.sleep(0.002)
+
+    # DESTROY IT!
+    time.sleep(1)
+    if process.returncode is None:
+        process.terminate()
+
+    time.sleep(3)
+    if process.returncode is None:
+        recursiveKillProcess(process)
+
+    remaining = str(process.stdout.read(), 'utf8')
+    output += remaining
+    print(remaining, "", sep="", end="", flush=True)
 
 def runTrainingSubprocess():
-    subprocess.run(["python3", "-m", "kwola.tasks.RunTrainingStep"])
+    process = subprocess.Popen(["python3", "-m", "kwola.tasks.RunTrainingStep"], stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)
+
+    waitOnProcess(process, "==== Training Step Completed ====")
 
 def runTestingSubprocess():
-    subprocess.run(["python3", "-m", "kwola.tasks.RunTestingSequence"])
+    process = subprocess.Popen(["python3", "-m", "kwola.tasks.RunTestingSequence"], stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)
+
+    waitOnProcess(process, "==== Finished Running Testing Sequence! ====")
 
 def runMainTrainingLoop():
-    sequencesNeeded = 1000
-    sequencesCompleted = 0
-    numTestSequencesPerTrainingStep = 1
-    while sequencesCompleted < sequencesNeeded:
+    loopsNeeded = 1000
+    loopsCompleted = 0
+    numTestSequencesPerLoop = 1
+    while loopsCompleted < loopsNeeded:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = []
 
             trainingFuture = executor.submit(runTrainingSubprocess)
             futures.append(trainingFuture)
 
-            for testingSequences in range(numTestSequencesPerTrainingStep):
+            for testingSequences in range(numTestSequencesPerLoop):
                 futures.append(executor.submit(runTestingSubprocess))
 
             wait(futures)
 
             print("Completed one parallel training loop! Hooray!")
 
-            sequencesCompleted += 1
+            loopsCompleted += 1
 
 
 @app.task
