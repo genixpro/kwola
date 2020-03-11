@@ -11,13 +11,6 @@ import scipy.signal
 import pandas
 from torchvision import models
 
-# USE_CUDA = torch.cuda.is_available()
-# Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs).cuda() if USE_CUDA else autograd.Variable(*args, **kwargs)
-# Variable = lambda *args, **kwargs: autograd.Variable(*args, **kwargs) if USE_CUDA else autograd.Variable(*args, **kwargs)
-
-Variable = lambda x:x.cuda()
-
-
 class BradNet(nn.Module):
     def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize, whichGpu):
         super(BradNet, self).__init__()
@@ -25,12 +18,12 @@ class BradNet(nn.Module):
         self.branchStampEdgeSize = 10
 
         self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
+        self.stampProjectionParallel = nn.DataParallel(self.stampProjection)
+
         if whichGpu == "all":
-            self.stampProjection = nn.DataParallel(self.stampProjection)
-        elif whichGpu is None:
-            pass
+            self.stampProjectionCurrent = self.stampProjectionParallel
         else:
-            self.stampProjection = self.stampProjection.to(torch.device(f"cuda:{whichGpu}"))
+            self.stampProjectionCurrent = self.stampProjection
 
         self.pixelFeatureCount = 32
 
@@ -62,31 +55,29 @@ class BradNet(nn.Module):
 
             torch.nn.Upsample(scale_factor=8)
         )
+        self.mainModelParallel = nn.DataParallel(self.mainModel)
         if whichGpu == "all":
-            self.mainModel = nn.DataParallel(self.mainModel)
-        elif whichGpu is None:
-            pass
+            self.mainModelCurrent = self.mainModelParallel
         else:
-            self.mainModel = self.mainModel.to(torch.device(f"cuda:{whichGpu}"))
+            self.mainModelCurrent = self.mainModel
+
 
         self.rewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
+        self.rewardConvolutionParallel = nn.DataParallel(self.rewardConvolution)
         if whichGpu == "all":
-            self.rewardConvolution = nn.DataParallel(self.rewardConvolution)
-        elif whichGpu is None:
-            pass
+            self.rewardConvolutionCurrent = self.rewardConvolutionParallel
         else:
-            self.rewardConvolution = self.rewardConvolution.to(torch.device(f"cuda:{whichGpu}"))
+            self.rewardConvolutionCurrent = self.rewardConvolution
 
         self.predictedExecutionTraceLinear = nn.Sequential(
             nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
             nn.Sigmoid()
         )
+        self.predictedExecutionTraceLinearParallel = nn.DataParallel(self.predictedExecutionTraceLinear)
         if whichGpu == "all":
-            self.predictedExecutionTraceLinear = nn.DataParallel(self.predictedExecutionTraceLinear)
-        elif whichGpu is None:
-            pass
+            self.predictedExecutionTraceLinearCurrent = self.predictedExecutionTraceLinearParallel
         else:
-            self.predictedExecutionTraceLinear = self.predictedExecutionTraceLinear.to(torch.device(f"cuda:{whichGpu}"))
+            self.predictedExecutionTraceLinearCurrent = self.predictedExecutionTraceLinear
 
         self.numActions = numActions
 
@@ -94,7 +85,7 @@ class BradNet(nn.Module):
         width = data['image'].shape[3]
         height = data['image'].shape[2]
 
-        stamp = self.stampProjection(data['additionalFeature'])
+        stamp = self.stampProjectionCurrent(data['additionalFeature'])
 
         stampTiler = stamp.reshape([-1, self.branchStampEdgeSize, self.branchStampEdgeSize]).repeat([1, int(height / self.branchStampEdgeSize) + 1, int(width / self.branchStampEdgeSize) + 1])
         stampLayer = stampTiler[:, :height, :width].reshape([-1, 1, height, width])
@@ -103,12 +94,12 @@ class BradNet(nn.Module):
         merged = torch.cat([stampLayer, data['image']], dim=1)
 
         # print("Forward", merged.shape)
-        output = self.mainModel(merged)
+        output = self.mainModelCurrent(merged)
         # print("Output", output.shape)
 
         featureMap = output
 
-        rewards = self.rewardConvolution(output)
+        rewards = self.rewardConvolutionCurrent(output)
 
         action_types = []
         action_xs = []
@@ -139,13 +130,13 @@ class BradNet(nn.Module):
 
         joinedFeatures = torch.cat(forwardFeatures, dim=0)
 
-        predictedTraces = self.predictedExecutionTraceLinear(joinedFeatures)
+        predictedTraces = self.predictedExecutionTraceLinearCurrent(joinedFeatures)
 
         return rewards, predictedTraces
 
 
     def feature_size(self):
-        return self.features(autograd.Variable(torch.zeros(1, *self.imageInputShape))).view(1, -1).size(1)
+        return self.features(torch.zeros(1, *self.imageInputShape)).view(1, -1).size(1)
 
 
     @staticmethod

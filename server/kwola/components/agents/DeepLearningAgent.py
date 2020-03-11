@@ -96,7 +96,7 @@ class DeepLearningAgent(BaseAgent):
         if self.whichGpu == "all":
             self.model = self.model.cuda()
         elif self.whichGpu is None:
-            pass
+            self.model = self.model.cpu()
         else:
             self.model = self.model.to(torch.device(f"cuda:{self.whichGpu}"))
         # self.model = self.model
@@ -133,19 +133,17 @@ class DeepLearningAgent(BaseAgent):
             # :param environment:
             :return:
         """
-        epsilon = 0.50
-        images = self.getImage()
-        additionalFeatures = self.getAdditionalFeatures()
-
-        # print(images.shape)
-
-        width = images.shape[3]
-        height = images.shape[2]
-
+        epsilon = 0.75
         if random.random() > epsilon:
-            images = self.variableWrapperFunc(torch.FloatTensor(images))
+            images = self.getImage()
 
-            q_values, predictedTrace = self.model({"image": images, "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(additionalFeatures))})
+            width = images.shape[3]
+            height = images.shape[2]
+
+            images = self.variableWrapperFunc(torch.FloatTensor(images))
+            additionalFeatures = self.variableWrapperFunc(torch.FloatTensor(self.getAdditionalFeatures()))
+
+            q_values, predictedTrace = self.model({"image": images, "additionalFeature": additionalFeatures})
 
             actionIndexes = q_values.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
 
@@ -156,6 +154,9 @@ class DeepLearningAgent(BaseAgent):
 
         else:
             actionInfoList = []
+
+            width = self.environment.screenshotSize()['width']
+            height = self.environment.screenshotSize()['height']
 
             for n in range(self.environment.numberParallelSessions()):
                 actionType = random.randrange(len(self.actionsSorted))

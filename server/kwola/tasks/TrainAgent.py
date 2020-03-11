@@ -38,6 +38,7 @@ def runRandomInitialization():
 def runMainTrainingLoop():
     sequencesNeeded = 1000
     sequencesCompleted = 0
+    numTestSequencesPerTrainingStep = 1
     with ProcessPoolExecutor(max_workers=2) as executor:
         while sequencesCompleted < sequencesNeeded:
             futures = []
@@ -45,7 +46,7 @@ def runMainTrainingLoop():
             trainingFuture = executor.submit(runTrainingStep)
             futures.append(trainingFuture)
 
-            for testingSequences in range(3):
+            for testingSequences in range(numTestSequencesPerTrainingStep):
                 sequence = TestingSequenceModel()
                 sequence.save()
                 testingSequenceFuture = executor.submit(runTestingSequence, str(sequence.id), False)

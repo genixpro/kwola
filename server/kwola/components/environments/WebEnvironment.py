@@ -25,7 +25,7 @@ class WebEnvironment(BaseEnvironment):
         def createSession(number):
             return WebEnvironmentSession(targetURL, number, self.proxyPort, self.pathTracer)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             sessionFutures = [
                 executor.submit(createSession, sessionNumber) for sessionNumber in range(numberParallelSessions)
             ]
