@@ -103,6 +103,7 @@ class DeepLearningAgent(BaseAgent):
             "targetHomogenizationLoss": [],
             "predictedCursorLoss": [],
             "totalLoss": [],
+            "totalRebalancedLoss": [],
             "batchReward": []
         }
 
@@ -143,7 +144,7 @@ class DeepLearningAgent(BaseAgent):
 
         rect = environment.screenshotSize()
 
-        self.model = BradNet(self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize(), 12, len(self.cursors), whichGpu=self.whichGpu)
+        self.model = BradNet(self.agentConfiguration, self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize(), 12, len(self.cursors), whichGpu=self.whichGpu)
 
         if self.whichGpu == "all":
             self.model = self.model.cuda()
@@ -479,7 +480,7 @@ class DeepLearningAgent(BaseAgent):
             # Target Homogenization loss - basically, all of the features for the masked area should produce similar features
             pixelFeaturesImageMasked = pixelFeatureImage * rewardPixelMask
             averageFeatures = (pixelFeaturesImageMasked.sum(1).sum(1) / countPixelMask).unsqueeze(1).unsqueeze(1)
-            targetHomogenizationLoss = ((pixelFeaturesImageMasked - averageFeatures) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.model.pixelFeatureCount)
+            targetHomogenizationLoss = ((pixelFeaturesImageMasked - averageFeatures) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.agentConfiguration['pixel_features'])
 
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
@@ -502,16 +503,22 @@ class DeepLearningAgent(BaseAgent):
 
         totalLoss = totalRewardLoss + tracePredictionLoss + predictedExecutionFeaturesLoss + targetHomogenizationLoss + predictedCursorLoss
 
-        runningAverageRewardLoss = numpy.mean(self.trainingLosses['totalRewardLoss'][-10:])
-        runningAverageTracePredictionLoss = numpy.mean(self.trainingLosses['tracePredictionLoss'][-10:])
-        runningAverageExecutionFeaturesLoss = numpy.mean(self.trainingLosses['predictedExecutionFeaturesLoss'][-10:])
-        runningAverageHomogenizationLoss = numpy.mean(self.trainingLosses['targetHomogenizationLoss'][-10:])
-        runningAveragePredictedCursorLoss = numpy.mean(self.trainingLosses['predictedCursorLoss'][-10:])
+        if len(self.trainingLosses['totalLoss']) > 1:
+            runningAverageRewardLoss = numpy.mean(self.trainingLosses['totalRewardLoss'][-self.agentConfiguration['loss_balancing_moving_average_period']:])
+            runningAverageTracePredictionLoss = numpy.mean(self.trainingLosses['tracePredictionLoss'][-self.agentConfiguration['loss_balancing_moving_average_period']:])
+            runningAverageExecutionFeaturesLoss = numpy.mean(self.trainingLosses['predictedExecutionFeaturesLoss'][-self.agentConfiguration['loss_balancing_moving_average_period']:])
+            runningAverageHomogenizationLoss = numpy.mean(self.trainingLosses['targetHomogenizationLoss'][-self.agentConfiguration['loss_balancing_moving_average_period']:])
+            runningAveragePredictedCursorLoss = numpy.mean(self.trainingLosses['predictedCursorLoss'][-self.agentConfiguration['loss_balancing_moving_average_period']:])
 
-        tracePredictionAdustment = (runningAverageRewardLoss / runningAverageTracePredictionLoss) * self.agentConfiguration['loss_ratio_trace_prediction']
-        executionFeaturesAdustment = (runningAverageRewardLoss / runningAverageExecutionFeaturesLoss) * self.agentConfiguration['loss_ratio_execution_features']
-        homogenizationAdustment = (runningAverageRewardLoss / runningAverageHomogenizationLoss) * self.agentConfiguration['loss_ratio_homogenization']
-        predictedCursorAdustment = (runningAverageRewardLoss / runningAveragePredictedCursorLoss) * self.agentConfiguration['loss_ratio_predicted_cursor']
+            tracePredictionAdustment = (runningAverageRewardLoss / runningAverageTracePredictionLoss) * self.agentConfiguration['loss_ratio_trace_prediction']
+            executionFeaturesAdustment = (runningAverageRewardLoss / runningAverageExecutionFeaturesLoss) * self.agentConfiguration['loss_ratio_execution_features']
+            homogenizationAdustment = (runningAverageRewardLoss / runningAverageHomogenizationLoss) * self.agentConfiguration['loss_ratio_homogenization']
+            predictedCursorAdustment = (runningAverageRewardLoss / runningAveragePredictedCursorLoss) * self.agentConfiguration['loss_ratio_predicted_cursor']
+        else:
+            tracePredictionAdustment = 1
+            executionFeaturesAdustment = 1
+            homogenizationAdustment = 1
+            predictedCursorAdustment = 1
 
         totalRebalancedLoss = totalRewardLoss + \
                               tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor([tracePredictionAdustment])) + \

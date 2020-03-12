@@ -12,10 +12,29 @@ from kwola.components.ManagedTaskSubprocess import ManagedTaskSubprocess
 import time
 import psutil
 import subprocess
+import traceback
 import datetime
 import atexit
 import bson
 from kwola.config import config
+
+def runRandomInitializationSubprocess(trainingSequence):
+    testingSequence = TestingSequenceModel()
+    testingSequence.save()
+
+    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingSequence"], {
+        "testingSequenceId": str(testingSequence.id),
+        "shouldBeRandom": True
+    }, timeout=config.getAgentConfiguration()['random_initialization_testing_sequence_timeout'])
+    result = process.waitForProcessResult()
+
+    # Reload the testing sequence from the db. It will have been updated by the sub-process.
+    testingSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequence.id) ).first()
+    trainingSequence.initializationTestingSequences.append(testingSequence)
+    trainingSequence.save()
+
+    return
+
 
 def runRandomInitialization(trainingSequence):
     print("Starting random testing sequences for initialization", flush=True)
@@ -25,21 +44,19 @@ def runRandomInitialization(trainingSequence):
     trainingSequence.initializationTestingSequences = []
 
     futures = []
-    with ProcessPoolExecutor(max_workers=agentConfig['training_random_initialization_workers']) as executor:
+    with ThreadPoolExecutor(max_workers=agentConfig['training_random_initialization_workers']) as executor:
         for n in range(agentConfig['training_random_initialization_sequences']):
             sequence = TestingSequenceModel()
             sequence.save()
 
-            trainingSequence.initializationTestingSequences.append(sequence)
-
-            future = executor.submit(runTestingSequence, str(sequence.id), True)
+            future = executor.submit(runRandomInitializationSubprocess, trainingSequence)
             futures.append(future)
 
             # Add in a delay for each successive task so that they parallelize smoother
             # without fighting for CPU during the startup of that task
             time.sleep(3)
 
-        for future in as_completed(futures[:int(agentConfig['training_random_initialization_sequences']/2)]):
+        for future in as_completed(futures):
             result = future.result()
             print("Random Testing Sequence Completed", flush=True)
 
@@ -51,25 +68,25 @@ def runRandomInitialization(trainingSequence):
 
 
 def runTrainingSubprocess(trainingSequence):
-    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
-        "trainingSequenceId": str(trainingSequence.id)
-    }, timeout=config.getAgentConfiguration()['training_step_timeout'])
+    try:
+        process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
+            "trainingSequenceId": str(trainingSequence.id)
+        }, timeout=config.getAgentConfiguration()['training_step_timeout'])
 
-    result = process.waitForProcessResult()
+        result = process.waitForProcessResult()
 
-
-    trainingStepId = str(result['trainingStepId'])
-    trainingStep = TrainingStep.objects({id: bson.ObjectId(trainingStepId)}).first()
-    trainingSequence.trainingSteps.append(trainingStep)
-    trainingSequence.save()
-
-    return
+        trainingStepId = str(result['trainingStepId'])
+        trainingStep = TrainingStep.objects(id=bson.ObjectId(trainingStepId)).first()
+        trainingSequence.trainingSteps.append(trainingStep)
+        trainingSequence.save()
+    except Exception as e:
+        traceback.print_exc()
+        print("Training task subprocess appears to have failed")
 
 
 def runTestingSubprocess(trainingSequence):
     testingSequence = TestingSequenceModel()
     testingSequence.save()
-
 
     process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingSequence"], {
         "testingSequenceId": str(testingSequence.id),
@@ -77,13 +94,10 @@ def runTestingSubprocess(trainingSequence):
     }, timeout=config.getAgentConfiguration()['training_step_timeout'])
     result = process.waitForProcessResult()
 
-
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
-    testingSequence = TestingSequenceModel.objects({id: bson.ObjectId(testingSequence.id)}).first()
+    testingSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequence.id)).first()
     trainingSequence.testingSequences.append(testingSequence)
     trainingSequence.save()
-
-    return
 
 
 
@@ -98,11 +112,11 @@ def runMainTrainingLoop(trainingSequence):
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = []
 
-            trainingFuture = executor.submit(runTrainingSubprocess)
+            trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence)
             futures.append(trainingFuture)
 
             for testingSequences in range(agentConfig['testing_sequences_per_training_step']):
-                futures.append(executor.submit(runTestingSubprocess))
+                futures.append(executor.submit(runTestingSubprocess, trainingSequence))
 
             wait(futures)
 
@@ -115,7 +129,6 @@ def runMainTrainingLoop(trainingSequence):
         trainingSequence.save()
 
 
-@app.task
 def trainAgent():
     trainingSequence = TrainingSequence()
 
@@ -129,6 +142,11 @@ def trainAgent():
     trainingSequence.status = "completed"
     trainingSequence.endTime = datetime.datetime.now()
     trainingSequence.save()
+
+
+@app.task
+def trainAgentTask():
+    trainAgent()
 
 
 if __name__ == "__main__":

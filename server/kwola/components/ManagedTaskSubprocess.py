@@ -22,7 +22,7 @@ class ManagedTaskSubprocess:
     def __init__(self, args, data, timeout):
         self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)
 
-        self.process.stdin.writelines([json.dumps(data)])
+        self.process.stdin.write(bytes(json.dumps(data) + "\n", "utf8"))
         self.process.stdin.flush()
         self.startTime = datetime.datetime.now()
         self.alive = True
@@ -91,13 +91,19 @@ class ManagedTaskSubprocess:
 
             print("", sep="", end="", flush=True)
 
-        self.output += str(self.process.stdout.read(), 'utf8')
-
         print("Terminating process, task finished.", flush=True)
         self.alive = False
         self.stopProcessBothMethods()
 
-        return self.extractResultFromOutput()
+        self.output += str(self.process.stdout.read(), 'utf8')
+        print(self.output, sep="", end="", flush=True)
+
+        result = self.extractResultFromOutput()
+        print("Task Subprocess finished and gave back result", flush=True)
+        print(json.dumps(result, indent=4), flush=True)
+
+        return result
+
 
 
     def timeoutMonitoringThread(self):

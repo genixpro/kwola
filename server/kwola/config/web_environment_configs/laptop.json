@@ -1,0 +1,5 @@
+{
+  "parallel_sessions": 1,
+  "max_startup_workers": 1,
+  "headless": true
+}

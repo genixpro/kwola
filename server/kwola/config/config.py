@@ -42,14 +42,14 @@ def getAgentConfiguration():
 
 
 
-def getEnvironmentConfiguration():
+def getWebEnvironmentConfiguration():
     """
         This function returns the configuration for the core machine learning model of the agent.
 
         :return:
     """
 
-    modelConfig = json.load(open(f"kwola/config/environment_configs/{config_name}.json"))
+    modelConfig = json.load(open(f"kwola/config/web_environment_configs/{config_name}.json"))
 
     return modelConfig
 

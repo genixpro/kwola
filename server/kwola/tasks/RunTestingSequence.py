@@ -15,10 +15,13 @@ from kwola.config import config
 
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     print("Starting New Testing Sequence", flush=True)
+
+    returnValue = {}
+
     try:
         agentConfig = config.getAgentConfiguration()
 
-        environment = WebEnvironment(environmentConfiguration=config.getEnvironmentConfiguration())
+        environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
 
         stepsRemaining = int(agentConfig['testing_sequence_length'])
 
@@ -27,6 +30,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         testSequence.startTime = datetime.now()
         testSequence.status = "running"
         testSequence.save()
+
+        returnValue = {"testingSequenceId": str(testSequence.id)}
 
         executionSessions = [
             ExecutionSession(startTime=datetime.now(), endTime=None, tabNumber=sessionN, executionTraces=[])
@@ -96,7 +101,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     # This print statement will trigger the parent manager process to kill this process.
     print("==== Finished Running Testing Sequence! ====", flush=True)
 
-    return ""
+    return returnValue
 
 @app.task
 def runTestingSequenceTask(testingSequenceId, shouldBeRandom=False):

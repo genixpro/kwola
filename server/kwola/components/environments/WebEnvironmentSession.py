@@ -32,13 +32,12 @@ class WebEnvironmentSession(BaseEnvironment):
     """
         This class represents a single tab in the web environment.
     """
-    def __init__(self, targetURL, tabNumber, proxyPort, pathTracer):
+    def __init__(self, environmentConfiguration, targetURL, tabNumber, proxyPort, pathTracer):
         self.targetURL = targetURL
 
 
         chrome_options = Options()
-        # chrome_options.headless = True
-        chrome_options.headless = False
+        chrome_options.headless = environmentConfiguration['headless']
 
         capabilities = webdriver.DesiredCapabilities.CHROME
         capabilities['loggingPrefs'] = {'browser': 'ALL'}

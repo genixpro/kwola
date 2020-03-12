@@ -1,3 +1,4 @@
+import sys
 import json
 
 class TaskProcess:
@@ -14,10 +15,13 @@ class TaskProcess:
 
 
     def run(self):
-        dataStr = input()
-        data = json.load(dataStr)
+        print("Waiting for input from stdin", flush=True)
+        dataStr = sys.stdin.readline()
+        data = json.loads(dataStr)
+        print("Running process with following data:", flush=True)
+        print(json.dumps(data, indent=4), flush=True)
         result = self.targetFunc(**data)
-        print(TaskProcess.resultStartString)
-        print(json.dumps(result))
-        print(TaskProcess.resultFinishString)
+        print(TaskProcess.resultStartString, flush=True)
+        print(json.dumps(result), flush=True)
+        print(TaskProcess.resultFinishString, flush=True)
         exit(0)

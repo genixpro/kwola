@@ -98,7 +98,7 @@ def runTrainingStep(trainingSequenceId):
     if len(testSequences) == 0:
         print("Error, no test sequences in db to train on for training step.", flush=True)
         print("==== Training Step Completed ====", flush=True)
-        return
+        return {}
 
     agentConfig = config.getAgentConfiguration()
 
@@ -122,7 +122,7 @@ def runTrainingStep(trainingSequenceId):
         for session in testSequence.executionSessions:
             executionSessions.append((str(testSequence.id), str(session.id)))
 
-    environment = WebEnvironment(environmentConfiguration=config.getEnvironmentConfiguration())
+    environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
 
     agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all")
     agent.initialize(environment)

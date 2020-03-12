@@ -48,7 +48,8 @@ setup(
             'main = kwola:main',
         ],
         'console_scripts': [
-
+            'kwola_clear_db = kwola.bin.clear_db:main',
+            'kwola_train_agent = kwola.bin.train_agent:main'
         ]
     },
 )

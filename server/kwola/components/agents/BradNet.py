@@ -30,51 +30,51 @@ class BradNet(nn.Module):
         self.mainModel = nn.Sequential(
             nn.Conv2d(
                 in_channels=3, 
-                out_channels=self.agentConfiguration['inner_kernels'], 
+                out_channels=self.agentConfiguration['layer_1_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_1_kernel_size'], 
                 stride=self.agentConfiguration['layer_1_stride'], 
                 dilation=self.agentConfiguration['layer_1_dilation'], 
                 padding=self.agentConfiguration['layer_1_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['inner_kernels']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_1_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['inner_kernels'], 
-                out_channels=self.agentConfiguration['inner_kernels'], 
+                in_channels=self.agentConfiguration['layer_1_num_kernels'],
+                out_channels=self.agentConfiguration['layer_2_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_2_kernel_size'],
                 stride=self.agentConfiguration['layer_2_stride'],
                 dilation=self.agentConfiguration['layer_2_dilation'],
                 padding=self.agentConfiguration['layer_2_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['inner_kernels']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_2_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['inner_kernels'], 
-                out_channels=self.agentConfiguration['peak_inner_kernels'], 
+                in_channels=self.agentConfiguration['layer_2_num_kernels'],
+                out_channels=self.agentConfiguration['layer_3_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_3_kernel_size'],
                 stride=self.agentConfiguration['layer_3_stride'],
                 dilation=self.agentConfiguration['layer_3_dilation'],
                 padding=self.agentConfiguration['layer_3_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['peak_inner_kernels']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_3_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['peak_inner_kernels'], 
-                out_channels=self.agentConfiguration['inner_kernels'], 
+                in_channels=self.agentConfiguration['layer_3_num_kernels'],
+                out_channels=self.agentConfiguration['layer_4_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_4_kernel_size'],
                 stride=self.agentConfiguration['layer_4_stride'],
                 dilation=self.agentConfiguration['layer_4_dilation'],
                 padding=self.agentConfiguration['layer_4_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['inner_kernels']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_4_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['inner_kernels'], 
-                out_channels=self.agentConfiguration['pixel_features'], 
+                in_channels=self.agentConfiguration['layer_4_num_kernels'],
+                out_channels=self.agentConfiguration['pixel_features'],
                 kernel_size=self.agentConfiguration['layer_5_kernel_size'],
                 stride=self.agentConfiguration['layer_5_stride'],
                 dilation=self.agentConfiguration['layer_5_dilation'],
