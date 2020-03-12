@@ -467,11 +467,11 @@ class DeepLearningAgent(BaseAgent):
 
             targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
 
-        tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).mean()
+        tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).abs().mean()
 
-        predictedExecutionFeaturesLoss = (predictedExecutionFeatures - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).mean()
+        predictedExecutionFeaturesLoss = (predictedExecutionFeatures - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).abs().mean()
 
-        predictedCursorLoss = (predictedCursors - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).mean()
+        predictedCursorLoss = (predictedCursors - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).abs().mean()
 
         totalRewardLoss = torch.mean(torch.cat(totalRewardLosses))
         presentRewardLoss = torch.mean(torch.cat(presentRewardLosses))
