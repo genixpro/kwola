@@ -3,6 +3,7 @@ from kwola.models.TrainingSequenceModel import TrainingSequence
 from kwola.models.TestingSequenceModel import TestingSequenceModel
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.models.ExecutionTraceModel import ExecutionTrace
+from kwola.models.TrainingStepModel import TrainingStep
 from mongoengine import connect
 
 connect('kwola')
@@ -13,5 +14,6 @@ def main():
     TestingSequenceModel.objects().delete()
     ExecutionSession.objects().delete()
     ExecutionTrace.objects().delete()
+    TrainingStep.objects().delete()
 
     print("Kwola Mongo database is now cleared")

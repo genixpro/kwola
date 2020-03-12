@@ -22,6 +22,22 @@ const routes = [
   {
     path: 'testing_sequences/:id',
     component: lazy(() => import('../ViewTestingSequence')),
+  },
+  {
+    path: 'training_sequences/:id',
+    component: lazy(() => import('../ViewTrainingSequence')),
+  },
+  {
+    path: 'training_steps/:id',
+    component: lazy(() => import('../ViewTrainingStep')),
+  },
+  {
+    path: 'execution_sessions/:id',
+    component: lazy(() => import('../ViewExecutionSession')),
+  },
+  {
+    path: 'execution_traces/:id',
+    component: lazy(() => import('../ViewExecutionTrace')),
   }
 ];
 

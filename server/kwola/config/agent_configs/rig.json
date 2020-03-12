@@ -64,7 +64,7 @@
   "reward_url_changed": 1e-3,
   "testing_sequence_length": 150,
   "testing_sequences_per_training_step": 1,
-  "total_training_steps_needed": 1000,
+  "training_steps_needed": 1000,
   "training_max_main_process_workers": 12,
   "training_max_main_thread_workers": 12,
   "training_precompute_sessions_count": 15,

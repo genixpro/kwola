@@ -4,9 +4,18 @@ import axios from "axios";
 // worker Saga: will be fired on USER_FETCH_REQUESTED actions
 function* fetchTrainingSequence(action) {
     try {
-        const response = yield axios.get(`/api/trainng_sequences/${action._id}`);
+        const response = yield axios.get(`/api/training_sequences/${action._id}`);
 
-        yield put({type: "TRAINING_SEQUENCE_SUCCESS_RESULT", trainngSequence: response.data.trainngSequence});
+        const testingSequencesResponse = yield axios.get(`/api/testing_sequences`);
+
+        const trainingStepsResponse = yield axios.get(`/api/training_steps`);
+
+        yield put({
+            type: "TRAINING_SEQUENCE_SUCCESS_RESULT",
+            trainingSequence: response.data.trainingSequence,
+            testingSequences: testingSequencesResponse.data.testingSequences,
+            trainingSteps: trainingStepsResponse.data.trainingSteps
+        });
 
     } catch (e) {
         yield put({type: "TRAINING_SEQUENCE_ERROR_RESULT", message: e.message});

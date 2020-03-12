@@ -5,6 +5,10 @@ import LanguageSwitcher from './languageSwitcher/reducer';
 import ListApplications from './ListApplications/reducers';
 import ViewApplication from './ViewApplication/reducers';
 import ViewTestingSequence from './ViewTestingSequence/reducers';
+import ViewTrainingSequence from './ViewTrainingSequence/reducers';
+import ViewTrainingStep from './ViewTrainingStep/reducers';
+import ViewExecutionSession from './ViewExecutionSession/reducers';
+import ViewExecutionTrace from './ViewExecutionTrace/reducers';
 
 export default {
   Auth,
@@ -13,5 +17,9 @@ export default {
   LanguageSwitcher,
   ListApplications,
   ViewApplication,
-  ViewTestingSequence
+  ViewTestingSequence,
+  ViewTrainingSequence,
+  ViewTrainingStep,
+  ViewExecutionSession,
+  ViewExecutionTrace
 };

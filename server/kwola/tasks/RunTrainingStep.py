@@ -104,6 +104,7 @@ def runTrainingStep(trainingSequenceId):
 
     trainingStep = TrainingStep()
     trainingStep.startTime = datetime.now()
+    trainingStep.trainingSequenceId = trainingSequenceId
     trainingStep.status = "running"
     trainingStep.numberOfIterationsCompleted = 0
     trainingStep.presentRewardLosses = []

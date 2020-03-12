@@ -7,11 +7,11 @@ const actions = {
         type: actions.TRAINING_SEQUENCE_REQUEST,
         _id: id
     }),
-    trainngSequenceSuccess: (trainngSequence) => ({
+    trainingSequenceSuccess: (trainingSequence) => ({
         type: actions.TRAINING_SEQUENCE_SUCCESS_RESULT,
-        trainngSequence
+        trainingSequence,
     }),
-    trainngSequenceError: () => ({
+    trainingSequenceError: () => ({
         type: actions.TRAINING_SEQUENCE_ERROR_RESULT
     }),
 };

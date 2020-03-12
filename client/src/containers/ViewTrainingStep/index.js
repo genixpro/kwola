@@ -7,7 +7,7 @@ import PageTitle from '../../components/utility/paperTitle';
 import Papersheet, { DemoWrapper } from '../../components/utility/papersheet';
 import { FullColumn , HalfColumn, OneThirdColumn, TwoThirdColumn, Row, Column} from '../../components/utility/rowColumn';
 import {withStyles} from "@material-ui/core";
-import action from "../../redux/ViewTestingSequence/actions";
+import action from "../../redux/ViewTrainingStep/actions";
 import {store} from "../../redux/store";
 import SingleCard from '../Shuffle/singleCard.js';
 import BoxCard from '../../components/boxCard';
@@ -17,78 +17,77 @@ import ActionButton from "../../components/mail/singleMail/actionButton";
 import {Button} from "../UiElements/Button/button.style";
 import Icon from "../../components/uielements/icon";
 import moment from 'moment';
+import _ from "underscore";
 import {Chip, Wrapper} from "../UiElements/Chips/chips.style";
 import Avatar from "../../components/uielements/avatars";
 import {Table} from "../ListApplications/materialUiTables.style";
 import {TableBody, TableCell, TableHead, TableRow} from "../../components/uielements/table";
+import { Line } from "react-chartjs-2";
 
-class ViewTestingSequence extends Component {
+class ViewTrainingStep extends Component {
     state = {
         result: '',
     };
 
     componentDidMount() {
-        store.dispatch(action.requestTestingSequence(this.props.match.params.id));
+        store.dispatch(action.requestTrainingStep(this.props.match.params.id));
     }
 
-    // launchTestingSequenceButtonClicked() {
-    //     store.dispatch(action.requestNewTestingSequence(this.props.match.params.id));
-    // }
 
     render() {
         const { result } = this.state;
+
         return (
-            this.props.testingSequence ?
+            this.props.trainingStep ?
                 <LayoutWrapper>
                     <FullColumn>
                         <Row>
                             <HalfColumn>
-                                <SingleCard src={Img7} grid/>
+                                <Papersheet>
+
+                                </Papersheet>
                             </HalfColumn>
 
                             <HalfColumn>
                                 <Papersheet
-                                    title={`Testing Sequence ${this.props.testingSequence._id.$oid}`}
-                                    subtitle={`Last Tested ${moment(this.props.timestamp).format('MMM Do, YYYY')}`}
+                                    title={`Training Step ${this.props.trainingStep._id.$oid}`}
+                                    // subtitle={}
                                 >
+                                    <span>Status: {this.props.trainingStep.status}<br/></span>
 
-                                    AWESOME!!!
+                                    <span>Start Time: {moment(this.props.trainingStep.startTime).format('MMM Do, YYYY')}<br/></span>
 
+                                    {
+                                        this.props.trainingStep.endTime ?
+                                            <span>End Time: {moment(this.props.trainingStep.endTime).format('MMM Do, YYYY')}<br/></span>
+                                            : <span>End Time: N/A<br/></span>
+                                    }
                                 </Papersheet>
-
-
                             </HalfColumn>
                         </Row>
+
                         <Row>
                             <FullColumn>
-                                <Papersheet title={"Bug"}>
-
-
+                                <Papersheet title={"Execution Sessions"}>
                                     <Table>
                                         <TableHead>
                                             <TableRow>
-                                                <TableCell>ID</TableCell>
-                                                <TableCell>Status</TableCell>
                                                 <TableCell>Test Start Time</TableCell>
-                                                <TableCell>Bug Found</TableCell>
+                                                <TableCell>Total Reward</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-
-                                            {(this.props.executionSessions || []).map(session => {
+                                            {(this.props.executionSessions || []).map(executionSession => {
                                                 return (
-                                                    <TableRow key={session._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/execution_sessions/${session._id.$oid}`)}>
-                                                        <TableCell>{session._id.$oid}</TableCell>
-                                                        <TableCell>{session.status}</TableCell>
-                                                        <TableCell>{session.startDate}</TableCell>
-                                                        <TableCell>{session.bugsFound}</TableCell>
+                                                    <TableRow key={executionSession._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/execution_sessions/${executionSession._id.$oid}`)} >
+                                                        <TableCell>{executionSession.startTime ? moment(new Date(executionSession.startTime.$date)).format('HH:mm MMM Do') : null}</TableCell>
+                                                        <TableCell>{executionSession.totalReward}</TableCell>
                                                     </TableRow>
                                                 );
                                             })}
                                         </TableBody>
                                     </Table>
                                 </Papersheet>
-
                             </FullColumn>
                         </Row>
 
@@ -100,6 +99,6 @@ class ViewTestingSequence extends Component {
     }
 }
 
-const mapStateToProps = (state) => {return { ...state.ViewTestingSequence} };
-export default connect(mapStateToProps)(ViewTestingSequence);
+const mapStateToProps = (state) => {return { ...state.ViewTrainingStep} };
+export default connect(mapStateToProps)(ViewTrainingStep);
 

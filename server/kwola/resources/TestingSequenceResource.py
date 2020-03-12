@@ -5,7 +5,7 @@ from flask_jwt_extended import (create_access_token, create_refresh_token,
 from ..models.TestingSequenceModel import TestingSequenceModel
 from ..tasks.RunTestingSequence import runTestingSequence
 import json
-
+import bson
 
 class TestingSequencesGroup(Resource):
     def __init__(self):
@@ -52,7 +52,7 @@ class TestingSequencesSingle(Resource):
         self.postParser.add_argument('status', help='This field cannot be blank', required=True)
 
     def get(self, testing_sequence_id):
-        testingSequence = TestingSequenceModel.objects(id=testing_sequence_id).limit(1)[0].to_json()
+        testingSequence = TestingSequenceModel.objects(id=bson.ObjectId(testing_sequence_id)).limit(1)[0].to_json()
 
         return {"testingSequence": json.loads(testingSequence)}
 

@@ -243,7 +243,7 @@ class DeepLearningAgent(BaseAgent):
         frames = []
 
         videoPath = config.getKwolaUserDataDirectory("videos")
-        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(testingSequence.id)}-{executionSession.tabNumber}.mp4'))
+        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(executionSession.id)}.mp4'))
 
         while (cap.isOpened()):
             ret, frame = cap.read()

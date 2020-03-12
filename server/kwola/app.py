@@ -15,8 +15,10 @@ CORS(app)
 # import models
 from .resources.ApplicationResource import ApplicationGroup, ApplicationSingle
 from .resources.TestingSequenceResource import TestingSequencesGroup, TestingSequencesSingle
-from .resources.ExecutionSessionResource import ExecutionSessionGroup, ExecutionSessionSingle
+from .resources.ExecutionSessionResource import ExecutionSessionGroup, ExecutionSessionSingle, ExecutionSessionVideo
+from .resources.ExecutionTraceResource import ExecutionTraceGroup, ExecutionTraceSingle
 from .resources.TrainingSequenceResource import TrainingSequencesGroup, TrainingSequencesSingle
+from .resources.TrainingStepResources import TrainingStepGroup, TrainingStepSingle
 
 api.add_resource(ApplicationGroup, '/api/application')
 api.add_resource(ApplicationSingle, '/api/application/<string:application_id>')
@@ -32,6 +34,15 @@ api.add_resource(TrainingSequencesSingle, '/api/training_sequences/<string:train
 
 api.add_resource(ExecutionSessionGroup, '/api/execution_sessions')
 api.add_resource(ExecutionSessionSingle, '/api/execution_sessions/<string:execution_session_id>')
+api.add_resource(ExecutionSessionVideo, '/api/execution_sessions/<string:execution_session_id>/video')
+
+
+api.add_resource(ExecutionTraceGroup, '/api/execution_traces')
+api.add_resource(ExecutionTraceSingle, '/api/execution_traces/<string:execution_trace_id>')
+
+
+api.add_resource(TrainingStepGroup, '/api/training_steps')
+api.add_resource(TrainingStepSingle, '/api/training_steps/<string:training_step_id>')
 
 
 # api.add_resource(resources.TokenRefresh, '/refresh')

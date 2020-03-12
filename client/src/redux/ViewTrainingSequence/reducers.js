@@ -2,7 +2,8 @@ import actions from './actions';
 
 const initState = {
     application: null,
-    trainngSequences: [],
+    trainingSequences: [],
+    trainingSteps: [],
     loading: false,
     error: false
 };
@@ -12,7 +13,9 @@ export default function reducer(state = initState, action) {
         case actions.TRAINING_SEQUENCE_REQUEST:
             return {
                 ...state,
-                trainngSequence: null,
+                trainingSequence: null,
+                testingSequences: [],
+                trainingSteps: [],
                 loading: true,
                 error: false
             };
@@ -20,7 +23,9 @@ export default function reducer(state = initState, action) {
         case actions.TRAINING_SEQUENCE_SUCCESS_RESULT:
             return {
                 ...state,
-                trainngSequence: action.trainngSequence,
+                trainingSequence: action.trainingSequence,
+                testingSequences: action.testingSequences,
+                trainingSteps: action.trainingSteps,
                 loading: false,
                 error: false
             };
@@ -28,7 +33,9 @@ export default function reducer(state = initState, action) {
         case actions.TRAINING_SEQUENCE_ERROR_RESULT:
             return {
                 ...state,
-                trainngSequence: null,
+                trainingSequence: null,
+                testingSequences: [],
+                trainingSteps: [],
                 loading: false,
                 error: true
             };

@@ -76,22 +76,24 @@ class ViewTrainingSequence extends Component {
                     <FullColumn>
                         <Row>
                             <HalfColumn>
-                                <Line data={this.getConfigurationForHeaderChart()} />
+                                <Papersheet>
+                                    <Line data={this.getConfigurationForHeaderChart()} />
+                                </Papersheet>
                             </HalfColumn>
 
                             <HalfColumn>
                                 <Papersheet
-                                    title={`${this.props.trainingSequence._id.$oid}`}
-                                    subtitle={}
+                                    title={`Training Sequence ${this.props.trainingSequence._id.$oid}`}
+                                    // subtitle={}
                                 >
-                                    <span>Status: {this.props.trainingSequence.status}</span>
+                                    <span>Status: {this.props.trainingSequence.status}<br/></span>
 
-                                    <span>Start Time: {moment(this.props.trainingSequence.startTime).format('MMM Do, YYYY')}</span>
+                                    <span>Start Time: {moment(this.props.trainingSequence.startTime).format('MMM Do, YYYY')}<br/></span>
 
                                     {
                                         this.props.trainingSequence.endTime ?
-                                            <span>End Time: {moment(this.props.trainingSequence.endTime).format('MMM Do, YYYY')}</span>
-                                            : <span>End Time: N/A</span>
+                                            <span>End Time: {moment(this.props.trainingSequence.endTime).format('MMM Do, YYYY')}<br/></span>
+                                            : <span>End Time: N/A<br/></span>
                                     }
                                 </Papersheet>
                             </HalfColumn>
@@ -103,19 +105,17 @@ class ViewTrainingSequence extends Component {
                                     <Table>
                                         <TableHead>
                                             <TableRow>
-                                                <TableCell>ID</TableCell>
-                                                <TableCell>Status</TableCell>
                                                 <TableCell>Test Start Time</TableCell>
+                                                <TableCell>Status</TableCell>
                                                 <TableCell>Average Reward</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
                                             {(this.props.testingSequences || []).map(testingSequence => {
                                                 return (
-                                                    <TableRow key={testingSequence._id.$oid} hover={true}>
-                                                        <TableCell>{testingSequence._id.$oid}</TableCell>
+                                                    <TableRow key={testingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/testing_sequences/${testingSequence._id.$oid}`)}>
+                                                        <TableCell>{testingSequence.startTime ? moment(new Date(testingSequence.startTime.$date)).format('HH:mm MMM Do') : null}</TableCell>
                                                         <TableCell>{testingSequence.status}</TableCell>
-                                                        <TableCell>{testingSequence.startDate}</TableCell>
                                                         <TableCell>{testingSequence.averageReward}</TableCell>
                                                     </TableRow>
                                                 );
@@ -129,21 +129,18 @@ class ViewTrainingSequence extends Component {
                                     <Table>
                                         <TableHead>
                                             <TableRow>
-                                                <TableCell>ID</TableCell>
                                                 <TableCell>Status</TableCell>
                                                 <TableCell>Step Start Time</TableCell>
                                                 <TableCell>Average Loss</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-
-                                            {(this.props.trainingSteps || []).map(session => {
+                                            {(this.props.trainingSteps || []).map(trainingStep => {
                                                 return (
-                                                    <TableRow key={session._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/execution_sessions/${session._id.$oid}`)}>
-                                                        <TableCell>{session._id.$oid}</TableCell>
-                                                        <TableCell>{session.status}</TableCell>
-                                                        <TableCell>{session.startDate}</TableCell>
-                                                        <TableCell>{session.averageLoss}</TableCell>
+                                                    <TableRow key={trainingStep._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/training_steps/${trainingStep._id.$oid}`)}>
+                                                        <TableCell>{trainingStep.startTime ? moment(new Date(trainingStep.startTime.$date)).format('HH:mm MMM Do') : null}</TableCell>
+                                                        <TableCell>{trainingStep.status}</TableCell>
+                                                        <TableCell>{trainingStep.averageLoss}</TableCell>
                                                     </TableRow>
                                                 );
                                             })}

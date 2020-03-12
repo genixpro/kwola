@@ -8,6 +8,8 @@ from .errors.BaseError import BaseError
 class TrainingStep(Document):
     applicationId = StringField()
 
+    trainingSequenceId = StringField()
+
     status = StringField()
 
     numberOfIterationsCompleted = IntField()

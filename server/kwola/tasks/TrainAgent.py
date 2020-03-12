@@ -108,7 +108,7 @@ def runMainTrainingLoop(trainingSequence):
 
     stepStartTime = datetime.datetime.now()
 
-    while stepsCompleted < agentConfig['total_training_steps_needed']:
+    while stepsCompleted < agentConfig['training_steps_needed']:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = []
 

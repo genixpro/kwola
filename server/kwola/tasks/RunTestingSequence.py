@@ -34,9 +34,18 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         returnValue = {"testingSequenceId": str(testSequence.id)}
 
         executionSessions = [
-            ExecutionSession(startTime=datetime.now(), endTime=None, tabNumber=sessionN, executionTraces=[])
+            ExecutionSession(
+                testingSequenceId=str(testingSequenceId),
+                startTime=datetime.now(),
+                endTime=None,
+                tabNumber=sessionN,
+                executionTraces=[]
+            )
             for sessionN in range(environment.numberParallelSessions())
         ]
+
+        for session in executionSessions:
+            session.save()
 
         errorHashes = set()
         uniqueErrors = []
@@ -55,7 +64,9 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
             actions = agent.nextBestActions()
 
             traces = environment.runActions(actions)
-            for sessionN, trace in enumerate(traces):
+            for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
+                trace.executionSessionId = str(executionSession.id)
+                trace.testingSequenceId = str(testingSequenceId)
                 trace.save()
 
                 executionSessions[sessionN].executionTraces.append(trace)
@@ -73,10 +84,13 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
 
         kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
 
-        for sessionN, videoPath in enumerate(videoPaths):
+        for sessionN, videoPath, executionSession in zip(range(len(videoPaths)), videoPaths, executionSessions):
             with open(videoPath, 'rb') as origFile:
-                with open(os.path.join(kwolaVideoDirectory, f'{str(testSequence.id)}-{sessionN}.mp4'), "wb") as cloneFile:
+                with open(os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
                     cloneFile.write(origFile.read())
+
+        for session in executionSessions:
+            session.save()
 
         testSequence.bugsFound = len(uniqueErrors)
         testSequence.errors = uniqueErrors
@@ -84,9 +98,6 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         testSequence.status = "completed"
 
         testSequence.endTime = datetime.now()
-
-        for session in executionSessions:
-            session.save()
 
         testSequence.executionSessions = executionSessions
         testSequence.save()

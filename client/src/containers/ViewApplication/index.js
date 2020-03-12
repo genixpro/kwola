@@ -110,7 +110,7 @@ class ViewApplication extends Component {
                                                         <TableRow key={testingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/testing_sequences/${testingSequence._id.$oid}`)}>
                                                             <TableCell>{testingSequence._id.$oid}</TableCell>
                                                             <TableCell>{testingSequence.status}</TableCell>
-                                                            <TableCell>{testingSequence.startDate}</TableCell>
+                                                            <TableCell>{moment(testingSequence.startTime).format('HH:mm MMM Do')}</TableCell>
                                                             {/*<TableCell>{testingSequence.endDate}</TableCell>*/}
                                                             <TableCell>{testingSequence.bugsFound}</TableCell>
                                                         </TableRow>
@@ -141,10 +141,10 @@ class ViewApplication extends Component {
 
                                                 {(this.props.trainingSequences || []).map(trainingSequence => {
                                                     return (
-                                                        <TableRow key={trainingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/testing_sequences/${trainingSequence._id.$oid}`)}>
+                                                        <TableRow key={trainingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/training_sequences/${trainingSequence._id.$oid}`)}>
                                                             <TableCell>{trainingSequence._id.$oid}</TableCell>
                                                             <TableCell>{trainingSequence.status}</TableCell>
-                                                            <TableCell>{trainingSequence.startTime}</TableCell>
+                                                            <TableCell>{moment(trainingSequence.startTime).format('HH:mm MMM Do')}</TableCell>
                                                         </TableRow>
                                                     );
                                                 })}

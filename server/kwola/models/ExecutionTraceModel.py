@@ -7,6 +7,10 @@ import numpy
 class ExecutionTrace(Document):
     time = DateField()
 
+    executionSessionId = StringField()
+
+    testingSequenceId = StringField()
+
     actionPerformed = EmbeddedDocumentField(BaseAction)
 
     errorsDetected = EmbeddedDocumentListField(BaseError)

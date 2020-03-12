@@ -2,11 +2,12 @@ from flask_restful import Resource, reqparse
 from flask_jwt_extended import (create_access_token, create_refresh_token,
                                 jwt_required, jwt_refresh_token_required, get_jwt_identity, get_raw_jwt)
 
-from ..models.TrainingSequenceModel import TrainingSequence
+from ..models.TrainingStepModel import TrainingStep
 import json
+import math
 
 
-class TrainingSequencesGroup(Resource):
+class TrainingStepGroup(Resource):
     def __init__(self):
         self.postParser = reqparse.RequestParser()
         # self.postParser.add_argument('version', help='This field cannot be blank', required=False)
@@ -16,15 +17,21 @@ class TrainingSequencesGroup(Resource):
         # self.postParser.add_argument('status', help='This field cannot be blank', required=False)
 
     def get(self):
-        trainingSequences = TrainingSequence.objects().order_by("-startTime").to_json()
+        trainingSteps = TrainingStep.objects().order_by("-startTime").only("startTime", "id", "status", "averageLoss")
 
-        return {"trainingSequences": json.loads(trainingSequences)}
+        for trainingStep in trainingSteps:
+            if trainingStep.averageLoss is not None and math.isnan(trainingStep.averageLoss):
+                trainingStep.averageLoss = None
+                trainingStep.save()
+                print("Got an unexpected nan!")
+
+        return {"trainingSteps": json.loads(trainingSteps.to_json())}
 
 
 
 
 
-class TrainingSequencesSingle(Resource):
+class TrainingStepSingle(Resource):
     def __init__(self):
         self.postParser = reqparse.RequestParser()
         # self.postParser.add_argument('version', help='This field cannot be blank', required=True)
@@ -33,8 +40,8 @@ class TrainingSequencesSingle(Resource):
         # self.postParser.add_argument('bugsFound', help='This field cannot be blank', required=True)
         # self.postParser.add_argument('status', help='This field cannot be blank', required=True)
 
-    def get(self, training_sequence_id):
-        trainingSequence = TrainingSequence.objects(id=training_sequence_id).limit(1)[0].to_json()
+    def get(self, training_step_id):
+        trainingStep = TrainingStep.objects(id=training_step_id).limit(1)[0]
 
-        return {"trainingSequence": json.loads(trainingSequence)}
+        return {"trainingStep": json.loads(trainingStep.to_json())}
 

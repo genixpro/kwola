@@ -18,6 +18,7 @@ import tempfile
 import subprocess
 import os
 import os.path
+from datetime import datetime
 import hashlib
 import cv2
 import numpy
@@ -168,6 +169,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
     def runAction(self, action):
         executionTrace = ExecutionTrace()
+        executionTrace.time = datetime.now()
         executionTrace.actionPerformed = action
         executionTrace.errorsDetected = []
         executionTrace.startURL = self.driver.current_url
