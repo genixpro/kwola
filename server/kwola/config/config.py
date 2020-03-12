@@ -2,7 +2,9 @@ import os
 
 import os.path
 
+import json
 
+config_name = "laptop"
 
 def getKwolaUserDataDirectory(subDirName):
     """
@@ -21,4 +23,35 @@ def getKwolaUserDataDirectory(subDirName):
         os.mkdir(subDirectory)
 
     return subDirectory
+
+
+
+
+def getAgentConfiguration():
+    """
+        This function returns the configuration for the core machine learning model of the agent.
+
+        :return:
+    """
+
+    modelConfig = json.load(open(f"kwola/config/agent_configs/{config_name}.json"))
+
+    return modelConfig
+
+
+
+
+
+def getEnvironmentConfiguration():
+    """
+        This function returns the configuration for the core machine learning model of the agent.
+
+        :return:
+    """
+
+    modelConfig = json.load(open(f"kwola/config/environment_configs/{config_name}.json"))
+
+    return modelConfig
+
+
 

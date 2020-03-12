@@ -2,25 +2,29 @@ from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
+from kwola.models.TrainingStepModel import TrainingStep
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.config.config import getKwolaUserDataDirectory
+from kwola.components.TaskProcess import TaskProcess
 import concurrent.futures
 import random
 import numpy
 import gzip
 from datetime import datetime
 import traceback
+import json
 import bson
 import tempfile
 import pickle
 import os
+from kwola.config import config
 
 def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, batchDirectory):
     testSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequenceId)).first()
     executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
 
-    agent = DeepLearningAgent()
+    agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu=None)
 
     sequenceBatches = agent.prepareBatchesForExecutionSession(testSequence, executionSession)
 
@@ -63,7 +67,32 @@ def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
     return list(batches)
 
 
-def runTrainingStep():
+def printMovingAverageLosses(trainingStep):
+    agentConfig = config.getAgentConfiguration()
+    movingAverageLength = int(agentConfig['print_loss_moving_average_length'])
+
+    averageTotalRewardLoss = numpy.mean(trainingStep.totalRewardLosses[-movingAverageLength:])
+    averagePresentRewardLoss = numpy.mean(trainingStep.presentRewardLosses[-movingAverageLength:])
+    averageDiscountedFutureRewardLoss = numpy.mean(trainingStep.discountedFutureRewardLosses[-movingAverageLength:])
+    averageTracePredictionLoss = numpy.mean(trainingStep.tracePredictionLosses[-movingAverageLength:])
+    averageExecutionFeatureLoss = numpy.mean(trainingStep.executionFeaturesLosses[-movingAverageLength:])
+    averageTargetHomogenizationLoss = numpy.mean(trainingStep.targetHomogenizationLosses[-movingAverageLength:])
+    averagePredictedCursorLoss = numpy.mean(trainingStep.predictedCursorLosses[-movingAverageLength:])
+    averageTotalLoss = numpy.mean(trainingStep.totalLosses[-movingAverageLength:])
+    averageTotalRebalancedLoss = numpy.mean(trainingStep.totalRebalancedLosses[-movingAverageLength:])
+
+    print("Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
+    print("Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
+    print("Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
+    print("Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
+    print("Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
+    print("Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
+    print("Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
+    print("Moving Average Total Loss:", averageTotalLoss, flush=True)
+    print("Moving Average Total Rebalanced Loss:", averageTotalRebalancedLoss, flush=True)
+
+
+def runTrainingStep(trainingSequenceId):
     print("Starting Training Step", flush=True)
     testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(25))
     if len(testSequences) == 0:
@@ -71,14 +100,31 @@ def runTrainingStep():
         print("==== Training Step Completed ====", flush=True)
         return
 
+    agentConfig = config.getAgentConfiguration()
+
+    trainingStep = TrainingStep()
+    trainingStep.startTime = datetime.now()
+    trainingStep.status = "running"
+    trainingStep.numberOfIterationsCompleted = 0
+    trainingStep.presentRewardLosses = []
+    trainingStep.discountedFutureRewardLosses = []
+    trainingStep.tracePredictionLosses = []
+    trainingStep.executionFeaturesLosses = []
+    trainingStep.targetHomogenizationLosses = []
+    trainingStep.predictedCursorLosses = []
+    trainingStep.totalRewardLosses = []
+    trainingStep.totalLosses = []
+    trainingStep.totalRebalancedLosses = []
+    trainingStep.save()
+
     executionSessions = []
     for testSequence in testSequences:
         for session in testSequence.executionSessions:
             executionSessions.append((str(testSequence.id), str(session.id)))
 
-    environment = WebEnvironment(numberParallelSessions=1)
+    environment = WebEnvironment(environmentConfiguration=config.getEnvironmentConfiguration())
 
-    agent = DeepLearningAgent()
+    agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all")
     agent.initialize(environment)
     agent.load()
 
@@ -94,25 +140,14 @@ def runTrainingStep():
 
     try:
         batchFutures = []
-        totalRewardLosses = []
-        presentRewardLosses = []
-        discountedFutureRewardLosses = []
-        tracePredictionLosses = []
-        executionFeaturesLosses = []
-        targetHomogenizationLosses = []
-        predictedCursorLosses = []
-        totalLosses = []
-        iterationsCompleted = 0
-        iterationsNeeded = 500
-        precomputeExecutionSessionsCount = 15 # Note each execution session produces multiple batches and thus multiple iterations
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=12) as processExecutor:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as threadExecutor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
                 # First we chuck some sequence requests into the queue into the queue
-                for n in range(precomputeExecutionSessionsCount):
+                for n in range(agentConfig['training_precompute_sessions_count']):
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
 
-                while iterationsCompleted < iterationsNeeded:
+                while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
                     # Wait on the first future in the list to finish
                     batches = batchFutures.pop(0).result()
 
@@ -124,40 +159,32 @@ def runTrainingStep():
                     for batch in batches:
                         totalReward = 0
 
-                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, batchReward = agent.learnFromBatch(batch)
+                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward = agent.learnFromBatch(batch)
 
-                        totalRewardLosses.append(totalRewardLoss)
-                        presentRewardLosses.append(presentRewardLoss)
-                        discountedFutureRewardLosses.append(discountedFutureRewardLoss)
-                        tracePredictionLosses.append(tracePredictionLoss)
-                        executionFeaturesLosses.append(executionFeaturesLoss)
-                        targetHomogenizationLosses.append(targetHomogenizationLoss)
-                        predictedCursorLosses.append(predictedCursorLoss)
-                        totalLosses.append(totalLoss)
+                        trainingStep.presentRewardLosses.append(presentRewardLoss)
+                        trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
+                        trainingStep.tracePredictionLosses.append(tracePredictionLoss)
+                        trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
+                        trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
+                        trainingStep.predictedCursorLosses.append(predictedCursorLoss)
+                        trainingStep.totalRewardLosses.append(totalRewardLoss)
+                        trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
+                        trainingStep.totalLosses.append(totalLoss)
                         totalReward += batchReward
-                        iterationsCompleted += 1
+                        trainingStep.numberOfIterationsCompleted += 1
 
-                        print("Completed", iterationsCompleted, "batches", flush=True)
+                        if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
+                            print("Completed", trainingStep.numberOfIterationsCompleted, "batches", flush=True)
+                            printMovingAverageLosses(trainingStep)
 
-                    averageTotalRewardLoss = numpy.mean(totalRewardLosses[-25:])
-                    averagePresentRewardLoss = numpy.mean(presentRewardLosses[-25:])
-                    averageDiscountedFutureRewardLoss = numpy.mean(discountedFutureRewardLosses[-25:])
-                    averageTracePredictionLoss = numpy.mean(tracePredictionLosses[-25:])
-                    averageExecutionFeatureLoss = numpy.mean(executionFeaturesLosses[-25:])
-                    averageTargetHomogenizationLoss = numpy.mean(targetHomogenizationLosses[-25:])
-                    averagePredictedCursorLoss = numpy.mean(predictedCursorLosses[-25:])
-                    averageTotalLoss = numpy.mean(totalLosses[-25:])
+                        if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
+                            trainingStep.save()
 
-                    # print(testingSequence.id)
-                    # print("Total Reward", float(totalReward))
-                    print("Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
-                    print("Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
-                    print("Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
-                    print("Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
-                    print("Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
-                    print("Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
-                    print("Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
-                    print("Moving Average Total Loss:", averageTotalLoss, flush=True)
+        trainingStep.endTime = datetime.now()
+        trainingStep.averageTimePerIteration = (trainingStep.endTime - trainingStep.startTime).total_seconds() / trainingStep.numberOfIterationsCompleted
+        trainingStep.averageLoss = float(numpy.mean(trainingStep.totalLosses))
+        trainingStep.status = "completed"
+        trainingStep.save()
 
         agent.save()
         print("Agent saved!", flush=True)
@@ -175,15 +202,15 @@ def runTrainingStep():
 
     # This print statement will trigger the parent manager process to kill this process.
     print("==== Training Step Completed ====", flush=True)
-    return ""
+    return {"trainingStepId": str(trainingStep.id)}
 
 
 @app.task
-def runTrainingStepTask():
-    runTrainingStep()
+def runTrainingStepTask(trainingSequenceId):
+    runTrainingStep(trainingSequenceId)
 
 
 
 if __name__ == "__main__":
-    runTrainingStep()
-
+    task = TaskProcess(runTrainingStep)
+    task.run()

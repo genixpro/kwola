@@ -19,6 +19,10 @@ const routes = [
     path: 'applications/:id',
     component: lazy(() => import('../ViewApplication')),
   },
+  {
+    path: 'testing_sequences/:id',
+    component: lazy(() => import('../ViewTestingSequence')),
+  }
 ];
 
 class AppRouter extends Component {

@@ -16,12 +16,12 @@ class TestingSequencesGroup(Resource):
         self.postParser.add_argument('bugsFound', help='This field cannot be blank', required=False)
         self.postParser.add_argument('status', help='This field cannot be blank', required=False)
 
-    def get(self, application_id):
-        testingSequences = TestingSequenceModel.objects().to_json()
+    def get(self):
+        testingSequences = TestingSequenceModel.objects().order_by("-startTime").to_json()
 
-        return {"testing_sequences": json.loads(testingSequences)}
+        return {"testingSequences": json.loads(testingSequences)}
 
-    def post(self, application_id):
+    def post(self):
         data = self.postParser.parse_args()
 
 
@@ -51,7 +51,8 @@ class TestingSequencesSingle(Resource):
         self.postParser.add_argument('bugsFound', help='This field cannot be blank', required=True)
         self.postParser.add_argument('status', help='This field cannot be blank', required=True)
 
-    def get(self, application_id, testing_sequence_id):
-        application = TestingSequenceModel.objects(id=testing_sequence_id).limit(1)[0].to_json()
+    def get(self, testing_sequence_id):
+        testingSequence = TestingSequenceModel.objects(id=testing_sequence_id).limit(1)[0].to_json()
 
-        return json.loads(application)
+        return {"testingSequence": json.loads(testingSequence)}
+

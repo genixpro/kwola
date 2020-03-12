@@ -37,8 +37,8 @@ class WebEnvironmentSession(BaseEnvironment):
 
 
         chrome_options = Options()
-        chrome_options.headless = True
-        # chrome_options.headless = False
+        # chrome_options.headless = True
+        chrome_options.headless = False
 
         capabilities = webdriver.DesiredCapabilities.CHROME
         capabilities['loggingPrefs'] = {'browser': 'ALL'}

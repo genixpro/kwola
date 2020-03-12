@@ -44,12 +44,11 @@ class DeepLearningAgent(BaseAgent):
         This class represents a deep learning agent, which uses reinforcement learning to make the automated testing more effective
     """
 
-    def __init__(self, whichGpu="all"):
+    def __init__(self, agentConfiguration, whichGpu="all"):
         super().__init__()
 
-        self.num_frames = 1400000
-        self.batchSize = 14
-        self.gamma = 0.50
+        self.agentConfiguration = agentConfiguration
+        
         self.whichGpu = whichGpu
         self.variableWrapperFunc = (lambda x:x.cuda()) if whichGpu is not None else (lambda x:x)
 
@@ -94,6 +93,18 @@ class DeepLearningAgent(BaseAgent):
             "zoom-out",
             "none"
         ]
+
+        self.trainingLosses = {
+            "totalRewardLoss": [],
+            "presentRewardLoss": [],
+            "discountedFutureRewardLoss": [],
+            "tracePredictionLoss": [],
+            "predictedExecutionFeaturesLoss": [],
+            "targetHomogenizationLoss": [],
+            "predictedCursorLoss": [],
+            "totalLoss": [],
+            "batchReward": []
+        }
 
     def load(self):
         """
@@ -174,8 +185,8 @@ class DeepLearningAgent(BaseAgent):
             # :param environment:
             :return:
         """
-        epsilon = 0.75
-        if random.random() > epsilon:
+
+        if random.random() > self.agentConfiguration['epsilon']:
             images = self.getImage()
 
             width = images.shape[3]
@@ -205,9 +216,9 @@ class DeepLearningAgent(BaseAgent):
             height = self.environment.screenshotSize()['height']
 
             for n in range(self.environment.numberParallelSessions()):
-                actionType = random.randrange(len(self.actionsSorted))
-                actionX = random.randrange(width)
-                actionY = random.randrange(height)
+                actionType = random.randrange(0, len(self.actionsSorted))
+                actionX = random.randrange(0, width)
+                actionY = random.randrange(0, height)
 
                 actionInfo = (actionType, actionX, actionY)
                 actionInfoList.append(actionInfo)
@@ -252,50 +263,64 @@ class DeepLearningAgent(BaseAgent):
         for trace in executionSession.executionTraces:
             tracePresentReward = 0.0
 
-            if not trace.didActionSucceed:
-                tracePresentReward -= 0.02
+            if trace.didActionSucceed:
+                tracePresentReward += self.agentConfiguration['reward_action_success']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_action_failure']
 
             if trace.didCodeExecute:
-                tracePresentReward += 0.001
+                tracePresentReward += self.agentConfiguration['reward_code_executed']
             else:
-                tracePresentReward -= -0.01
+                tracePresentReward += self.agentConfiguration['reward_no_code_executed']
 
             if trace.didNewBranchesExecute:
-                tracePresentReward += 0.30
+                tracePresentReward += self.agentConfiguration['reward_new_code_executed']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_new_code_executed']
 
             if trace.hadNetworkTraffic:
-                tracePresentReward += 0.001
+                tracePresentReward += self.agentConfiguration['reward_network_traffic']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_network_traffic']
 
             if trace.hadNewNetworkTraffic:
-                tracePresentReward += 0.10
+                tracePresentReward += self.agentConfiguration['reward_new_network_traffic']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_new_network_traffic']
 
             if trace.didScreenshotChange:
-                tracePresentReward += 0.001
+                tracePresentReward += self.agentConfiguration['reward_screenshot_changed']
             else:
-                tracePresentReward -= -0.01
+                tracePresentReward += self.agentConfiguration['reward_no_screenshot_change']
 
             if trace.isScreenshotNew:
-                tracePresentReward += 0.005
+                tracePresentReward += self.agentConfiguration['reward_new_screenshot']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_new_screenshot']
 
             if trace.didURLChange:
-                tracePresentReward += 0.001
+                tracePresentReward += self.agentConfiguration['reward_url_changed']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_url_change']
 
             if trace.isURLNew:
-                tracePresentReward += 0.01
+                tracePresentReward += self.agentConfiguration['reward_new_url']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_new_url']
 
             if trace.hadLogOutput:
-                tracePresentReward += 0.001
+                tracePresentReward += self.agentConfiguration['reward_log_output']
+            else:
+                tracePresentReward += self.agentConfiguration['reward_no_log_output']
 
             presentRewards.append(tracePresentReward)
-
-        discountRate = 0.95
 
         # Now compute the discounted reward
         discountedFutureRewards = []
         presentRewards.reverse()
         current = 0
         for reward in presentRewards:
-            current *= discountRate
+            current *= self.agentConfiguration['reward_discount_rate']
             discountedFutureRewards.append(current)
             current += reward
 
@@ -306,7 +331,7 @@ class DeepLearningAgent(BaseAgent):
         tracesReversed = list(executionSession.executionTraces)
         tracesReversed.reverse()
         currentTrace = numpy.zeros_like(executionSession.executionTraces[0].branchExecutionTrace)
-        executionTraceDiscountRate = 0.90
+        executionTraceDiscountRate = self.agentConfiguration['future_execution_trace_decay_rate']
         executionTraces = []
         for trace in tracesReversed:
             executionTrace = numpy.array(trace.branchExecutionTrace)
@@ -321,7 +346,7 @@ class DeepLearningAgent(BaseAgent):
 
         batches = []
 
-        for batch in grouper(self.batchSize, shuffledTraceFrameList):
+        for batch in grouper(self.agentConfiguration['batch_size'], shuffledTraceFrameList):
             batchFrames = []
             batchAdditionalFeatures = []
             batchActionTypes = []
@@ -419,9 +444,6 @@ class DeepLearningAgent(BaseAgent):
             :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingSequence
             :return:
         """
-        width = batch['frames'][0].shape[2]
-        height = batch['frames'][0].shape[1]
-
         presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures = self.model({
             "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['frames']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
@@ -480,8 +502,25 @@ class DeepLearningAgent(BaseAgent):
 
         totalLoss = totalRewardLoss + tracePredictionLoss + predictedExecutionFeaturesLoss + targetHomogenizationLoss + predictedCursorLoss
 
+        runningAverageRewardLoss = numpy.mean(self.trainingLosses['totalRewardLoss'][-10:])
+        runningAverageTracePredictionLoss = numpy.mean(self.trainingLosses['tracePredictionLoss'][-10:])
+        runningAverageExecutionFeaturesLoss = numpy.mean(self.trainingLosses['predictedExecutionFeaturesLoss'][-10:])
+        runningAverageHomogenizationLoss = numpy.mean(self.trainingLosses['targetHomogenizationLoss'][-10:])
+        runningAveragePredictedCursorLoss = numpy.mean(self.trainingLosses['predictedCursorLoss'][-10:])
+
+        tracePredictionAdustment = (runningAverageRewardLoss / runningAverageTracePredictionLoss) * self.agentConfiguration['loss_ratio_trace_prediction']
+        executionFeaturesAdustment = (runningAverageRewardLoss / runningAverageExecutionFeaturesLoss) * self.agentConfiguration['loss_ratio_execution_features']
+        homogenizationAdustment = (runningAverageRewardLoss / runningAverageHomogenizationLoss) * self.agentConfiguration['loss_ratio_homogenization']
+        predictedCursorAdustment = (runningAverageRewardLoss / runningAveragePredictedCursorLoss) * self.agentConfiguration['loss_ratio_predicted_cursor']
+
+        totalRebalancedLoss = totalRewardLoss + \
+                              tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor([tracePredictionAdustment])) + \
+                              predictedExecutionFeaturesLoss * self.variableWrapperFunc(torch.FloatTensor([executionFeaturesAdustment])) + \
+                              targetHomogenizationLoss * self.variableWrapperFunc(torch.FloatTensor([homogenizationAdustment])) + \
+                              predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor([predictedCursorAdustment]))
+
         self.optimizer.zero_grad()
-        totalLoss.backward()
+        totalRebalancedLoss.backward()
         self.optimizer.step()
 
         totalRewardLoss = float(totalRewardLoss.data.item())
@@ -492,9 +531,20 @@ class DeepLearningAgent(BaseAgent):
         targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
         predictedCursorLoss = float(predictedCursorLoss.data.item())
         totalLoss = float(totalLoss.data.item())
+        totalRebalancedLoss = float(totalRebalancedLoss.data.item())
         batchReward = float(numpy.sum(batch['presentRewards']))
 
-        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, batchReward
+        self.trainingLosses["totalRewardLoss"].append(totalRewardLoss)
+        self.trainingLosses["presentRewardLoss"].append(presentRewardLoss)
+        self.trainingLosses["discountedFutureRewardLoss"].append(discountedFutureRewardLoss)
+        self.trainingLosses["tracePredictionLoss"].append(tracePredictionLoss)
+        self.trainingLosses["predictedExecutionFeaturesLoss"].append(predictedExecutionFeaturesLoss)
+        self.trainingLosses["targetHomogenizationLoss"].append(targetHomogenizationLoss)
+        self.trainingLosses["predictedCursorLoss"].append(predictedCursorLoss)
+        self.trainingLosses["totalLoss"].append(totalLoss)
+        self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
+
+        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward
 
 
 def processRawImageParallel(rawImage):

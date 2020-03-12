@@ -4,6 +4,7 @@ import ThemeSwitcher from './themeSwitcher/reducer';
 import LanguageSwitcher from './languageSwitcher/reducer';
 import ListApplications from './ListApplications/reducers';
 import ViewApplication from './ViewApplication/reducers';
+import ViewTestingSequence from './ViewTestingSequence/reducers';
 
 export default {
   Auth,
@@ -11,5 +12,6 @@ export default {
   ThemeSwitcher,
   LanguageSwitcher,
   ListApplications,
-  ViewApplication
+  ViewApplication,
+  ViewTestingSequence
 };

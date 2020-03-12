@@ -21,6 +21,7 @@ export default function reducer(state = initState, action) {
         ...state,
         application: action.application,
         testingSequences: action.testingSequences,
+        trainingSequences: action.trainingSequences,
         loading: false,
         error: false
       };
@@ -28,7 +29,9 @@ export default function reducer(state = initState, action) {
     case actions.APPLICATION_ERROR_RESULT:
       return {
         ...state,
-        application: [],
+        application: null,
+        testingSequences: [],
+        trainingSequences: [],
         loading: false,
         error: true
       };

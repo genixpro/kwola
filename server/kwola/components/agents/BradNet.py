@@ -12,70 +12,127 @@ import pandas
 from torchvision import models
 
 class BradNet(nn.Module):
-    def __init__(self, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount, whichGpu):
+    def __init__(self, agentConfiguration, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount, whichGpu):
         super(BradNet, self).__init__()
 
-        self.branchStampEdgeSize = 10
+        self.agentConfiguration = agentConfiguration
+
+        self.agentConfiguration['additional_features_stamp_edge_size'] = agentConfiguration['additional_features_stamp_edge_size']
 
         self.whichGpu = whichGpu
 
-        self.stampProjection = nn.Linear(additionalFeatureSize, self.branchStampEdgeSize*self.branchStampEdgeSize)
-        self.stampProjectionParallel = nn.DataParallel(self.stampProjection)
-
-        self.pixelFeatureCount = 32
-
-        self.innerSize = 64
-
-        self.peakInnerSize = 128
+        self.stampProjection = nn.Linear(
+            in_features=additionalFeatureSize,
+            out_features=self.agentConfiguration['additional_features_stamp_edge_size'] * self.agentConfiguration['additional_features_stamp_edge_size']
+        )
+        self.stampProjectionParallel = nn.DataParallel(module=self.stampProjection)
 
         self.mainModel = nn.Sequential(
-            nn.Conv2d(3, self.innerSize, kernel_size=3, stride=2, dilation=1, padding=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(self.innerSize),
+            nn.Conv2d(
+                in_channels=3, 
+                out_channels=self.agentConfiguration['inner_kernels'], 
+                kernel_size=self.agentConfiguration['layer_1_kernel_size'], 
+                stride=self.agentConfiguration['layer_1_stride'], 
+                dilation=self.agentConfiguration['layer_1_dilation'], 
+                padding=self.agentConfiguration['layer_1_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['inner_kernels']),
 
-            nn.Conv2d(self.innerSize, self.innerSize, kernel_size=3, stride=2, dilation=1, padding=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(self.innerSize),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['inner_kernels'], 
+                out_channels=self.agentConfiguration['inner_kernels'], 
+                kernel_size=self.agentConfiguration['layer_2_kernel_size'],
+                stride=self.agentConfiguration['layer_2_stride'],
+                dilation=self.agentConfiguration['layer_2_dilation'],
+                padding=self.agentConfiguration['layer_2_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['inner_kernels']),
 
-            nn.Conv2d(self.innerSize, self.peakInnerSize, kernel_size=3, stride=2, dilation=1, padding=1),
-            nn.ReLU(),
-            nn.BatchNorm2d(self.peakInnerSize),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['inner_kernels'], 
+                out_channels=self.agentConfiguration['peak_inner_kernels'], 
+                kernel_size=self.agentConfiguration['layer_3_kernel_size'],
+                stride=self.agentConfiguration['layer_3_stride'],
+                dilation=self.agentConfiguration['layer_3_dilation'],
+                padding=self.agentConfiguration['layer_3_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['peak_inner_kernels']),
 
-            nn.Conv2d(self.peakInnerSize, self.innerSize, kernel_size=5, stride=1, dilation=3, padding=6),
-            nn.ReLU(),
-            nn.BatchNorm2d(self.innerSize),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['peak_inner_kernels'], 
+                out_channels=self.agentConfiguration['inner_kernels'], 
+                kernel_size=self.agentConfiguration['layer_4_kernel_size'],
+                stride=self.agentConfiguration['layer_4_stride'],
+                dilation=self.agentConfiguration['layer_4_dilation'],
+                padding=self.agentConfiguration['layer_4_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['inner_kernels']),
 
-            nn.Conv2d(self.innerSize, self.pixelFeatureCount, kernel_size=5, stride=1, dilation=1, padding=2),
-            nn.ReLU(),
-            nn.BatchNorm2d(self.pixelFeatureCount),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['inner_kernels'], 
+                out_channels=self.agentConfiguration['pixel_features'], 
+                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
+                stride=self.agentConfiguration['layer_5_stride'],
+                dilation=self.agentConfiguration['layer_5_dilation'],
+                padding=self.agentConfiguration['layer_5_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
 
             torch.nn.Upsample(scale_factor=8)
         )
-        self.mainModelParallel = nn.DataParallel(self.mainModel)
+        self.mainModelParallel = nn.DataParallel(module=self.mainModel)
 
-        self.presentRewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
-        self.presentRewardConvolutionParallel = nn.DataParallel(self.presentRewardConvolution)
+        self.presentRewardConvolution = nn.Conv2d(
+            in_channels=self.agentConfiguration['pixel_features'],
+            out_channels=numActions,
+            kernel_size=self.agentConfiguration['present_reward_convolution_kernel_size'],
+            stride=1,
+            padding=0,
+            bias=False
+        )
+        self.presentRewardConvolutionParallel = nn.DataParallel(module=self.presentRewardConvolution)
 
-        self.discountedFutureRewardConvolution = nn.Conv2d(self.pixelFeatureCount, numActions, kernel_size=1, stride=1, padding=0, bias=False)
-        self.discountedFutureRewardConvolutionParallel = nn.DataParallel(self.discountedFutureRewardConvolution)
+        self.discountedFutureRewardConvolution = nn.Conv2d(
+            in_channels=self.agentConfiguration['pixel_features'],
+            out_channels=numActions,
+            kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
+            stride=1,
+            padding=0,
+            bias=False
+        )
+        self.discountedFutureRewardConvolutionParallel = nn.DataParallel(module=self.discountedFutureRewardConvolution)
 
         self.predictedExecutionTraceLinear = nn.Sequential(
-            nn.Linear(self.pixelFeatureCount, executionTracePredictorSize),
-            nn.Sigmoid()
+            nn.Linear(
+                in_features=self.agentConfiguration['pixel_features'],
+                out_features=executionTracePredictorSize
+            ),
+            nn.ELU()
         )
-        self.predictedExecutionTraceLinearParallel = nn.DataParallel(self.predictedExecutionTraceLinear)
+        self.predictedExecutionTraceLinearParallel = nn.DataParallel(module=self.predictedExecutionTraceLinear)
 
         self.predictedExecutionFeaturesLinear = nn.Sequential(
-            nn.Linear(self.pixelFeatureCount, executionFeaturePredictorSize),
+            nn.Linear(
+                in_features=self.agentConfiguration['pixel_features'],
+                out_features=executionFeaturePredictorSize
+            ),
             nn.Sigmoid()
         )
-        self.predictedExecutionFeaturesLinearParallel = nn.DataParallel(self.predictedExecutionFeaturesLinear)
+        self.predictedExecutionFeaturesLinearParallel = nn.DataParallel(module=self.predictedExecutionFeaturesLinear)
 
         self.predictedCursorLinear = nn.Sequential(
-            nn.Linear(self.pixelFeatureCount, cursorCount),
+            nn.Linear(
+                in_features=self.agentConfiguration['pixel_features'],
+                out_features=cursorCount
+            ),
             nn.Sigmoid()
         )
-        self.predictedCursorLinearParallel = nn.DataParallel(self.predictedCursorLinear)
+        self.predictedCursorLinearParallel = nn.DataParallel(module=self.predictedCursorLinear)
 
         self.numActions = numActions
 
@@ -138,7 +195,7 @@ class BradNet(nn.Module):
 
         stamp = self.stampProjectionCurrent(data['additionalFeature'])
 
-        stampTiler = stamp.reshape([-1, self.branchStampEdgeSize, self.branchStampEdgeSize]).repeat([1, int(height / self.branchStampEdgeSize) + 1, int(width / self.branchStampEdgeSize) + 1])
+        stampTiler = stamp.reshape([-1, self.agentConfiguration['additional_features_stamp_edge_size'], self.agentConfiguration['additional_features_stamp_edge_size']]).repeat([1, int(height / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(width / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])
         stampLayer = stampTiler[:, :height, :width].reshape([-1, 1, height, width])
 
         # Replace the saturation layer on the image with the stamp data layer

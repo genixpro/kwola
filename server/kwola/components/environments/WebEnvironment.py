@@ -17,17 +17,19 @@ class WebEnvironment(BaseEnvironment):
         This class represents web / browser based environments. It will boot up a headless browser and use it to communicate
         with the software.
     """
-    def __init__(self, targetURL="http://172.17.0.2:3000/", numberParallelSessions = 4):
+    def __init__(self, environmentConfiguration, targetURL="http://172.17.0.2:3000/"):
         self.targetURL = targetURL
 
         self.startProxyServer()
 
+        self.config = environmentConfiguration
+
         def createSession(number):
             return WebEnvironmentSession(targetURL, number, self.proxyPort, self.pathTracer)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=environmentConfiguration['max_startup_workers']) as executor:
             sessionFutures = [
-                executor.submit(createSession, sessionNumber) for sessionNumber in range(numberParallelSessions)
+                executor.submit(createSession, sessionNumber) for sessionNumber in range(environmentConfiguration['parallel_sessions'])
             ]
 
             self.sessions = [

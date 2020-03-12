@@ -5,6 +5,7 @@ from kwola.models.TestingSequenceModel import TestingSequenceModel
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.components.agents.RandomAgent import RandomAgent
+from kwola.components.TaskProcess import TaskProcess
 import random
 from datetime import datetime
 import traceback
@@ -15,9 +16,11 @@ from kwola.config import config
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     print("Starting New Testing Sequence", flush=True)
     try:
-        environment = WebEnvironment(numberParallelSessions=16)
+        agentConfig = config.getAgentConfiguration()
 
-        stepsRemaining = 150
+        environment = WebEnvironment(environmentConfiguration=config.getEnvironmentConfiguration())
+
+        stepsRemaining = int(agentConfig['testing_sequence_length'])
 
         testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
 
@@ -36,7 +39,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         if shouldBeRandom:
             agent = RandomAgent()
         else:
-            agent = DeepLearningAgent(whichGpu=None)
+            agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
 
         agent.initialize(environment)
         agent.load()
@@ -101,8 +104,6 @@ def runTestingSequenceTask(testingSequenceId, shouldBeRandom=False):
 
 
 if __name__ == "__main__":
-    sequence = TestingSequenceModel()
-    sequence.save()
-
-    runTestingSequence(str(sequence.id), False)
+    task = TaskProcess(runTestingSequence)
+    task.run()
 

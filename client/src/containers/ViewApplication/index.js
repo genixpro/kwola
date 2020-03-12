@@ -36,6 +36,8 @@ class ViewApplication extends Component {
     }
 
     render() {
+        console.log(this.props.testingSequences);
+
         const { result } = this.state;
         return (
                 this.props.application ?
@@ -86,36 +88,73 @@ class ViewApplication extends Component {
                             </Row>
 
 
-                            <Papersheet title={"Recent Testing Sequences"}>
+                            <Row>
+                                <FullColumn>
+                                    <Papersheet title={"Recent Testing Sequences"}>
 
 
-                                <Table>
-                                    <TableHead>
-                                        <TableRow>
-                                            <TableCell>Version</TableCell>
-                                            <TableCell>Test Start Time</TableCell>
-                                            <TableCell>Test Finish Time</TableCell>
-                                            <TableCell>Bug Found</TableCell>
-                                        </TableRow>
-                                    </TableHead>
-                                    <TableBody>
-
-                                        {(this.props.testingSequences || []).map(testingSequence => {
-                                            return (
-                                                <TableRow key={testingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/applications/${testingSequence._id.$oid}`)}>
-                                                    <TableCell>{testingSequence.name}</TableCell>
-                                                    <TableCell>{testingSequence.url}</TableCell>
+                                        <Table>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell>ID</TableCell>
+                                                    <TableCell>Status</TableCell>
+                                                    <TableCell>Test Start Time</TableCell>
+                                                    {/*<TableCell>Test Finish Time</TableCell>*/}
+                                                    <TableCell>Bug Found</TableCell>
                                                 </TableRow>
-                                            );
-                                        })}
-                                    </TableBody>
-                                </Table>
+                                            </TableHead>
+                                            <TableBody>
+
+                                                {(this.props.testingSequences || []).map(testingSequence => {
+                                                    return (
+                                                        <TableRow key={testingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/testing_sequences/${testingSequence._id.$oid}`)}>
+                                                            <TableCell>{testingSequence._id.$oid}</TableCell>
+                                                            <TableCell>{testingSequence.status}</TableCell>
+                                                            <TableCell>{testingSequence.startDate}</TableCell>
+                                                            {/*<TableCell>{testingSequence.endDate}</TableCell>*/}
+                                                            <TableCell>{testingSequence.bugsFound}</TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </Table>
 
 
+                                    </Papersheet>
+                                </FullColumn>
+                            </Row>
+
+                            <Row>
+                                <FullColumn>
+                                    <Papersheet title={"Recent Training Sequences"}>
 
 
+                                        <Table>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell>ID</TableCell>
+                                                    <TableCell>Status</TableCell>
+                                                    <TableCell>Training Start Time</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
 
-                            </Papersheet>
+                                                {(this.props.trainingSequences || []).map(trainingSequence => {
+                                                    return (
+                                                        <TableRow key={trainingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/testing_sequences/${trainingSequence._id.$oid}`)}>
+                                                            <TableCell>{trainingSequence._id.$oid}</TableCell>
+                                                            <TableCell>{trainingSequence.status}</TableCell>
+                                                            <TableCell>{trainingSequence.startTime}</TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </Table>
+
+
+                                    </Papersheet>
+                                </FullColumn>
+                            </Row>
                         </FullColumn>
                     </LayoutWrapper>
                     : null

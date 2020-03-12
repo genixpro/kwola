@@ -2,28 +2,35 @@ from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
+from kwola.models.TrainingSequenceModel import TrainingSequence
+from kwola.models.TrainingStepModel import TrainingStep
 from .RunTrainingStep import runTrainingStep
 from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait
+from kwola.components.ManagedTaskSubprocess import ManagedTaskSubprocess
 import time
 import psutil
 import subprocess
 import datetime
 import atexit
+import bson
+from kwola.config import config
 
-def runRandomInitialization():
-    print("Starting random testing sequences for initialization")
+def runRandomInitialization(trainingSequence):
+    print("Starting random testing sequences for initialization", flush=True)
 
-    # Seed the pot with 10 random sequences
-    numInitializationSequences = 10
-    numWorkers = 2
+    agentConfig = config.getAgentConfiguration()
+
+    trainingSequence.initializationTestingSequences = []
 
     futures = []
-    with ProcessPoolExecutor(max_workers=numWorkers) as executor:
-        for n in range(numInitializationSequences):
+    with ProcessPoolExecutor(max_workers=agentConfig['training_random_initialization_workers']) as executor:
+        for n in range(agentConfig['training_random_initialization_sequences']):
             sequence = TestingSequenceModel()
             sequence.save()
+
+            trainingSequence.initializationTestingSequences.append(sequence)
 
             future = executor.submit(runTestingSequence, str(sequence.id), True)
             futures.append(future)
@@ -32,94 +39,96 @@ def runRandomInitialization():
             # without fighting for CPU during the startup of that task
             time.sleep(3)
 
-        for future in as_completed(futures[:int(numInitializationSequences/2)]):
+        for future in as_completed(futures[:int(agentConfig['training_random_initialization_sequences']/2)]):
             result = future.result()
-            print("Random Testing Sequence Completed")
+            print("Random Testing Sequence Completed", flush=True)
 
-    print("Random initialization completed")
-
-def recursiveKillProcess(process):
-    try:
-        parent = psutil.Process(process.pid)
-        children = parent.children(recursive=True)
-        children.append(parent)
-        for p in children:
-            p.send_signal(9)
-    except psutil.NoSuchProcess:
-        pass
-
-def waitOnProcess(process, finishText, timeLimit=800):
-    atexit.register(lambda: process.kill())
-
-    output = ''
-    startTime = datetime.datetime.now()
-    while process.returncode is None and (finishText not in output):
-        nextChars = str(process.stdout.readline(), 'utf8')
-        elapsedSeconds = (datetime.datetime.now() - startTime).total_seconds()
-        for nextChar in nextChars:
-            if nextChar == chr(127):
-                output = output[:-1]  # Erase the last character from the output.
-            else:
-                output += nextChar
-                print(nextChar, sep="", end="")
-
-        print("", sep="", end="", flush=True)
-
-        if elapsedSeconds > timeLimit:
-            print("Killing Process due to too much time elapsed")
-            recursiveKillProcess(process)
-            break
-        
-        time.sleep(0.002)
-
-    time.sleep(1)
-    print("Terminating process, task finished.")
-
-    # DESTROY IT!
-    if process.returncode is None:
-        process.terminate()
-        time.sleep(3)
-
-    if process.returncode is None:
-        recursiveKillProcess(process)
+    # Save the training sequence with all the data on the initialization sequences
+    trainingSequence.save()
+    print("Random initialization completed", flush=True)
 
 
-def runTrainingSubprocess():
-    process = subprocess.Popen(["python3", "-m", "kwola.tasks.RunTrainingStep"], stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)
 
-    waitOnProcess(process, "==== Training Step Completed ====")
 
-def runTestingSubprocess():
-    process = subprocess.Popen(["python3", "-m", "kwola.tasks.RunTestingSequence"], stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)
+def runTrainingSubprocess(trainingSequence):
+    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
+        "trainingSequenceId": str(trainingSequence.id)
+    }, timeout=config.getAgentConfiguration()['training_step_timeout'])
 
-    waitOnProcess(process, "==== Finished Running Testing Sequence! ====")
+    result = process.waitForProcessResult()
 
-def runMainTrainingLoop():
-    loopsNeeded = 1000
-    loopsCompleted = 0
-    numTestSequencesPerLoop = 1
-    while loopsCompleted < loopsNeeded:
+
+    trainingStepId = str(result['trainingStepId'])
+    trainingStep = TrainingStep.objects({id: bson.ObjectId(trainingStepId)}).first()
+    trainingSequence.trainingSteps.append(trainingStep)
+    trainingSequence.save()
+
+    return
+
+
+def runTestingSubprocess(trainingSequence):
+    testingSequence = TestingSequenceModel()
+    testingSequence.save()
+
+
+    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingSequence"], {
+        "testingSequenceId": str(testingSequence.id),
+        "shouldBeRandom": False
+    }, timeout=config.getAgentConfiguration()['training_step_timeout'])
+    result = process.waitForProcessResult()
+
+
+    # Reload the testing sequence from the db. It will have been updated by the sub-process.
+    testingSequence = TestingSequenceModel.objects({id: bson.ObjectId(testingSequence.id)}).first()
+    trainingSequence.testingSequences.append(testingSequence)
+    trainingSequence.save()
+
+    return
+
+
+
+def runMainTrainingLoop(trainingSequence):
+    agentConfig = config.getAgentConfiguration()
+
+    stepsCompleted = 0
+
+    stepStartTime = datetime.datetime.now()
+
+    while stepsCompleted < agentConfig['total_training_steps_needed']:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = []
 
             trainingFuture = executor.submit(runTrainingSubprocess)
             futures.append(trainingFuture)
 
-            for testingSequences in range(numTestSequencesPerLoop):
+            for testingSequences in range(agentConfig['testing_sequences_per_training_step']):
                 futures.append(executor.submit(runTestingSubprocess))
 
             wait(futures)
 
-            print("Completed one parallel training loop! Hooray!")
+            print("Completed one parallel training & testing step! Hooray!", flush=True)
 
-            loopsCompleted += 1
+            stepsCompleted += 1
+
+        trainingSequence.trainingStepsCompleted += 1
+        trainingSequence.averageTimePerStep = (datetime.datetime.now() - stepStartTime).total_seconds() / stepsCompleted
+        trainingSequence.save()
 
 
 @app.task
 def trainAgent():
-    # runRandomInitialization()
-    runMainTrainingLoop()
+    trainingSequence = TrainingSequence()
 
+    trainingSequence.startTime = datetime.datetime.now()
+    trainingSequence.status = "running"
+    trainingSequence.trainingStepsCompleted = 0
+
+    runRandomInitialization(trainingSequence)
+    runMainTrainingLoop(trainingSequence)
+
+    trainingSequence.status = "completed"
+    trainingSequence.endTime = datetime.datetime.now()
+    trainingSequence.save()
 
 
 if __name__ == "__main__":
