@@ -17,7 +17,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     try:
         environment = WebEnvironment(numberParallelSessions=16)
 
-        stepsRemaining = 100
+        stepsRemaining = 150
 
         testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
 

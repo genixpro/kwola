@@ -48,7 +48,7 @@ def recursiveKillProcess(process):
     except psutil.NoSuchProcess:
         pass
 
-def waitOnProcess(process, finishText):
+def waitOnProcess(process, finishText, timeLimit=800):
     atexit.register(lambda: process.kill())
 
     output = ''
@@ -65,23 +65,24 @@ def waitOnProcess(process, finishText):
 
         print("", sep="", end="", flush=True)
 
-        if elapsedSeconds > 600:
+        if elapsedSeconds > timeLimit:
+            print("Killing Process due to too much time elapsed")
             recursiveKillProcess(process)
+            break
         
         time.sleep(0.002)
 
-    # DESTROY IT!
     time.sleep(1)
+    print("Terminating process, task finished.")
+
+    # DESTROY IT!
     if process.returncode is None:
         process.terminate()
+        time.sleep(3)
 
-    time.sleep(3)
     if process.returncode is None:
         recursiveKillProcess(process)
 
-    remaining = str(process.stdout.read(), 'utf8')
-    output += remaining
-    print(remaining, "", sep="", end="", flush=True)
 
 def runTrainingSubprocess():
     process = subprocess.Popen(["python3", "-m", "kwola.tasks.RunTrainingStep"], stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)

@@ -48,7 +48,7 @@ class DeepLearningAgent(BaseAgent):
         super().__init__()
 
         self.num_frames = 1400000
-        self.batchSize = 16
+        self.batchSize = 14
         self.gamma = 0.50
         self.whichGpu = whichGpu
         self.variableWrapperFunc = (lambda x:x.cuda()) if whichGpu is not None else (lambda x:x)
