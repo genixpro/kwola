@@ -198,38 +198,32 @@ class DeepLearningAgent(BaseAgent):
             :return:
         """
         images, segmentationMaps = self.getImage()
+        additionalFeatures = self.getAdditionalFeatures()
+        actions = []
 
-        if random.random() > self.agentConfiguration['epsilon']:
+        width = images.shape[3]
+        height = images.shape[2]
 
-            width = images.shape[3]
-            height = images.shape[2]
+        for sampleN, image, segmentationMap, additionalFeatureVector in zip(range(len(images)), images, segmentationMaps, additionalFeatures):
+            epsilon = (float(sampleN + 1) / float(len(images))) * 0.95
 
-            images = self.variableWrapperFunc(torch.FloatTensor(images))
-            additionalFeatures = self.variableWrapperFunc(torch.FloatTensor(self.getAdditionalFeatures()))
+            if random.random() > epsilon:
+                image = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
+                additionalFeatureVector = self.variableWrapperFunc(torch.FloatTensor(numpy.array([additionalFeatureVector])))
 
-            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures = self.model({"image": images, "additionalFeature": additionalFeatures})
+                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures = self.model({"image": image, "additionalFeature": additionalFeatureVector})
 
-            totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
+                totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
-            # cv2.imshow('image', numpy.array(q_values[0, 0, :, :]))
-            # cv2.waitKey(50)
+                actionIndexes = totalRewardPredictions.reshape([1, width * height * len(self.actionsSorted)]).argmax(1).data
 
-            actionIndexes = totalRewardPredictions.reshape([-1, width * height * len(self.actionsSorted)]).argmax(1).data
+                actionType, actionX, actionY = BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndexes[0])
 
-            actionInfoList = [
-                BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndex)
-                for actionIndex in actionIndexes
-            ]
+                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
+                action.source = "prediction"
+                actions.append(action)
 
-            wasRandom = False
-
-        else:
-            actionInfoList = []
-
-            width = self.environment.screenshotSize()['width']
-            height = self.environment.screenshotSize()['height']
-
-            for segmentationMap in segmentationMaps:
+            else:
                 uniques = numpy.unique(segmentationMap)
                 chosenSegmentation = random.choice(uniques)
 
@@ -245,21 +239,9 @@ class DeepLearningAgent(BaseAgent):
                 actionX = chosenPixel[0]
                 actionY = chosenPixel[1]
 
-                actionInfo = (actionType, actionX, actionY)
-                actionInfoList.append(actionInfo)
-
-            wasRandom = True
-
-        actions = [
-            self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
-            for actionInfo in actionInfoList
-        ]
-
-        for action in actions:
-            if wasRandom:
+                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
-            else:
-                action.source = "prediction"
+                actions.append(action)
 
         return actions
 

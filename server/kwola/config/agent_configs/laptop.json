@@ -2,7 +2,6 @@
   "additional_features_stamp_edge_size": 5,
   "batch_size": 1,
   "discounted_future_reward_convolution_kernel_size": 1,
-  "epsilon": 0.75,
   "future_execution_trace_decay_rate": 0.70,
   "iterations_between_db_saves": 5,
   "iterations_per_training_step": 50,
