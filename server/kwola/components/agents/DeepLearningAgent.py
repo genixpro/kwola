@@ -341,7 +341,7 @@ class DeepLearningAgent(BaseAgent):
 
         tempScreenshotDirectory = tempfile.mkdtemp()
 
-        topSize = 200
+        topSize = 250
         bottomSize = 250
         leftSize = 100
         rightSize = 500
@@ -369,36 +369,49 @@ class DeepLearningAgent(BaseAgent):
             fontSize = 0.5
             fontThickness = 1
             fontColor = (0, 0, 0)
+            
+            columnOneLeft = leftSize
+            columnTwoLeft = leftSize + 300
+            columnThreeLeft = leftSize + 550
+            lineOneTop = topMargin + 20
+            lineTwoTop = topMargin + 40
+            lineThreeTop = topMargin + 60
+            lineFourTop = topMargin + 80
+            lineFiveTop = topMargin + 100
+            lineSixTop = topMargin + 120
+            lineSevenTop = topMargin + 140
+            lineEightTop = topMargin + 160
 
-            cv2.putText(image, f"URL {trace.startURL}", (leftSize-0, topMargin + 20), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"{str(executionSession.id)}", (leftSize-0, topMargin + 40), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Frame {trace.frameNumber}", (leftSize-0, topMargin + 60), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}", (leftSize-0, topMargin + 80), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"{str(executionSession.id)}", (columnOneLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}", (columnOneLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (leftSize-0, topMargin + 100), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (leftSize-0, topMargin + 120), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (leftSize-0, topMargin + 140), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (leftSize+300, topMargin + 40), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (leftSize+300, topMargin + 60), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (leftSize+300, topMargin + 80), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (leftSize+300, topMargin + 100), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (leftSize+300, topMargin + 120), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (leftSize+300, topMargin + 140), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (leftSize+550, topMargin + 40), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (leftSize+550, topMargin + 60), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (leftSize+550, topMargin + 80), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%", (leftSize+550, topMargin + 100), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (leftSize+550, topMargin + 120), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}", (leftSize+550, topMargin + 140), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-
+            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%", (columnThreeLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}", (columnThreeLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
         fig = plt.figure(figsize=(frameWidth / 100, (bottomSize - 50) / 100), dpi=100)
         ax = fig.add_subplot(111)
@@ -458,10 +471,12 @@ class DeepLearningAgent(BaseAgent):
 
 
             for actionIndex, action in enumerate(self.actionsSorted):
+                maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
+
                 rewardPredictionAxes[actionIndex].set_xticks([])
                 rewardPredictionAxes[actionIndex].set_yticks([])
                 im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=plt.get_cmap('inferno'), vmin=0, vmax=0.7)
-                rewardPredictionAxes[actionIndex].set_title(action)
+                rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                 rewardPredictionsFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
             stampAxes.set_xticks([])
