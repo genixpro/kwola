@@ -22,6 +22,7 @@ import skimage.draw
 import skimage.transform
 import skimage.color
 import skimage.io
+from skimage.segmentation import felzenszwalb, mark_boundaries
 import shutil
 import cv2
 import matplotlib.pyplot as plt
@@ -173,11 +174,15 @@ class DeepLearningAgent(BaseAgent):
                 convertedImageFuture = executor.submit(processRawImageParallel, image)
                 convertedImageFutures.append(convertedImageFuture)
 
-        convertedImages = [
-            convertedImageFuture.result() for convertedImageFuture in convertedImageFutures
+        converteHSLImages = [
+            convertedImageFuture.result()[0] for convertedImageFuture in convertedImageFutures
         ]
 
-        return numpy.array(convertedImages)
+        convertedSegmentationMaps = [
+            convertedImageFuture.result()[1] for convertedImageFuture in convertedImageFutures
+        ]
+
+        return numpy.array(converteHSLImages),  numpy.array(convertedSegmentationMaps)
 
     def getAdditionalFeatures(self):
         branchFeature = self.environment.getBranchFeatures()
@@ -192,9 +197,9 @@ class DeepLearningAgent(BaseAgent):
             # :param environment:
             :return:
         """
+        images, segmentationMaps = self.getImage()
 
         if random.random() > self.agentConfiguration['epsilon']:
-            images = self.getImage()
 
             width = images.shape[3]
             height = images.shape[2]
@@ -224,10 +229,21 @@ class DeepLearningAgent(BaseAgent):
             width = self.environment.screenshotSize()['width']
             height = self.environment.screenshotSize()['height']
 
-            for n in range(self.environment.numberParallelSessions()):
+            for segmentationMap in segmentationMaps:
+                uniques = numpy.unique(segmentationMap)
+                chosenSegmentation = random.choice(uniques)
+
+                possiblePixels = []
+                for x in range(width):
+                    for y in range(height):
+                        if segmentationMap[y, x] == chosenSegmentation:
+                            possiblePixels.append((x, y))
+
+                chosenPixel = random.choice(possiblePixels)
+
                 actionType = random.randrange(0, len(self.actionsSorted))
-                actionX = random.randrange(0, width)
-                actionY = random.randrange(0, height)
+                actionX = chosenPixel[0]
+                actionY = chosenPixel[1]
 
                 actionInfo = (actionType, actionX, actionY)
                 actionInfoList.append(actionInfo)
@@ -462,7 +478,7 @@ class DeepLearningAgent(BaseAgent):
 
             fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
-            skimage.io.imsave(filePath, newImage)
+            skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
             newFrameIndex += 1
 
             lastFrame = frame
@@ -746,4 +762,9 @@ def processRawImageParallel(rawImage):
     image = skimage.color.rgb2hsv(rawImage[:, :, :3])
     swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
     hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
-    return hueLightnessImage
+
+    # Segment the image, and randomly choose a segment. This helps to avoid wasting time clicking on useless
+    # parts of the UI.
+    segmentationMap = felzenszwalb(rawImage, scale=300, sigma=0.50, min_size=70)
+
+    return hueLightnessImage, segmentationMap

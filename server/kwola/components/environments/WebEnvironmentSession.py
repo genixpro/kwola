@@ -220,7 +220,7 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain.perform()
 
             if isinstance(action, WaitAction):
-                print("Waiting for ", action.time, "at", action.x, action.y, action.source)
+                # print("Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException:
