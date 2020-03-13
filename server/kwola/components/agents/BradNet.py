@@ -193,9 +193,9 @@ class BradNet(nn.Module):
         width = data['image'].shape[3]
         height = data['image'].shape[2]
 
-        stamp = self.stampProjectionCurrent(data['additionalFeature'])
+        stamp = self.stampProjectionCurrent(data['additionalFeature']).reshape([-1, self.agentConfiguration['additional_features_stamp_edge_size'], self.agentConfiguration['additional_features_stamp_edge_size']])
 
-        stampTiler = stamp.reshape([-1, self.agentConfiguration['additional_features_stamp_edge_size'], self.agentConfiguration['additional_features_stamp_edge_size']]).repeat([1, int(height / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(width / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])
+        stampTiler = stamp.repeat([1, int(height / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(width / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])
         stampLayer = stampTiler[:, :height, :width].reshape([-1, 1, height, width])
 
         # Replace the saturation layer on the image with the stamp data layer
@@ -242,7 +242,7 @@ class BradNet(nn.Module):
         predictedExecutionFeatures = self.predictedExecutionFeaturesLinearCurrent(joinedFeatures)
         predictedCursor = self.predictedCursorLinearCurrent(joinedFeatures)
 
-        return presentRewards, discountFutureRewards, predictedTraces, predictedExecutionFeatures, predictedCursor, pixelFeatureMap
+        return presentRewards, discountFutureRewards, predictedTraces, predictedExecutionFeatures, predictedCursor, pixelFeatureMap, stamp
 
 
     def feature_size(self):

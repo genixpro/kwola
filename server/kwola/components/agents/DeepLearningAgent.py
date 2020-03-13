@@ -211,7 +211,7 @@ class DeepLearningAgent(BaseAgent):
                 image = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
                 additionalFeatureVector = self.variableWrapperFunc(torch.FloatTensor(numpy.array([additionalFeatureVector])))
 
-                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures = self.model({"image": image, "additionalFeature": additionalFeatureVector})
+                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = self.model({"image": image, "additionalFeature": additionalFeatureVector})
 
                 totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
@@ -434,13 +434,16 @@ class DeepLearningAgent(BaseAgent):
 
             line.remove()
 
-        def addRewardPredictionsToImage(plotImage, frame, trace):
+        def addRewardPredictionsAndStampToImage(plotImage, frame, trace):
             rewardPredictionsFigure = plt.figure(figsize=((rightSize) / 100, (frameHeight + bottomSize) / 100), dpi=100)
+            stampFigure = plt.figure(figsize=((rightSize - 50) / 100, (topSize) / 100), dpi=100)
 
             rewardPredictionAxes = [
                 rewardPredictionsFigure.add_subplot(len(self.actionsSorted), 1, actionIndex + 1)
                 for actionIndex, action in enumerate(self.actionsSorted)
             ]
+
+            stampAxes = stampFigure.add_subplot(111)
 
             image = skimage.color.rgb2hsv(frame[:, :, :3])
             swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
@@ -449,7 +452,7 @@ class DeepLearningAgent(BaseAgent):
 
             additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
-            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures = \
+            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = \
                 self.model({"image": frame, "additionalFeature": additionalFeature})
             totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
 
@@ -461,15 +464,27 @@ class DeepLearningAgent(BaseAgent):
                 rewardPredictionAxes[actionIndex].set_title(action)
                 rewardPredictionsFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
+            stampAxes.set_xticks([])
+            stampAxes.set_yticks([])
+            stampIm = stampAxes.imshow(stamp.data[0], cmap=plt.get_cmap('inferno'))
+            stampFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
+            stampAxes.set_title("Memory Stamp")
+
             # ax.grid()
             rewardPredictionsFigure.tight_layout()
             rewardPredictionsFigure.canvas.draw()
 
+            stampFigure.tight_layout()
+            stampFigure.canvas.draw()
+
             # Now we can save it to a numpy array and paste it into the image
             rewardPredictionChart = numpy.fromstring(rewardPredictionsFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
             rewardPredictionChart = rewardPredictionChart.reshape(rewardPredictionsFigure.canvas.get_width_height()[::-1] + (3,))
-
             plotImage[int(topSize):, (-rightSize):] = rewardPredictionChart
+
+            stampChart = numpy.fromstring(stampFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+            stampChart = stampChart.reshape(stampFigure.canvas.get_width_height()[::-1] + (3,))
+            plotImage[0:int(topSize), (-rightSize + 50):] = stampChart
 
 
         for frameIndex, trace, frame, presentReward, discountedFutureReward, in zip(range(len(frames)), executionSession.executionTraces, frames, presentRewards, discountedFutureRewards):
@@ -483,7 +498,7 @@ class DeepLearningAgent(BaseAgent):
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
             addRewardChartToImage(newImage, trace)
-            addRewardPredictionsToImage(newImage, frame, trace)
+            addRewardPredictionsAndStampToImage(newImage, frame, trace)
 
             fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
@@ -495,7 +510,7 @@ class DeepLearningAgent(BaseAgent):
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = frame
             addRewardChartToImage(newImage, trace)
-            addRewardPredictionsToImage(newImage, frame, trace)
+            addRewardPredictionsAndStampToImage(newImage, frame, trace)
 
             fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
@@ -673,7 +688,7 @@ class DeepLearningAgent(BaseAgent):
             :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingSequence
             :return:
         """
-        presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures = self.model({
+        presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures, stamp = self.model({
             "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['frames']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
             "action_type": batch['actionTypes'],
