@@ -344,7 +344,7 @@ class DeepLearningAgent(BaseAgent):
         topSize = 200
         bottomSize = 250
         leftSize = 100
-        rightSize = 100
+        rightSize = 500
         topMargin = 25
 
         frameHeight = frames[0].shape[0]
@@ -434,6 +434,43 @@ class DeepLearningAgent(BaseAgent):
 
             line.remove()
 
+        def addRewardPredictionsToImage(plotImage, frame, trace):
+            rewardPredictionsFigure = plt.figure(figsize=((rightSize) / 100, (frameHeight + bottomSize) / 100), dpi=100)
+
+            rewardPredictionAxes = [
+                rewardPredictionsFigure.add_subplot(len(self.actionsSorted), 1, actionIndex + 1)
+                for actionIndex, action in enumerate(self.actionsSorted)
+            ]
+
+            image = skimage.color.rgb2hsv(frame[:, :, :3])
+            swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
+            image = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
+            frame = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
+
+            additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
+
+            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures = \
+                self.model({"image": frame, "additionalFeature": additionalFeature})
+            totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
+
+
+            for actionIndex, action in enumerate(self.actionsSorted):
+                rewardPredictionAxes[actionIndex].set_xticks([])
+                rewardPredictionAxes[actionIndex].set_yticks([])
+                im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=plt.get_cmap('inferno'), vmin=0, vmax=0.7)
+                rewardPredictionAxes[actionIndex].set_title(action)
+                rewardPredictionsFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
+
+            # ax.grid()
+            rewardPredictionsFigure.tight_layout()
+            rewardPredictionsFigure.canvas.draw()
+
+            # Now we can save it to a numpy array and paste it into the image
+            rewardPredictionChart = numpy.fromstring(rewardPredictionsFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+            rewardPredictionChart = rewardPredictionChart.reshape(rewardPredictionsFigure.canvas.get_width_height()[::-1] + (3,))
+
+            plotImage[int(topSize):, (-rightSize):] = rewardPredictionChart
+
 
         for frameIndex, trace, frame, presentReward, discountedFutureReward, in zip(range(len(frames)), executionSession.executionTraces, frames, presentRewards, discountedFutureRewards):
             frame = numpy.flip(frame, axis=2)
@@ -446,6 +483,7 @@ class DeepLearningAgent(BaseAgent):
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
             addRewardChartToImage(newImage, trace)
+            addRewardPredictionsToImage(newImage, frame, trace)
 
             fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
@@ -457,6 +495,7 @@ class DeepLearningAgent(BaseAgent):
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = frame
             addRewardChartToImage(newImage, trace)
+            addRewardPredictionsToImage(newImage, frame, trace)
 
             fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
@@ -465,7 +504,7 @@ class DeepLearningAgent(BaseAgent):
 
             lastFrame = frame
 
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
 
         moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
 
@@ -477,6 +516,12 @@ class DeepLearningAgent(BaseAgent):
         return videoData
 
 
+    def prepareAdditionalFeaturesForTrace(self, trace):
+        branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
+        decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
+        additionalFeature = self.variableWrapperFunc(torch.FloatTensor(numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)))
+
+        return additionalFeature
 
     def prepareBatchesForExecutionSession(self, testingSequence, executionSession):
         """
