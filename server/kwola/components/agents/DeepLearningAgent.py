@@ -205,9 +205,7 @@ class DeepLearningAgent(BaseAgent):
         height = images.shape[2]
 
         for sampleN, image, segmentationMap, additionalFeatureVector in zip(range(len(images)), images, segmentationMaps, additionalFeatures):
-            epsilon = (float(sampleN + 1) / float(len(images))) * 0.95 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
-
-            print(sampleN, epsilon)
+            epsilon = (float(sampleN + 1) / float(len(images))) * 0.85 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
 
             if random.random() > epsilon:
                 image = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
