@@ -195,16 +195,16 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
                     if action.times == 1:
-                        print("Clicking", action.x, action.y)
+                        print("Clicking", action.x, action.y, action.source)
                         actionChain.click()
                     elif action.times == 2:
-                        print("Double Clicking", action.x, action.y)
+                        print("Double Clicking", action.x, action.y, action.source)
                         actionChain.double_click()
 
                     actionChain.perform()
 
             if isinstance(action, RightClickAction):
-                    print("Right Clicking", action.x, action.y)
+                    print("Right Clicking", action.x, action.y, action.source)
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
@@ -212,7 +212,7 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain.perform()
 
             if isinstance(action, TypeAction):
-                    print("Typing", action.text, "at", action.x, action.y)
+                    print("Typing", action.text, "at", action.x, action.y, action.source)
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
@@ -220,7 +220,7 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain.perform()
 
             if isinstance(action, WaitAction):
-                print("Waiting for ", action.time, "at", action.x, action.y)
+                print("Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException:

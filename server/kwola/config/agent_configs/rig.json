@@ -48,7 +48,7 @@
   "reward_network_traffic": 1e-3,
   "reward_new_code_executed": 3e-1,
   "reward_new_network_traffic": 1e-1,
-  "reward_new_screenshot": 3e-3,
+  "reward_new_screenshot": 0,
   "reward_new_url": 1e-1,
   "reward_no_code_executed": -1e-2,
   "reward_no_log_output": 0,
@@ -68,7 +68,7 @@
   "training_max_main_process_workers": 12,
   "training_max_main_thread_workers": 12,
   "training_precompute_sessions_count": 15,
-  "training_random_initialization_sequences": 50,
+  "training_random_initialization_sequences": 0,
   "training_random_initialization_workers": 2,
   "training_step_timeout": 800
 }

@@ -18,3 +18,5 @@ class BaseAction(EmbeddedDocument):
 
     y = FloatField()
 
+    source = StringField()
+

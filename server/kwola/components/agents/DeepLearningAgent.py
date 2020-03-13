@@ -216,6 +216,8 @@ class DeepLearningAgent(BaseAgent):
                 for actionIndex in actionIndexes
             ]
 
+            wasRandom = False
+
         else:
             actionInfoList = []
 
@@ -230,10 +232,18 @@ class DeepLearningAgent(BaseAgent):
                 actionInfo = (actionType, actionX, actionY)
                 actionInfoList.append(actionInfo)
 
+            wasRandom = True
+
         actions = [
             self.actions[self.actionsSorted[actionInfo[0]]](actionInfo[1], actionInfo[2])
             for actionInfo in actionInfoList
         ]
+
+        for action in actions:
+            if wasRandom:
+                action.source = "random"
+            else:
+                action.source = "prediction"
 
         return actions
 

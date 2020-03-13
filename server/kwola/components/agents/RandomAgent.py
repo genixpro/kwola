@@ -58,6 +58,8 @@ class RandomAgent(BaseAgent):
 
             action = self.actions[self.actionsSorted[actionIndex]](x=x, y=y)
 
+            action.source = "random"
+
             actions.append(action)
 
         return actions

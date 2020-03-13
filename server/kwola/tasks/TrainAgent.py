@@ -75,10 +75,11 @@ def runTrainingSubprocess(trainingSequence):
 
         result = process.waitForProcessResult()
 
-        trainingStepId = str(result['trainingStepId'])
-        trainingStep = TrainingStep.objects(id=bson.ObjectId(trainingStepId)).first()
-        trainingSequence.trainingSteps.append(trainingStep)
-        trainingSequence.save()
+        if 'trainingStepId' in result:
+            trainingStepId = str(result['trainingStepId'])
+            trainingStep = TrainingStep.objects(id=bson.ObjectId(trainingStepId)).first()
+            trainingSequence.trainingSteps.append(trainingStep)
+            trainingSequence.save()
     except Exception as e:
         traceback.print_exc()
         print("Training task subprocess appears to have failed")
