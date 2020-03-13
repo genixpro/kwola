@@ -4,7 +4,7 @@
   "discounted_future_reward_convolution_kernel_size": 1,
   "future_execution_trace_decay_rate": 0.70,
   "iterations_between_db_saves": 25,
-  "iterations_per_training_step": 500,
+  "iterations_per_training_step": 550,
   "layer_1_num_kernels": 64,
   "layer_1_dilation": 1,
   "layer_1_kernel_size": 3,

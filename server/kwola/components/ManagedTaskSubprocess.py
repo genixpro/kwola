@@ -95,8 +95,9 @@ class ManagedTaskSubprocess:
         self.alive = False
         self.stopProcessBothMethods()
 
-        self.output += str(self.process.stdout.read(), 'utf8')
-        print(self.output, sep="", end="", flush=True)
+        additionalOutput = str(self.process.stdout.read(), 'utf8')
+        self.output += additionalOutput
+        print(additionalOutput, sep="", end="", flush=True)
 
         result = self.extractResultFromOutput()
         print("Task Subprocess finished and gave back result", flush=True)
