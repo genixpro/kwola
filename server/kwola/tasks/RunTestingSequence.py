@@ -83,11 +83,17 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         videoPaths = environment.createMovies()
 
         kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
+        kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory("debug_videos")
 
         for sessionN, videoPath, executionSession in zip(range(len(videoPaths)), videoPaths, executionSessions):
             with open(videoPath, 'rb') as origFile:
                 with open(os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
                     cloneFile.write(origFile.read())
+
+            if not shouldBeRandom:
+                videoData = agent.createDebugVideoForExecutionSession(executionSession)
+                with open(os.path.join(kwolaDebugVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
+                    cloneFile.write(videoData)
 
         for session in executionSessions:
             session.save()

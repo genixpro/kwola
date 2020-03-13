@@ -62,7 +62,7 @@
   "reward_no_url_change": 0,
   "reward_screenshot_changed": 1e-3,
   "reward_url_changed": 1e-3,
-  "testing_sequence_length": 5,
+  "testing_sequence_length": 10,
   "testing_sequences_per_training_step": 1,
   "training_steps_needed": 3,
   "training_max_main_process_workers": 12,

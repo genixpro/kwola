@@ -54,7 +54,7 @@ class ExecutionSessionVideo(Resource):
         # self.postParser.add_argument('status', help='This field cannot be blank', required=True)
 
     def get(self, execution_session_id):
-        videoFilePath = os.path.join(config.getKwolaUserDataDirectory("videos"), f'{str(execution_session_id)}.mp4')
+        videoFilePath = os.path.join(config.getKwolaUserDataDirectory("debug_videos"), f'{str(execution_session_id)}.mp4')
 
         with open(videoFilePath, 'rb') as videoFile:
             videoData = videoFile.read()

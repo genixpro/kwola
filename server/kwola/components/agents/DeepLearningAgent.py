@@ -11,14 +11,20 @@ import cv2
 import os
 import pickle
 import tempfile
+import subprocess
 import bz2
 import os.path
 from kwola.models.actions.ClickTapAction import ClickTapAction
 import os.path
 import numpy
 import skimage
+import skimage.draw
 import skimage.transform
 import skimage.color
+import skimage.io
+import shutil
+import cv2
+import matplotlib.pyplot as plt
 import skimage.segmentation
 import concurrent.futures
 from kwola.models.actions.ClickTapAction import ClickTapAction
@@ -231,34 +237,7 @@ class DeepLearningAgent(BaseAgent):
 
         return actions
 
-
-    def prepareBatchesForExecutionSession(self, testingSequence, executionSession):
-        """
-            This function prepares batches that can be fed to the neural network.
-
-            :param testingSequence:
-            :param executionSession:
-            :return:
-        """
-        frames = []
-
-        videoPath = config.getKwolaUserDataDirectory("videos")
-        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(executionSession.id)}.mp4'))
-
-        while (cap.isOpened()):
-            ret, frame = cap.read()
-
-            if ret:
-                image = skimage.color.rgb2hsv(frame[:, :, :3])
-
-                swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
-
-                hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
-
-                frames.append(hueLightnessImage)
-            else:
-                break
-
+    def computePresentRewards(self, executionSession):
         # First compute the present reward at each time step
         presentRewards = []
         for trace in executionSession.executionTraces:
@@ -315,6 +294,11 @@ class DeepLearningAgent(BaseAgent):
                 tracePresentReward += self.agentConfiguration['reward_no_log_output']
 
             presentRewards.append(tracePresentReward)
+        return presentRewards
+
+    def computeDiscountedFutureRewards(self, executionSession):
+        # First compute the present reward at each time step
+        presentRewards = self.computePresentRewards(executionSession)
 
         # Now compute the discounted reward
         discountedFutureRewards = []
@@ -326,7 +310,198 @@ class DeepLearningAgent(BaseAgent):
             current += reward
 
         discountedFutureRewards.reverse()
-        presentRewards.reverse()
+
+        return discountedFutureRewards
+
+    def createDebugVideoForExecutionSession(self, executionSession):
+        videoPath = config.getKwolaUserDataDirectory("videos")
+        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(executionSession.id)}.mp4'))
+
+        frames = []
+
+        while (cap.isOpened()):
+            ret, frame = cap.read()
+
+            if ret:
+                frames.append(frame)
+            else:
+                break
+
+        presentRewards = self.computePresentRewards(executionSession)
+
+        discountedFutureRewards = self.computeDiscountedFutureRewards(executionSession)
+
+        tempScreenshotDirectory = tempfile.mkdtemp()
+
+        topSize = 200
+        bottomSize = 250
+        leftSize = 100
+        rightSize = 100
+        topMargin = 25
+
+        frameHeight = frames[0].shape[0]
+        frameWidth = frames[0].shape[1]
+
+        newFrameIndex = 0
+
+        lastFrame = frames.pop(0)
+        lastFrame = numpy.flip(lastFrame, axis=2)
+
+        def addDebugCircleToImage(image, trace):
+            targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 30, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
+            targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 20, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
+            targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 10, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
+            targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 5, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
+            image[targetCircleCoordsRadius30] = [255, 0, 0]
+            image[targetCircleCoordsRadius20] = [255, 0, 0]
+            image[targetCircleCoordsRadius10] = [255, 0, 0]
+            image[targetCircleCoordsRadius5] = [255, 0, 0]
+
+        def addDebugTextToImage(image, trace):
+            fontSize = 0.5
+            fontThickness = 1
+            fontColor = (0, 0, 0)
+
+            cv2.putText(image, f"URL {trace.startURL}", (leftSize-0, topMargin + 20), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"{str(executionSession.id)}", (leftSize-0, topMargin + 40), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Frame {trace.frameNumber}", (leftSize-0, topMargin + 60), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}", (leftSize-0, topMargin + 80), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (leftSize-0, topMargin + 100), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (leftSize-0, topMargin + 120), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (leftSize-0, topMargin + 140), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (leftSize+300, topMargin + 40), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (leftSize+300, topMargin + 60), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (leftSize+300, topMargin + 80), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (leftSize+300, topMargin + 100), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (leftSize+300, topMargin + 120), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (leftSize+300, topMargin + 140), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (leftSize+550, topMargin + 40), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (leftSize+550, topMargin + 60), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (leftSize+550, topMargin + 80), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%", (leftSize+550, topMargin + 100), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (leftSize+550, topMargin + 120), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}", (leftSize+550, topMargin + 140), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+
+
+
+        fig = plt.figure(figsize=(frameWidth / 100, (bottomSize - 50) / 100), dpi=100)
+        ax = fig.add_subplot(111)
+
+        xCoords = numpy.array(range(len(presentRewards)))
+
+        ax.set_ylim(ymin=0.0, ymax=0.7)
+
+        ax.plot(xCoords, presentRewards)
+        ax.plot(xCoords, discountedFutureRewards)
+
+        ax.set_xticks(range(0, len(presentRewards), 5))
+        ax.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
+        ax.set_yticks(numpy.arange(0, 1, 1.0))
+        ax.set_yticklabels(["" for n in range(2)])
+
+        # ax.grid()
+        fig.tight_layout()
+
+        def addRewardChartToImage(image, trace):
+            ax.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
+            line = ax.axvline(trace.frameNumber - 1, color='black', linewidth=2)
+
+            # If we haven't already shown or saved the plot, then we need to
+            # draw the figure first...
+            fig.canvas.draw()
+
+            # Now we can save it to a numpy array.
+            rewardChart = numpy.fromstring(fig.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+            rewardChart = rewardChart.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+            image[topSize + frameHeight:-50, leftSize:-rightSize] = rewardChart
+
+            line.remove()
+
+
+        for frameIndex, trace, frame, presentReward, discountedFutureReward, in zip(range(len(frames)), executionSession.executionTraces, frames, presentRewards, discountedFutureRewards):
+            frame = numpy.flip(frame, axis=2)
+
+            extraWidth = leftSize + rightSize
+            extraHeight = topSize + bottomSize
+
+            newImage = numpy.ones([frameHeight + extraHeight, frameWidth + extraWidth, 3]) * 255
+            newImage[topSize:-bottomSize, leftSize:-rightSize] = lastFrame
+            addDebugTextToImage(newImage, trace)
+            addDebugCircleToImage(newImage, trace)
+            addRewardChartToImage(newImage, trace)
+
+            fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
+            filePath = os.path.join(tempScreenshotDirectory, fileName)
+            skimage.io.imsave(filePath, newImage)
+            newFrameIndex += 1
+
+            newImage = numpy.ones([frameHeight + extraHeight, frameWidth + extraWidth, 3]) * 255
+            addDebugTextToImage(newImage, trace)
+
+            newImage[topSize:-bottomSize, leftSize:-rightSize] = frame
+            addRewardChartToImage(newImage, trace)
+
+            fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
+            filePath = os.path.join(tempScreenshotDirectory, fileName)
+            skimage.io.imsave(filePath, newImage)
+            newFrameIndex += 1
+
+            lastFrame = frame
+
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
+
+        moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
+
+        with open(moviePath, "rb") as file:
+            videoData = file.read()
+
+        shutil.rmtree(tempScreenshotDirectory)
+
+        return videoData
+
+
+
+    def prepareBatchesForExecutionSession(self, testingSequence, executionSession):
+        """
+            This function prepares batches that can be fed to the neural network.
+
+            :param testingSequence:
+            :param executionSession:
+            :return:
+        """
+        frames = []
+
+        videoPath = config.getKwolaUserDataDirectory("videos")
+        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(executionSession.id)}.mp4'))
+
+        while (cap.isOpened()):
+            ret, frame = cap.read()
+
+            if ret:
+                image = skimage.color.rgb2hsv(frame[:, :, :3])
+
+                swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
+
+                hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
+
+                frames.append(hueLightnessImage)
+            else:
+                break
+
+        # First compute the present reward at each time step
+        presentRewards = self.computePresentRewards(executionSession)
+
+        # Now compute the discounted reward
+        discountedFutureRewards = self.computeDiscountedFutureRewards(executionSession)
 
         # Create the decaying future execution trace for the prediction algorithm
         tracesReversed = list(executionSession.executionTraces)
