@@ -190,7 +190,7 @@ class DeepLearningAgent(BaseAgent):
 
         return numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=1)
 
-    def nextBestActions(self):
+    def nextBestActions(self, stepNumber):
         """
             Return the next best action predicted by the agent.
 
@@ -205,7 +205,9 @@ class DeepLearningAgent(BaseAgent):
         height = images.shape[2]
 
         for sampleN, image, segmentationMap, additionalFeatureVector in zip(range(len(images)), images, segmentationMaps, additionalFeatures):
-            epsilon = (float(sampleN + 1) / float(len(images))) * 0.95
+            epsilon = (float(sampleN + 1) / float(len(images))) * 0.95 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+
+            print(sampleN, epsilon)
 
             if random.random() > epsilon:
                 image = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))

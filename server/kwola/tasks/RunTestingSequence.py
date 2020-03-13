@@ -58,10 +58,13 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         agent.initialize(environment)
         agent.load()
 
+        step = 0
+
         while stepsRemaining > 0:
             stepsRemaining -= 1
 
-            actions = agent.nextBestActions()
+            actions = agent.nextBestActions(step)
+            step += 1
 
             traces = environment.runActions(actions)
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):

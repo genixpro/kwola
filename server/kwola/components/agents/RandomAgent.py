@@ -40,7 +40,7 @@ class RandomAgent(BaseAgent):
 
         self.environment = environment
 
-    def nextBestActions(self):
+    def nextBestActions(self, stepNumber):
         """
             Return the next best action predicted by the agent.
             :param screenshot:
