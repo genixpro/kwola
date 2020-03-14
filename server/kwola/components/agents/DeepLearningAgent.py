@@ -757,7 +757,7 @@ class DeepLearningAgent(BaseAgent):
 
             # Target Homogenization loss - basically, all of the features for the masked area should produce similar features
             pixelFeaturesImageMasked = pixelFeatureImage * rewardPixelMask
-            targetHomogenizationLoss = ((pixelFeaturesImageMasked - pixelFeatureImage[actionY, actionX]) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.agentConfiguration['pixel_features'])
+            targetHomogenizationLoss = ((pixelFeaturesImageMasked - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.agentConfiguration['pixel_features'])
 
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
