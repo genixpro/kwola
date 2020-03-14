@@ -3,6 +3,7 @@ from selenium import webdriver
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from selenium.webdriver.chrome.options import Options
 import time
+import traceback
 import numpy as np
 from mitmproxy.tools.dump import DumpMaster
 from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
@@ -15,6 +16,7 @@ from kwola.models.ExecutionTraceModel import ExecutionTrace
 import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile
+import skimage.io
 import subprocess
 import os
 import os.path
@@ -301,6 +303,8 @@ class WebEnvironmentSession(BaseEnvironment):
 
     def getImage(self):
         image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
+
+        image = numpy.flip(image[:, :, :3], axis=2)# OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
 
         return image
 

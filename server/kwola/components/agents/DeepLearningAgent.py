@@ -335,19 +335,26 @@ class DeepLearningAgent(BaseAgent):
 
         return discountedFutureRewards
 
-    def createDebugVideoForExecutionSession(self, executionSession):
-        videoPath = config.getKwolaUserDataDirectory("videos")
-        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(executionSession.id)}.mp4'))
+    def readVideoFrames(self, videoFilePath):
+        cap = cv2.VideoCapture(videoFilePath)
 
-        frames = []
+        rawImages = []
 
         while (cap.isOpened()):
-            ret, frame = cap.read()
-
+            ret, rawImage = cap.read()
             if ret:
-                frames.append(frame)
+                rawImage = numpy.flip(rawImage, axis=2) # OpenCV reads everything in BGR format for some reason so flip to RGB
+                rawImages.append(rawImage)
             else:
                 break
+
+        return rawImages
+
+
+    def createDebugVideoForExecutionSession(self, executionSession):
+        videoPath = config.getKwolaUserDataDirectory("videos")
+
+        rawImages = self.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"))
 
         presentRewards = self.computePresentRewards(executionSession)
 
@@ -361,19 +368,19 @@ class DeepLearningAgent(BaseAgent):
         rightSize = 1000
         topMargin = 25
 
-        frameHeight = frames[0].shape[0]
-        frameWidth = frames[0].shape[1]
+        imageHeight = rawImages[0].shape[0]
+        imageWidth = rawImages[0].shape[1]
 
-        newFrameIndex = 0
+        debugImageIndex = 0
 
-        lastFrame = frames.pop(0)
-        lastFrame = numpy.flip(lastFrame, axis=2)
+        lastRawImage = rawImages.pop(0)
+        lastRawImage = numpy.flip(lastRawImage, axis=2)
 
         def addDebugCircleToImage(image, trace):
-            targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 30, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
-            targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 20, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
-            targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 10, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
-            targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 5, shape=[int(frameWidth + extraWidth), int(frameHeight + extraHeight)])
+            targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 30, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 20, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 10, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 5, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
             image[targetCircleCoordsRadius30] = [255, 0, 0]
             image[targetCircleCoordsRadius20] = [255, 0, 0]
             image[targetCircleCoordsRadius10] = [255, 0, 0]
@@ -428,7 +435,7 @@ class DeepLearningAgent(BaseAgent):
             cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
 
-        rewardChartFigure = plt.figure(figsize=(frameWidth / 100, (bottomSize - 50) / 100), dpi=100)
+        rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
         rewardChartAxes = rewardChartFigure.add_subplot(111)
 
         xCoords = numpy.array(range(len(presentRewards)))
@@ -458,16 +465,16 @@ class DeepLearningAgent(BaseAgent):
             rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
             rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (3,))
 
-            image[topSize + frameHeight:-50, leftSize:-rightSize] = rewardChart
+            image[topSize + imageHeight:-50, leftSize:-rightSize] = rewardChart
 
             line.remove()
 
-        def addRewardPredictionsAndStampToImage(plotImage, frame, trace):
+        def addRewardPredictionsAndStampToImage(plotImage, rawImage, trace):
             chartTopMargin = 75
 
             mainColorMap = plt.get_cmap('inferno')
 
-            mainFigure = plt.figure(figsize=((rightSize) / 100, (frameHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
+            mainFigure = plt.figure(figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
 
             rewardPredictionAxes = [
                 mainFigure.add_subplot(len(self.actionsSorted), 2, actionIndex + 1)
@@ -476,8 +483,8 @@ class DeepLearningAgent(BaseAgent):
 
             stampAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 1)
 
-            processedFrame, segmentationMap = processRawImageParallel(frame)
-            boundaryImage = skimage.segmentation.mark_boundaries(frame[::3,::3], segmentationMap[::3,::3])
+            processedImage, segmentationMap = processRawImageParallel(rawImage)
+            boundaryImage = skimage.segmentation.mark_boundaries(rawImage[::3, ::3], segmentationMap[::3, ::3])
 
             segmentationBoundaryAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 2)
             segmentationBoundaryAxes.imshow(boundaryImage, vmin=0, vmax=1)
@@ -486,7 +493,7 @@ class DeepLearningAgent(BaseAgent):
             segmentationBoundaryAxes.set_title(f"{len(numpy.unique(segmentationMap))} segments")
 
             rewardPixelMaskAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 3)
-            rewardPixelMask = self.createRewardPixelMask(processedFrame, trace)
+            rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
             rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
             rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"))
             rewardPixelMaskAxes.set_xticks([])
@@ -496,7 +503,7 @@ class DeepLearningAgent(BaseAgent):
             additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
             presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = \
-                self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedFrame]))), "additionalFeature": additionalFeature})
+                self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))), "additionalFeature": additionalFeature})
             totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
 
 
@@ -524,37 +531,35 @@ class DeepLearningAgent(BaseAgent):
             mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
             plotImage[chartTopMargin:, (-rightSize):] = mainChart
 
-        for frameIndex, trace, frame, presentReward, discountedFutureReward, in zip(range(len(frames)), executionSession.executionTraces, frames, presentRewards, discountedFutureRewards):
-            frame = numpy.flip(frame, axis=2)
-
+        for frameNumber, trace, rawImage, presentReward, discountedFutureReward, in zip(range(len(rawImages)), executionSession.executionTraces, rawImages, presentRewards, discountedFutureRewards):
             extraWidth = leftSize + rightSize
             extraHeight = topSize + bottomSize
 
-            newImage = numpy.ones([frameHeight + extraHeight, frameWidth + extraWidth, 3]) * 255
-            newImage[topSize:-bottomSize, leftSize:-rightSize] = lastFrame
+            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
             addRewardChartToImage(newImage, trace)
-            addRewardPredictionsAndStampToImage(newImage, frame, trace)
+            addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
 
-            fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
+            fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, newImage)
-            newFrameIndex += 1
+            debugImageIndex += 1
 
-            newImage = numpy.ones([frameHeight + extraHeight, frameWidth + extraWidth, 3]) * 255
+            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
             addDebugTextToImage(newImage, trace)
 
-            newImage[topSize:-bottomSize, leftSize:-rightSize] = frame
+            newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
             addRewardChartToImage(newImage, trace)
-            addRewardPredictionsAndStampToImage(newImage, frame, trace)
+            addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
 
-            fileName = f"kwola-screenshot-{newFrameIndex:05d}.png"
+            fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
-            newFrameIndex += 1
+            debugImageIndex += 1
 
-            lastFrame = frame
+            lastRawImage = rawImage
 
         subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
 
@@ -568,11 +573,11 @@ class DeepLearningAgent(BaseAgent):
         return videoData
 
 
-    def createRewardPixelMask(self, frame, trace):
+    def createRewardPixelMask(self, processedImage, trace):
         # We use flood-segmentation on the original image to select which pixels we will update reward values for.
         # This works great on UIs because the elements always have big areas of solid-color which respond in the same
         # way.
-        rewardPixelMask = skimage.segmentation.flood(frame[1], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
+        rewardPixelMask = skimage.segmentation.flood(processedImage[1], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
 
         return rewardPixelMask
 
@@ -592,24 +597,12 @@ class DeepLearningAgent(BaseAgent):
             :param executionSession:
             :return:
         """
-        frames = []
+        processedImages = []
 
         videoPath = config.getKwolaUserDataDirectory("videos")
-        cap = cv2.VideoCapture(os.path.join(videoPath, f'{str(executionSession.id)}.mp4'))
-
-        while (cap.isOpened()):
-            ret, frame = cap.read()
-
-            if ret:
-                image = skimage.color.rgb2hsv(frame[:, :, :3])
-
-                swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
-
-                hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
-
-                frames.append(hueLightnessImage)
-            else:
-                break
+        for rawImage in self.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')):
+            processedImage, segmentationMap = processRawImageParallel(rawImage)
+            processedImages.append(processedImage)
 
         # First compute the present reward at each time step
         presentRewards = self.computePresentRewards(executionSession)
@@ -631,13 +624,13 @@ class DeepLearningAgent(BaseAgent):
 
         executionTraces.reverse()
 
-        shuffledTraceFrameList = list(zip(executionSession.executionTraces, frames, discountedFutureRewards, presentRewards, executionTraces))
+        shuffledTraceFrameList = list(zip(executionSession.executionTraces, processedImages, discountedFutureRewards, presentRewards, executionTraces))
         random.shuffle(shuffledTraceFrameList)
 
         batches = []
 
         for batch in grouper(self.agentConfiguration['batch_size'], shuffledTraceFrameList):
-            batchFrames = []
+            batchProcessedImages = []
             batchAdditionalFeatures = []
             batchActionTypes = []
             batchActionXs = []
@@ -650,15 +643,15 @@ class DeepLearningAgent(BaseAgent):
             batchExecutionFeatures = []
             batchCursors = []
 
-            for trace, frame, discountedFutureReward, presentReward, executionTrace in batch:
-                width = frame.shape[2]
-                height = frame.shape[1]
+            for trace, processedImage, discountedFutureReward, presentReward, executionTrace in batch:
+                width = processedImage.shape[2]
+                height = processedImage.shape[1]
 
                 branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
                 decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
                 additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
-                batchFrames.append(frame)
+                batchProcessedImages.append(processedImage)
                 batchAdditionalFeatures.append(additionalFeature)
 
                 action_index = BradNet.actionDetailsToActionIndex(width, height, len(self.actionsSorted), self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
@@ -696,7 +689,7 @@ class DeepLearningAgent(BaseAgent):
                 batchDiscountedFutureRewards.append(discountedFutureReward)
                 batchPresentRewards.append(presentReward)
 
-                batchRewardPixelMasks.append(self.createRewardPixelMask(frame, trace))
+                batchRewardPixelMasks.append(self.createRewardPixelMask(processedImage, trace))
 
                 batchExecutionFeatures.append(executionFeatures)
 
@@ -704,7 +697,7 @@ class DeepLearningAgent(BaseAgent):
             # Add the same time we down-sample some of the data points to be more compact.
             # We don't need a high precision for the image itself
             batches.append({
-                "frames": numpy.array(batchFrames, dtype=numpy.float16),
+                "processedImages": numpy.array(batchProcessedImages, dtype=numpy.float16),
                 "additionalFeatures": numpy.array(batchAdditionalFeatures, dtype=numpy.float16),
                 "actionTypes": batchActionTypes,
                 "actionXs": numpy.array(batchActionXs, dtype=numpy.int16),
@@ -731,7 +724,7 @@ class DeepLearningAgent(BaseAgent):
             :return:
         """
         presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures, stamp = self.model({
-            "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['frames']))),
+            "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['processedImages']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
             "action_type": batch['actionTypes'],
             "action_x": batch['actionXs'],
@@ -743,7 +736,7 @@ class DeepLearningAgent(BaseAgent):
         targetHomogenizationLosses = []
         discountedFutureRewardLosses = []
 
-        for presentRewardImage, discountedFutureRewardImage, pixelFeatureImage, rewardPixelMask, presentReward, discountedFutureReward, actionType in zip(presentRewardPredictions, discountedFutureRewardPredictions, predictedPixelFeatures, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes']):
+        for presentRewardImage, discountedFutureRewardImage, pixelFeatureImage, rewardPixelMask, presentReward, discountedFutureReward, actionType, actionX, actionY in zip(presentRewardPredictions, discountedFutureRewardPredictions, predictedPixelFeatures, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes'], batch['actionXs'], batch['actionYs']):
             # if len(totalRewardLosses) == 0:
             #     cv2.imshow('image', rewardPixelMask * 200)
             #     cv2.waitKey(50)
@@ -764,8 +757,7 @@ class DeepLearningAgent(BaseAgent):
 
             # Target Homogenization loss - basically, all of the features for the masked area should produce similar features
             pixelFeaturesImageMasked = pixelFeatureImage * rewardPixelMask
-            averageFeatures = (pixelFeaturesImageMasked.sum(1).sum(1) / countPixelMask).unsqueeze(1).unsqueeze(1)
-            targetHomogenizationLoss = ((pixelFeaturesImageMasked - averageFeatures) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.agentConfiguration['pixel_features'])
+            targetHomogenizationLoss = ((pixelFeaturesImageMasked - pixelFeatureImage[actionY, actionX]) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.agentConfiguration['pixel_features'])
 
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
@@ -854,8 +846,8 @@ def processRawImageParallel(rawImage):
     # Convert to HSL representation, but discard the saturation layer
     image = skimage.color.rgb2hsv(rawImage[:, :, :3])
     swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
-    hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
+    processedImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
 
     segmentationMap = globalSegmentImage(rawImage)
 
-    return hueLightnessImage, segmentationMap
+    return processedImage, segmentationMap
