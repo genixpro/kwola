@@ -216,6 +216,7 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
+                    actionChain.click()
                     actionChain.send_keys(action.text)
                     actionChain.perform()
 
