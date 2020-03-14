@@ -224,7 +224,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            print("Running action failed!")
+            print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!")
 
             success = False
 
