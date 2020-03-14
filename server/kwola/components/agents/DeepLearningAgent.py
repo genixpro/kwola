@@ -358,7 +358,7 @@ class DeepLearningAgent(BaseAgent):
         topSize = 250
         bottomSize = 250
         leftSize = 100
-        rightSize = 500
+        rightSize = 1000
         topMargin = 25
 
         frameHeight = frames[0].shape[0]
@@ -418,69 +418,85 @@ class DeepLearningAgent(BaseAgent):
 
             cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}", (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%", (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%", (columnThreeLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}", (columnThreeLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-        fig = plt.figure(figsize=(frameWidth / 100, (bottomSize - 50) / 100), dpi=100)
-        ax = fig.add_subplot(111)
+
+        rewardChartFigure = plt.figure(figsize=(frameWidth / 100, (bottomSize - 50) / 100), dpi=100)
+        rewardChartAxes = rewardChartFigure.add_subplot(111)
 
         xCoords = numpy.array(range(len(presentRewards)))
 
-        ax.set_ylim(ymin=0.0, ymax=0.7)
+        rewardChartAxes.set_ylim(ymin=0.0, ymax=0.7)
 
-        ax.plot(xCoords, presentRewards)
-        ax.plot(xCoords, discountedFutureRewards)
+        rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
-        ax.set_xticks(range(0, len(presentRewards), 5))
-        ax.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
-        ax.set_yticks(numpy.arange(0, 1, 1.0))
-        ax.set_yticklabels(["" for n in range(2)])
+        rewardChartAxes.set_xticks(range(0, len(presentRewards), 5))
+        rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
+        rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
+        rewardChartAxes.set_yticklabels(["" for n in range(2)])
+        rewardChartAxes.set_title("Net Present Reward")
 
         # ax.grid()
-        fig.tight_layout()
+        rewardChartFigure.tight_layout()
 
         def addRewardChartToImage(image, trace):
-            ax.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
-            line = ax.axvline(trace.frameNumber - 1, color='black', linewidth=2)
+            rewardChartAxes.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
+            line = rewardChartAxes.axvline(trace.frameNumber - 1, color='black', linewidth=2)
 
             # If we haven't already shown or saved the plot, then we need to
             # draw the figure first...
-            fig.canvas.draw()
+            rewardChartFigure.canvas.draw()
 
             # Now we can save it to a numpy array.
-            rewardChart = numpy.fromstring(fig.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-            rewardChart = rewardChart.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+            rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (3,))
 
             image[topSize + frameHeight:-50, leftSize:-rightSize] = rewardChart
 
             line.remove()
 
         def addRewardPredictionsAndStampToImage(plotImage, frame, trace):
-            rewardPredictionsFigure = plt.figure(figsize=((rightSize) / 100, (frameHeight + bottomSize) / 100), dpi=100)
-            stampFigure = plt.figure(figsize=((rightSize - 50) / 100, (topSize) / 100), dpi=100)
+            chartTopMargin = 75
+
+            mainColorMap = plt.get_cmap('inferno')
+
+            mainFigure = plt.figure(figsize=((rightSize) / 100, (frameHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
 
             rewardPredictionAxes = [
-                rewardPredictionsFigure.add_subplot(len(self.actionsSorted), 1, actionIndex + 1)
+                mainFigure.add_subplot(len(self.actionsSorted), 2, actionIndex + 1)
                 for actionIndex, action in enumerate(self.actionsSorted)
             ]
 
-            stampAxes = stampFigure.add_subplot(111)
+            stampAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 1)
 
-            image = skimage.color.rgb2hsv(frame[:, :, :3])
-            swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
-            image = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
-            frame = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
+            processedFrame, segmentationMap = processRawImageParallel(frame)
+            boundaryImage = skimage.segmentation.mark_boundaries(frame[::3,::3], segmentationMap[::3,::3])
+
+            segmentationBoundaryAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 2)
+            segmentationBoundaryAxes.imshow(boundaryImage, vmin=0, vmax=1)
+            segmentationBoundaryAxes.set_xticks([])
+            segmentationBoundaryAxes.set_yticks([])
+            segmentationBoundaryAxes.set_title(f"{len(numpy.unique(segmentationMap))} segments")
+
+            rewardPixelMaskAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 3)
+            rewardPixelMask = self.createRewardPixelMask(processedFrame, trace)
+            rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
+            rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"))
+            rewardPixelMaskAxes.set_xticks([])
+            rewardPixelMaskAxes.set_yticks([])
+            rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
 
             additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
             presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = \
-                self.model({"image": frame, "additionalFeature": additionalFeature})
+                self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedFrame]))), "additionalFeature": additionalFeature})
             totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
 
 
@@ -489,32 +505,24 @@ class DeepLearningAgent(BaseAgent):
 
                 rewardPredictionAxes[actionIndex].set_xticks([])
                 rewardPredictionAxes[actionIndex].set_yticks([])
-                im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=plt.get_cmap('inferno'), vmin=0, vmax=0.7)
+                im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap, vmin=0, vmax=0.7)
                 rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
-                rewardPredictionsFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
+                mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
             stampAxes.set_xticks([])
             stampAxes.set_yticks([])
-            stampIm = stampAxes.imshow(stamp.data[0], cmap=plt.get_cmap('inferno'))
-            stampFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
+            stampIm = stampAxes.imshow(stamp.data[0], cmap=mainColorMap)
+            mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
             stampAxes.set_title("Memory Stamp")
 
             # ax.grid()
-            rewardPredictionsFigure.tight_layout()
-            rewardPredictionsFigure.canvas.draw()
-
-            stampFigure.tight_layout()
-            stampFigure.canvas.draw()
+            mainFigure.tight_layout()
+            mainFigure.canvas.draw()
 
             # Now we can save it to a numpy array and paste it into the image
-            rewardPredictionChart = numpy.fromstring(rewardPredictionsFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-            rewardPredictionChart = rewardPredictionChart.reshape(rewardPredictionsFigure.canvas.get_width_height()[::-1] + (3,))
-            plotImage[int(topSize):, (-rightSize):] = rewardPredictionChart
-
-            stampChart = numpy.fromstring(stampFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-            stampChart = stampChart.reshape(stampFigure.canvas.get_width_height()[::-1] + (3,))
-            plotImage[0:int(topSize), (-rightSize + 50):] = stampChart
-
+            mainChart = numpy.fromstring(mainFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+            mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
+            plotImage[chartTopMargin:, (-rightSize):] = mainChart
 
         for frameIndex, trace, frame, presentReward, discountedFutureReward, in zip(range(len(frames)), executionSession.executionTraces, frames, presentRewards, discountedFutureRewards):
             frame = numpy.flip(frame, axis=2)
@@ -558,6 +566,15 @@ class DeepLearningAgent(BaseAgent):
         shutil.rmtree(tempScreenshotDirectory)
 
         return videoData
+
+
+    def createRewardPixelMask(self, frame, trace):
+        # We use flood-segmentation on the original image to select which pixels we will update reward values for.
+        # This works great on UIs because the elements always have big areas of solid-color which respond in the same
+        # way.
+        rewardPixelMask = skimage.segmentation.flood(frame[1], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
+
+        return rewardPixelMask
 
 
     def prepareAdditionalFeaturesForTrace(self, trace):
@@ -679,11 +696,7 @@ class DeepLearningAgent(BaseAgent):
                 batchDiscountedFutureRewards.append(discountedFutureReward)
                 batchPresentRewards.append(presentReward)
 
-                # We use flood-segmentation on the original image to select which pixels we will update reward values for.
-                # This works great on UIs because the elements always have big areas of solid-color which respond in the same
-                # way.
-                rewardPixelMask = skimage.segmentation.flood(frame[1], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
-                batchRewardPixelMasks.append(rewardPixelMask)
+                batchRewardPixelMasks.append(self.createRewardPixelMask(frame, trace))
 
                 batchExecutionFeatures.append(executionFeatures)
 
@@ -826,6 +839,15 @@ class DeepLearningAgent(BaseAgent):
         return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward
 
 
+
+def globalSegmentImage(rawImage):
+    # Segment the image. We use this to help the algorithm with randomly choosing
+    # sections
+    segmentationMap = felzenszwalb(rawImage, scale=300, sigma=0.50, min_size=70)
+    return segmentationMap
+
+
+
 def processRawImageParallel(rawImage):
     # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
 
@@ -834,8 +856,6 @@ def processRawImageParallel(rawImage):
     swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
     hueLightnessImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
 
-    # Segment the image, and randomly choose a segment. This helps to avoid wasting time clicking on useless
-    # parts of the UI.
-    segmentationMap = felzenszwalb(rawImage, scale=300, sigma=0.50, min_size=70)
+    segmentationMap = globalSegmentImage(rawImage)
 
     return hueLightnessImage, segmentationMap
