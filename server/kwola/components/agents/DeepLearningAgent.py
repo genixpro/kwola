@@ -219,6 +219,15 @@ class DeepLearningAgent(BaseAgent):
 
                 actionType, actionX, actionY = BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndexes[0])
 
+                # We take what the neural network chose, but instead of clicking exclusively at that location, we click
+                # anywhere within the segment that pixel is located in based on the segmentation map. This gives a
+                # cleaner result when the neural network can get stuck in a situation of always picking the same
+                # pixel and then it doesn't properly learn behaviours in other spots.
+                chosenSegmentation = segmentationMap[actionY, actionX]
+                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
+                actionX = chosenPixel[0]
+                actionY = chosenPixel[1]
+
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "prediction"
                 actions.append(action)
@@ -226,14 +235,7 @@ class DeepLearningAgent(BaseAgent):
             else:
                 uniques = numpy.unique(segmentationMap)
                 chosenSegmentation = random.choice(uniques)
-
-                possiblePixels = []
-                for x in range(width):
-                    for y in range(height):
-                        if segmentationMap[y, x] == chosenSegmentation:
-                            possiblePixels.append((x, y))
-
-                chosenPixel = random.choice(possiblePixels)
+                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
 
                 actionType = random.randrange(0, len(self.actionsSorted))
                 actionX = chosenPixel[0]
@@ -244,6 +246,18 @@ class DeepLearningAgent(BaseAgent):
                 actions.append(action)
 
         return actions
+
+    def getRandomPixelOfSegmentation(self, segmentationMap, chosenSegmentation):
+        width = segmentationMap.shape[1]
+        height = segmentationMap.shape[0]
+        possiblePixels = []
+        for x in range(width):
+            for y in range(height):
+                if segmentationMap[y, x] == chosenSegmentation:
+                    possiblePixels.append((x, y))
+
+        chosenPixel = random.choice(possiblePixels)
+        return chosenPixel
 
     def computePresentRewards(self, executionSession):
         # First compute the present reward at each time step
