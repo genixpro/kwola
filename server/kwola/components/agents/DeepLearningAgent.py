@@ -362,25 +362,58 @@ class DeepLearningAgent(BaseAgent):
 
         tempScreenshotDirectory = tempfile.mkdtemp()
 
+        debugImageIndex = 0
+
+        lastRawImage = rawImages.pop(0)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+            futures = []
+            for trace, rawImage, presentReward, discountedFutureReward in zip(executionSession.executionTraces, rawImages, presentRewards, discountedFutureRewards):
+                future = executor.submit(self.createDebugImagesForExecutionTrace, executionSession, debugImageIndex, trace, rawImage, lastRawImage, presentReward, discountedFutureReward, tempScreenshotDirectory)
+                futures.append(future)
+                debugImageIndex += 2
+                lastRawImage = rawImage
+
+            concurrent.futures.wait(futures)
+
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
+
+        moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
+
+        with open(moviePath, "rb") as file:
+            videoData = file.read()
+
+        shutil.rmtree(tempScreenshotDirectory)
+
+        return videoData
+
+    def createDebugImagesForExecutionTrace(self, executionSession, debugImageIndex, trace, rawImage,lastRawImage, presentReward, discountedFutureReward, tempScreenshotDirectory):
         topSize = 250
         bottomSize = 250
         leftSize = 100
         rightSize = 1000
         topMargin = 25
 
-        imageHeight = rawImages[0].shape[0]
-        imageWidth = rawImages[0].shape[1]
-
-        debugImageIndex = 0
-
-        lastRawImage = rawImages.pop(0)
-        lastRawImage = numpy.flip(lastRawImage, axis=2)
+        imageHeight = rawImage.shape[0]
+        imageWidth = rawImage.shape[1]
 
         def addDebugCircleToImage(image, trace):
-            targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 30, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
-            targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 20, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
-            targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 10, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
-            targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y), int(leftSize + trace.actionPerformed.x), 5, shape=[int(imageWidth + extraWidth), int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                       int(leftSize + trace.actionPerformed.x), 30,
+                                                                       shape=[int(imageWidth + extraWidth),
+                                                                              int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                       int(leftSize + trace.actionPerformed.x), 20,
+                                                                       shape=[int(imageWidth + extraWidth),
+                                                                              int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                       int(leftSize + trace.actionPerformed.x), 10,
+                                                                       shape=[int(imageWidth + extraWidth),
+                                                                              int(imageHeight + extraHeight)])
+            targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                      int(leftSize + trace.actionPerformed.x), 5,
+                                                                      shape=[int(imageWidth + extraWidth),
+                                                                             int(imageHeight + extraHeight)])
             image[targetCircleCoordsRadius30] = [255, 0, 0]
             image[targetCircleCoordsRadius20] = [255, 0, 0]
             image[targetCircleCoordsRadius10] = [255, 0, 0]
@@ -390,7 +423,7 @@ class DeepLearningAgent(BaseAgent):
             fontSize = 0.5
             fontThickness = 1
             fontColor = (0, 0, 0)
-            
+
             columnOneLeft = leftSize
             columnTwoLeft = leftSize + 300
             columnThreeLeft = leftSize + 550
@@ -403,44 +436,71 @@ class DeepLearningAgent(BaseAgent):
             lineSevenTop = topMargin + 140
             lineEightTop = topMargin + 160
 
-            cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize,
+                        fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"{str(executionSession.id)}", (columnOneLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}", (columnOneLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"{str(executionSession.id)}", (columnOneLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX,
+                        fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX,
+                        fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image,
+                        f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}",
+                        (columnOneLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
+                        cv2.LINE_AA)
+            cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX,
+                        fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}", (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%", (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}",
+                        (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
+                        cv2.LINE_AA)
+            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineThreeTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%",
+                        (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
+                        cv2.LINE_AA)
 
-            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-
+            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop),
+                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
         rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
         rewardChartAxes = rewardChartFigure.add_subplot(111)
 
-        xCoords = numpy.array(range(len(presentRewards)))
+        xCoords = numpy.array(range(len(executionSession.executionTraces)))
 
         rewardChartAxes.set_ylim(ymin=0.0, ymax=0.7)
+
+        presentRewards = self.computePresentRewards(executionSession)
+        discountedFutureRewards = self.computeDiscountedFutureRewards(executionSession)
 
         rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
@@ -474,7 +534,8 @@ class DeepLearningAgent(BaseAgent):
 
             mainColorMap = plt.get_cmap('inferno')
 
-            mainFigure = plt.figure(figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
+            mainFigure = plt.figure(
+                figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
 
             rewardPredictionAxes = [
                 mainFigure.add_subplot(len(self.actionsSorted), 2, actionIndex + 1)
@@ -503,16 +564,17 @@ class DeepLearningAgent(BaseAgent):
             additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
             presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = \
-                self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))), "additionalFeature": additionalFeature})
+                self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
+                            "additionalFeature": additionalFeature})
             totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
-
 
             for actionIndex, action in enumerate(self.actionsSorted):
                 maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
 
                 rewardPredictionAxes[actionIndex].set_xticks([])
                 rewardPredictionAxes[actionIndex].set_yticks([])
-                im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap, vmin=0, vmax=0.7)
+                im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap,
+                                                              vmin=0, vmax=0.7)
                 rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                 mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
@@ -531,46 +593,31 @@ class DeepLearningAgent(BaseAgent):
             mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
             plotImage[chartTopMargin:, (-rightSize):] = mainChart
 
-        for frameNumber, trace, rawImage, presentReward, discountedFutureReward, in zip(range(len(rawImages)), executionSession.executionTraces, rawImages, presentRewards, discountedFutureRewards):
-            extraWidth = leftSize + rightSize
-            extraHeight = topSize + bottomSize
 
-            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
-            newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
-            addDebugTextToImage(newImage, trace)
-            addDebugCircleToImage(newImage, trace)
-            addRewardChartToImage(newImage, trace)
-            addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
+        extraWidth = leftSize + rightSize
+        extraHeight = topSize + bottomSize
 
-            fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
-            filePath = os.path.join(tempScreenshotDirectory, fileName)
-            skimage.io.imsave(filePath, newImage)
-            debugImageIndex += 1
+        newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+        newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
+        addDebugTextToImage(newImage, trace)
+        addDebugCircleToImage(newImage, trace)
+        addRewardChartToImage(newImage, trace)
+        addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
 
-            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
-            addDebugTextToImage(newImage, trace)
+        fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
+        filePath = os.path.join(tempScreenshotDirectory, fileName)
+        skimage.io.imsave(filePath, newImage)
 
-            newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
-            addRewardChartToImage(newImage, trace)
-            addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
+        newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+        addDebugTextToImage(newImage, trace)
 
-            fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
-            filePath = os.path.join(tempScreenshotDirectory, fileName)
-            skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
-            debugImageIndex += 1
+        newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
+        addRewardChartToImage(newImage, trace)
+        addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
 
-            lastRawImage = rawImage
-
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
-
-        moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
-
-        with open(moviePath, "rb") as file:
-            videoData = file.read()
-
-        shutil.rmtree(tempScreenshotDirectory)
-
-        return videoData
+        fileName = f"kwola-screenshot-{debugImageIndex+1:05d}.png"
+        filePath = os.path.join(tempScreenshotDirectory, fileName)
+        skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
 
     def createRewardPixelMask(self, processedImage, trace):
@@ -601,7 +648,7 @@ class DeepLearningAgent(BaseAgent):
 
         videoPath = config.getKwolaUserDataDirectory("videos")
         for rawImage in self.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')):
-            processedImage, segmentationMap = processRawImageParallel(rawImage)
+            processedImage = processRawImageParallel(rawImage, doSegmentation=False)
             processedImages.append(processedImage)
 
         # First compute the present reward at each time step
@@ -840,7 +887,7 @@ def globalSegmentImage(rawImage):
 
 
 
-def processRawImageParallel(rawImage):
+def processRawImageParallel(rawImage, doSegmentation=True):
     # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
 
     # Convert to HSL representation, but discard the saturation layer
@@ -848,6 +895,9 @@ def processRawImageParallel(rawImage):
     swapped = numpy.swapaxes(numpy.swapaxes(image, 0, 2), 1, 2)
     processedImage = numpy.concatenate((swapped[0:1], swapped[2:]), axis=0)
 
-    segmentationMap = globalSegmentImage(rawImage)
+    if doSegmentation:
+        segmentationMap = globalSegmentImage(rawImage)
 
-    return processedImage, segmentationMap
+        return processedImage, segmentationMap
+    else:
+        return processedImage
