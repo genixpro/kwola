@@ -265,16 +265,16 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
                     if action.times == 1:
-                        print("Clicking", action.x, action.y, action.source)
+                        print("Clicking", action.x, action.y, action.source, flush=True)
                         actionChain.click()
                     elif action.times == 2:
-                        print("Double Clicking", action.x, action.y, action.source)
+                        print("Double Clicking", action.x, action.y, action.source, flush=True)
                         actionChain.double_click()
 
                     actionChain.perform()
 
             if isinstance(action, RightClickAction):
-                    print("Right Clicking", action.x, action.y, action.source)
+                    print("Right Clicking", action.x, action.y, action.source, flush=True)
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
@@ -282,7 +282,7 @@ class WebEnvironmentSession(BaseEnvironment):
                     actionChain.perform()
 
             if isinstance(action, TypeAction):
-                    print("Typing", action.text, "at", action.x, action.y, action.source)
+                    print("Typing", action.text, "at", action.x, action.y, action.source, flush=True)
                     actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                     actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
                     actionChain.move_by_offset(action.x, action.y)
@@ -295,7 +295,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!")
+            print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
 

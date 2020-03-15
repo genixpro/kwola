@@ -9,6 +9,7 @@
   "enable_trace_prediction_loss": true,
   "enable_execution_feature_prediction_loss": true,
   "enable_cursor_prediction_loss": true,
+  "enable_loss_balancing": false,
   "layer_1_num_kernels": 32,
   "layer_1_dilation": 1,
   "layer_1_kernel_size": 3,

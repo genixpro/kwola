@@ -468,6 +468,12 @@ class DeepLearningAgent(BaseAgent):
                 image[targetCircleCoordsRadius10] = [255, 0, 0]
                 image[targetCircleCoordsRadius5] = [255, 0, 0]
 
+            def addCropViewToImage(image, trace):
+                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth, imageHeight)
+
+                cropRectangle = skimage.draw.rectangle_perimeter((int(topSize + cropTop), int(leftSize + cropLeft)), (int(topSize + cropBottom), int(leftSize + cropRight)))
+                image[cropRectangle] = [255, 0, 0]
+
             def addDebugTextToImage(image, trace):
                 fontSize = 0.5
                 fontThickness = 1
@@ -660,6 +666,7 @@ class DeepLearningAgent(BaseAgent):
             newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
+            addCropViewToImage(newImage, trace)
             addBottomRewardChartToImage(newImage, trace)
             addRightSideDebugCharts(newImage, rawImage, trace)
 
@@ -699,6 +706,21 @@ class DeepLearningAgent(BaseAgent):
         additionalFeature = self.variableWrapperFunc(torch.FloatTensor(numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)))
 
         return additionalFeature
+
+    def calculateTrainingCropPosition(self, trace, imageWidth, imageHeight):
+        cropLeft = trace.actionPerformed.x - self.agentConfiguration['training_crop_width'] / 2
+        cropTop = trace.actionPerformed.y - self.agentConfiguration['training_crop_height'] / 2
+
+        cropLeft = max(0, cropLeft)
+        cropLeft = min(imageWidth - self.agentConfiguration['training_crop_width'], cropLeft)
+
+        cropTop = max(0, cropTop)
+        cropTop = min(imageHeight - self.agentConfiguration['training_crop_height'], cropTop)
+
+        cropRight = cropLeft + self.agentConfiguration['training_crop_width']
+        cropBottom = cropTop + self.agentConfiguration['training_crop_height']
+
+        return (int(cropLeft), int(cropTop), int(cropRight), int(cropBottom))
 
     def prepareBatchesForExecutionSession(self, testingSequence, executionSession):
         """
@@ -759,21 +781,23 @@ class DeepLearningAgent(BaseAgent):
                 width = processedImage.shape[2]
                 height = processedImage.shape[1]
 
+                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
+
                 branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
                 decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
                 additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
-                batchProcessedImages.append(processedImage)
+                batchProcessedImages.append(processedImage[:, cropTop:cropBottom, cropLeft:cropRight])
                 batchAdditionalFeatures.append(additionalFeature)
 
-                action_index = BradNet.actionDetailsToActionIndex(width, height, len(self.actionsSorted), self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
+                action_index = BradNet.actionDetailsToActionIndex(self.agentConfiguration['training_crop_width'], self.agentConfiguration['training_crop_height'], len(self.actionsSorted), self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x - cropLeft, trace.actionPerformed.y - cropTop)
 
                 pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
-                batchPixelActionMaps.append(pixelActionMap)
+                batchPixelActionMaps.append(pixelActionMap[:, cropTop:cropBottom, cropLeft:cropRight])
 
                 batchActionTypes.append(trace.actionPerformed.type)
-                batchActionXs.append(trace.actionPerformed.x)
-                batchActionYs.append(trace.actionPerformed.y)
+                batchActionXs.append(trace.actionPerformed.x - cropLeft)
+                batchActionYs.append(trace.actionPerformed.y - cropTop)
                 batchActionIndexes.append(action_index)
 
                 cursorVector = [0] * len(self.cursors)
@@ -804,7 +828,9 @@ class DeepLearningAgent(BaseAgent):
                 batchDiscountedFutureRewards.append(discountedFutureReward)
                 batchPresentRewards.append(presentReward)
 
-                batchRewardPixelMasks.append(self.createRewardPixelMask(processedImage, trace))
+                rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
+
+                batchRewardPixelMasks.append(rewardPixelMask[cropTop:cropBottom, cropLeft:cropRight])
 
                 batchExecutionFeatures.append(executionFeatures)
 
@@ -969,7 +995,10 @@ class DeepLearningAgent(BaseAgent):
                               predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor([predictedCursorAdustment]))
 
         self.optimizer.zero_grad()
-        totalRebalancedLoss.backward()
+        if self.agentConfiguration['enable_loss_balancing']:
+            totalRebalancedLoss.backward()
+        else:
+            totalLoss.backward()
         self.optimizer.step()
 
         totalRewardLoss = float(totalRewardLoss.data.item())
