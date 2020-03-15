@@ -13,6 +13,7 @@ import numpy
 import gzip
 from datetime import datetime
 import traceback
+import redis
 import json
 import bson
 import tempfile
@@ -57,6 +58,17 @@ def loadBatch(batchFilename):
 
 def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
     testingSequenceId, executionSessionId = random.choice(executionSessions)
+
+    batchCache = redis.Redis(db=3)
+
+    shuffling = random.randint(0, config.getAgentConfiguration()['training_number_shufflings_cached_per_execution_sequence'])
+    cacheId = str(executionSessionId) + f"_shuffling_{shuffling}"
+
+    cached = batchCache.get(cacheId)
+    if cached is not None:
+        batches = pickle.loads(cached)
+        return batches
+
     future = processExecutor.submit(prepareBatchesForExecutionSession, testingSequenceId, str(executionSessionId), batchDirectory)
 
     batchFilenames = future.result()
@@ -64,7 +76,11 @@ def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
     with concurrent.futures.ThreadPoolExecutor() as threadExecutor:
         batches = threadExecutor.map(loadBatch, batchFilenames)
 
-    return list(batches)
+    batches = list(batches)
+
+    batchCache.set(cacheId, pickle.dumps(batches))
+
+    return batches
 
 
 def printMovingAverageLosses(trainingStep):
@@ -140,6 +156,9 @@ def runTrainingStep(trainingSequenceId):
     del environment
 
     try:
+        totalSessionsNeeded = 1 + (agentConfig['iterations_per_training_step'] * agentConfig['batch_size']) / agentConfig['testing_sequence_length']
+        sessionsPrepared = 0
+
         batchFutures = []
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
@@ -147,6 +166,7 @@ def runTrainingStep(trainingSequenceId):
                 # First we chuck some sequence requests into the queue into the queue
                 for n in range(agentConfig['training_precompute_sessions_count'] + agentConfig['training_execution_sessions_in_one_loop']):
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
+                    sessionsPrepared += 1
 
                 while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
                     batches = []
@@ -157,8 +177,9 @@ def runTrainingStep(trainingSequenceId):
                         # Wait on the first future in the list to finish
                         sessionBatches = batchFutures.pop(0).result()
 
-                        # Request another session be prepared
-                        batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
+                        if sessionsPrepared < totalSessionsNeeded + 1:
+                            # Request another session be prepared
+                            batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
 
                         batches.extend(sessionBatches)
 

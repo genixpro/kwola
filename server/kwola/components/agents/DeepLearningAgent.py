@@ -419,7 +419,7 @@ class DeepLearningAgent(BaseAgent):
 
             concurrent.futures.wait(futures)
 
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory)
 
         moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
 
@@ -552,7 +552,7 @@ class DeepLearningAgent(BaseAgent):
 
             xCoords = numpy.array(range(len(presentRewards)))
 
-            rewardChartAxes.set_ylim(ymin=0.0, ymax=0.7)
+            rewardChartAxes.set_ylim(ymin=0.0, ymax=10.0)
 
             rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
@@ -639,7 +639,7 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionAxes[actionIndex].set_xticks([])
                     rewardPredictionAxes[actionIndex].set_yticks([])
                     im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap,
-                                                                  vmin=0, vmax=0.7)
+                                                                  vmin=-1.00, vmax=10.0)
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 

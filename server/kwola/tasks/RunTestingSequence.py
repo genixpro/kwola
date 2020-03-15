@@ -93,11 +93,6 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                 with open(os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
                     cloneFile.write(origFile.read())
 
-            if not shouldBeRandom and sessionN == 0:
-                videoData = agent.createDebugVideoForExecutionSession(executionSession)
-                with open(os.path.join(kwolaDebugVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
-                    cloneFile.write(videoData)
-
         for session in executionSessions:
             session.save()
 
@@ -110,6 +105,12 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
 
         testSequence.executionSessions = executionSessions
         testSequence.save()
+
+        for sessionN, videoPath, executionSession in zip(range(len(videoPaths)), videoPaths, executionSessions):
+            if not shouldBeRandom and sessionN == 0:
+                videoData = agent.createDebugVideoForExecutionSession(executionSession)
+                with open(os.path.join(kwolaDebugVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
+                    cloneFile.write(videoData)
 
         environment.shutdown()
     except Exception as e:
