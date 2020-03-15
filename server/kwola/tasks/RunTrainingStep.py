@@ -61,8 +61,11 @@ def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
 
     batchCache = redis.Redis(db=3)
 
-    shuffling = random.randint(0, config.getAgentConfiguration()['training_number_shufflings_cached_per_execution_sequence'])
-    cacheId = str(executionSessionId) + f"_shuffling_{shuffling}"
+    if config.getAgentConfiguration()['training_number_shufflings_cached_per_execution_sequence'] > 1:
+        shuffling = random.randint(0, config.getAgentConfiguration()['training_number_shufflings_cached_per_execution_sequence'] - 1)
+        cacheId = str(executionSessionId) + f"_shuffling_{shuffling}"
+    else:
+        cacheId = str(executionSessionId) + f"_shuffling_0"
 
     cached = batchCache.get(cacheId)
     if cached is not None:
