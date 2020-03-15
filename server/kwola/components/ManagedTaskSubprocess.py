@@ -80,7 +80,7 @@ class ManagedTaskSubprocess:
         atexit.register(lambda: self.process.kill())
 
         self.output = ''
-        while self.process.returncode is None and (TaskProcess.resultStartString not in self.output) and self.alive:
+        while self.process.returncode is None and (TaskProcess.resultFinishString not in self.output) and self.alive:
             nextChars = str(self.process.stdout.readline(), 'utf8')
             for nextChar in nextChars:
                 if nextChar == chr(127):

@@ -1,41 +1,44 @@
 from .BaseAgent import BaseAgent
-import math, random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.autograd as autograd
-import torch.nn.functional as F
-import scipy.signal
-import pandas
-import cv2
-import os
-import pickle
-import tempfile
-import subprocess
-import bz2
-import os.path
+from .BradNet import BradNet
+from kwola.components.utilities.debug_plot import showRewardImageDebug
+from kwola.config import config
+from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.models.actions.ClickTapAction import ClickTapAction
-import os.path
-import numpy
-import skimage
-import skimage.draw
-import skimage.transform
-import skimage.color
-import skimage.io
-from skimage.segmentation import felzenszwalb, mark_boundaries
-import shutil
-import cv2
-import matplotlib.pyplot as plt
-import skimage.segmentation
-import concurrent.futures
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
+from skimage.segmentation import felzenszwalb, mark_boundaries
+import bz2
+import concurrent.futures
+import cv2
+import cv2
 import itertools
-from kwola.config import config
-
-from .BradNet import BradNet
+import math, random
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import traceback
+import numpy
+import os
+import os.path
+import os.path
+import pandas
+import pickle
+import scipy.signal
+import shutil
+import skimage
+import skimage.color
+import skimage.draw
+import skimage.io
+import skimage.segmentation
+import skimage.transform
+import subprocess
+import tempfile
+import torch
+import torch.autograd as autograd
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 
 def grouper(n, iterable):
     """Chunks an iterable into sublists"""
@@ -190,6 +193,23 @@ class DeepLearningAgent(BaseAgent):
 
         return numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=1)
 
+    def createPixelActionMap(self, actionMaps, height, width):
+        pixelActionMap = numpy.zeros([3, height, width], dtype=numpy.uint8)
+
+        for element in actionMaps:
+            actionTypes = []
+
+            if element['canClick']:
+                actionTypes.append(self.actionsSorted.index("click"))
+            if element['canType']:
+                actionTypes.append(self.actionsSorted.index("typeEmail"))
+                actionTypes.append(self.actionsSorted.index("typePassword"))
+
+            for actionTypeIndex in actionTypes:
+                pixelActionMap[actionTypeIndex, int(element['top']):int(element['bottom']), int(element['left']):int(element['right'])] = 1
+
+        return pixelActionMap
+
     def nextBestActions(self, stepNumber):
         """
             Return the next best action predicted by the agent.
@@ -198,22 +218,32 @@ class DeepLearningAgent(BaseAgent):
             :return:
         """
         images, segmentationMaps = self.getImage()
+        subEnvActionMaps = self.environment.getActionMaps()
         additionalFeatures = self.getAdditionalFeatures()
         actions = []
 
         width = images.shape[3]
         height = images.shape[2]
 
-        for sampleN, image, segmentationMap, additionalFeatureVector in zip(range(len(images)), images, segmentationMaps, additionalFeatures):
+        for sampleN, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(images)), images, segmentationMaps, additionalFeatures, subEnvActionMaps):
             epsilon = (float(sampleN + 1) / float(len(images))) * 0.85 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+
+            pixelActionMap = self.createPixelActionMap(actionMaps, height, width)
+            pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor([pixelActionMap]))
 
             if random.random() > epsilon:
                 image = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
                 additionalFeatureVector = self.variableWrapperFunc(torch.FloatTensor(numpy.array([additionalFeatureVector])))
 
-                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = self.model({"image": image, "additionalFeature": additionalFeatureVector})
+                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = self.model({
+                    "image": image,
+                    "additionalFeature": additionalFeatureVector,
+                    "pixelActionMaps": pixelActionMapTensor
+                })
 
                 totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
+
+                totalRewardPredictions = totalRewardPredictions
 
                 actionIndexes = totalRewardPredictions.reshape([1, width * height * len(self.actionsSorted)]).argmax(1).data
 
@@ -221,7 +251,7 @@ class DeepLearningAgent(BaseAgent):
 
                 # We take what the neural network chose, but instead of clicking exclusively at that location, we click
                 # anywhere within the segment that pixel is located in based on the segmentation map. This gives a
-                # cleaner result when the neural network can get stuck in a situation of always picking the same
+                # cleaner result while the neural network can get stuck in a situation of always picking the same
                 # pixel and then it doesn't properly learn behaviours in other spots.
                 chosenSegmentation = segmentationMap[actionY, actionX]
                 chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
@@ -233,8 +263,11 @@ class DeepLearningAgent(BaseAgent):
                 actions.append(action)
 
             else:
-                uniques = numpy.unique(segmentationMap)
-                chosenSegmentation = random.choice(uniques)
+                # Choose a random segment, but we only want to choose from among the segments that reside within
+                # areas that have actions associated with them. We use the pixelActionMap to do that.
+                segmentationMapMasked = numpy.array(segmentationMap + 1) * numpy.minimum(pixelActionMap.sum(axis=0), 1)
+                uniqueSegmentsInsideMask = list(sorted(numpy.unique(segmentationMapMasked).tolist()))
+                chosenSegmentation = random.choice(uniqueSegmentsInsideMask[1:]) - 1
                 chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
 
                 actionType = random.randrange(0, len(self.actionsSorted))
@@ -366,11 +399,16 @@ class DeepLearningAgent(BaseAgent):
 
         lastRawImage = rawImages.pop(0)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+        mpl.rcParams['figure.max_open_warning'] = 1000
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
-            for trace, rawImage, presentReward, discountedFutureReward in zip(executionSession.executionTraces, rawImages, presentRewards, discountedFutureRewards):
-                future = executor.submit(self.createDebugImagesForExecutionTrace, executionSession, debugImageIndex, trace, rawImage, lastRawImage, presentReward, discountedFutureReward, tempScreenshotDirectory)
+            for trace, rawImage in zip(executionSession.executionTraces, rawImages):
+                future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
                 futures.append(future)
+
+                # self.createDebugImagesForExecutionTrace(str(executionSession.id), debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
+
                 debugImageIndex += 2
                 lastRawImage = rawImage
 
@@ -387,237 +425,258 @@ class DeepLearningAgent(BaseAgent):
 
         return videoData
 
-    def createDebugImagesForExecutionTrace(self, executionSession, debugImageIndex, trace, rawImage,lastRawImage, presentReward, discountedFutureReward, tempScreenshotDirectory):
-        topSize = 250
-        bottomSize = 250
-        leftSize = 100
-        rightSize = 1000
-        topMargin = 25
+    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory):
+        try:
+            trace = ExecutionTrace.from_json(trace)
 
-        imageHeight = rawImage.shape[0]
-        imageWidth = rawImage.shape[1]
+            topSize = 250
+            bottomSize = 250
+            leftSize = 100
+            rightSize = 1250
+            topMargin = 25
 
-        def addDebugCircleToImage(image, trace):
-            targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                       int(leftSize + trace.actionPerformed.x), 30,
-                                                                       shape=[int(imageWidth + extraWidth),
-                                                                              int(imageHeight + extraHeight)])
-            targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                       int(leftSize + trace.actionPerformed.x), 20,
-                                                                       shape=[int(imageWidth + extraWidth),
-                                                                              int(imageHeight + extraHeight)])
-            targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                       int(leftSize + trace.actionPerformed.x), 10,
-                                                                       shape=[int(imageWidth + extraWidth),
-                                                                              int(imageHeight + extraHeight)])
-            targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                      int(leftSize + trace.actionPerformed.x), 5,
-                                                                      shape=[int(imageWidth + extraWidth),
-                                                                             int(imageHeight + extraHeight)])
-            image[targetCircleCoordsRadius30] = [255, 0, 0]
-            image[targetCircleCoordsRadius20] = [255, 0, 0]
-            image[targetCircleCoordsRadius10] = [255, 0, 0]
-            image[targetCircleCoordsRadius5] = [255, 0, 0]
+            imageHeight = rawImage.shape[0]
+            imageWidth = rawImage.shape[1]
 
-        def addDebugTextToImage(image, trace):
-            fontSize = 0.5
-            fontThickness = 1
-            fontColor = (0, 0, 0)
+            presentReward = presentRewards[trace.frameNumber - 1]
+            discountedFutureReward = discountedFutureRewards[trace.frameNumber - 1]
 
-            columnOneLeft = leftSize
-            columnTwoLeft = leftSize + 300
-            columnThreeLeft = leftSize + 550
-            lineOneTop = topMargin + 20
-            lineTwoTop = topMargin + 40
-            lineThreeTop = topMargin + 60
-            lineFourTop = topMargin + 80
-            lineFiveTop = topMargin + 100
-            lineSixTop = topMargin + 120
-            lineSevenTop = topMargin + 140
-            lineEightTop = topMargin + 160
+            def addDebugCircleToImage(image, trace):
+                targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                           int(leftSize + trace.actionPerformed.x), 30,
+                                                                           shape=[int(imageWidth + extraWidth),
+                                                                                  int(imageHeight + extraHeight)])
+                targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                           int(leftSize + trace.actionPerformed.x), 20,
+                                                                           shape=[int(imageWidth + extraWidth),
+                                                                                  int(imageHeight + extraHeight)])
+                targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                           int(leftSize + trace.actionPerformed.x), 10,
+                                                                           shape=[int(imageWidth + extraWidth),
+                                                                                  int(imageHeight + extraHeight)])
+                targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                          int(leftSize + trace.actionPerformed.x), 5,
+                                                                          shape=[int(imageWidth + extraWidth),
+                                                                                 int(imageHeight + extraHeight)])
+                image[targetCircleCoordsRadius30] = [255, 0, 0]
+                image[targetCircleCoordsRadius20] = [255, 0, 0]
+                image[targetCircleCoordsRadius10] = [255, 0, 0]
+                image[targetCircleCoordsRadius5] = [255, 0, 0]
 
-            cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize,
-                        fontColor, fontThickness, cv2.LINE_AA)
+            def addDebugTextToImage(image, trace):
+                fontSize = 0.5
+                fontThickness = 1
+                fontColor = (0, 0, 0)
 
-            cv2.putText(image, f"{str(executionSession.id)}", (columnOneLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX,
-                        fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX,
-                        fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image,
-                        f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}",
-                        (columnOneLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
-                        cv2.LINE_AA)
-            cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                columnOneLeft = leftSize
+                columnTwoLeft = leftSize + 300
+                columnThreeLeft = leftSize + 550
+                lineOneTop = topMargin + 20
+                lineTwoTop = topMargin + 40
+                lineThreeTop = topMargin + 60
+                lineFourTop = topMargin + 80
+                lineFiveTop = topMargin + 100
+                lineSixTop = topMargin + 120
+                lineSevenTop = topMargin + 140
+                lineEightTop = topMargin + 160
 
-            cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize,
+                            fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"{str(executionSessionId)}", (columnOneLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX,
+                            fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX,
+                            fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image,
+                            f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}",
+                            (columnOneLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
+                            cv2.LINE_AA)
+                cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX,
-                        fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}",
-                        (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
-                        cv2.LINE_AA)
-            cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineThreeTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%",
-                        (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
-                        cv2.LINE_AA)
+                cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
-            cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX,
+                            fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop),
-                        cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}",
+                            (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
+                            cv2.LINE_AA)
+                cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineThreeTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%",
+                            (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
+                            cv2.LINE_AA)
 
-        rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
-        rewardChartAxes = rewardChartFigure.add_subplot(111)
+                cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-        xCoords = numpy.array(range(len(executionSession.executionTraces)))
+                cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-        rewardChartAxes.set_ylim(ymin=0.0, ymax=0.7)
+            rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
+            rewardChartAxes = rewardChartFigure.add_subplot(111)
 
-        presentRewards = self.computePresentRewards(executionSession)
-        discountedFutureRewards = self.computeDiscountedFutureRewards(executionSession)
+            xCoords = numpy.array(range(len(presentRewards)))
 
-        rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
+            rewardChartAxes.set_ylim(ymin=0.0, ymax=0.7)
 
-        rewardChartAxes.set_xticks(range(0, len(presentRewards), 5))
-        rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
-        rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
-        rewardChartAxes.set_yticklabels(["" for n in range(2)])
-        rewardChartAxes.set_title("Net Present Reward")
+            rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
-        # ax.grid()
-        rewardChartFigure.tight_layout()
-
-        def addRewardChartToImage(image, trace):
-            rewardChartAxes.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
-            line = rewardChartAxes.axvline(trace.frameNumber - 1, color='black', linewidth=2)
-
-            # If we haven't already shown or saved the plot, then we need to
-            # draw the figure first...
-            rewardChartFigure.canvas.draw()
-
-            # Now we can save it to a numpy array.
-            rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-            rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (3,))
-
-            image[topSize + imageHeight:-50, leftSize:-rightSize] = rewardChart
-
-            line.remove()
-
-        def addRewardPredictionsAndStampToImage(plotImage, rawImage, trace):
-            chartTopMargin = 75
-
-            mainColorMap = plt.get_cmap('inferno')
-
-            mainFigure = plt.figure(
-                figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
-
-            rewardPredictionAxes = [
-                mainFigure.add_subplot(len(self.actionsSorted), 2, actionIndex + 1)
-                for actionIndex, action in enumerate(self.actionsSorted)
-            ]
-
-            stampAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 1)
-
-            processedImage, segmentationMap = processRawImageParallel(rawImage)
-            boundaryImage = skimage.segmentation.mark_boundaries(rawImage[::3, ::3], segmentationMap[::3, ::3])
-
-            segmentationBoundaryAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 2)
-            segmentationBoundaryAxes.imshow(boundaryImage, vmin=0, vmax=1)
-            segmentationBoundaryAxes.set_xticks([])
-            segmentationBoundaryAxes.set_yticks([])
-            segmentationBoundaryAxes.set_title(f"{len(numpy.unique(segmentationMap))} segments")
-
-            rewardPixelMaskAxes = mainFigure.add_subplot(len(self.actionsSorted), 2, len(self.actionsSorted) + 3)
-            rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
-            rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
-            rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"))
-            rewardPixelMaskAxes.set_xticks([])
-            rewardPixelMaskAxes.set_yticks([])
-            rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
-
-            additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
-
-            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = \
-                self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
-                            "additionalFeature": additionalFeature})
-            totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
-
-            for actionIndex, action in enumerate(self.actionsSorted):
-                maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
-
-                rewardPredictionAxes[actionIndex].set_xticks([])
-                rewardPredictionAxes[actionIndex].set_yticks([])
-                im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap,
-                                                              vmin=0, vmax=0.7)
-                rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
-                mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
-
-            stampAxes.set_xticks([])
-            stampAxes.set_yticks([])
-            stampIm = stampAxes.imshow(stamp.data[0], cmap=mainColorMap)
-            mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
-            stampAxes.set_title("Memory Stamp")
+            rewardChartAxes.set_xticks(range(0, len(presentRewards), 5))
+            rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
+            rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
+            rewardChartAxes.set_yticklabels(["" for n in range(2)])
+            rewardChartAxes.set_title("Net Present Reward")
 
             # ax.grid()
-            mainFigure.tight_layout()
-            mainFigure.canvas.draw()
+            rewardChartFigure.tight_layout()
 
-            # Now we can save it to a numpy array and paste it into the image
-            mainChart = numpy.fromstring(mainFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-            mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
-            plotImage[chartTopMargin:, (-rightSize):] = mainChart
+            def addBottomRewardChartToImage(image, trace):
+                rewardChartAxes.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
+                line = rewardChartAxes.axvline(trace.frameNumber - 1, color='black', linewidth=2)
+
+                # If we haven't already shown or saved the plot, then we need to
+                # draw the figure first...
+                rewardChartFigure.canvas.draw()
+
+                # Now we can save it to a numpy array.
+                rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+                rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (3,))
+
+                image[topSize + imageHeight:-50, leftSize:-rightSize] = rewardChart
+
+                line.remove()
+
+            def addRightSideDebugCharts(plotImage, rawImage, trace):
+                chartTopMargin = 75
+                numColumns = 3
+                numRows = 3
+                boundaryImageShrinkRatio = 3
+
+                mainColorMap = plt.get_cmap('inferno')
+
+                mainFigure = plt.figure(
+                    figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
+
+                rewardPredictionAxes = [
+                    mainFigure.add_subplot(numColumns, numRows, actionIndex + 1)
+                    for actionIndex, action in enumerate(self.actionsSorted)
+                ]
+
+                stampAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 1)
+
+                processedImage, segmentationMap = processRawImageParallel(rawImage)
+                boundaryImage = skimage.segmentation.mark_boundaries(rawImage[::boundaryImageShrinkRatio, ::boundaryImageShrinkRatio], segmentationMap[::boundaryImageShrinkRatio, ::boundaryImageShrinkRatio])
+
+                segmentationBoundaryAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 2)
+                segmentationBoundaryAxes.imshow(boundaryImage, vmin=0, vmax=1)
+                segmentationBoundaryAxes.set_xticks([])
+                segmentationBoundaryAxes.set_yticks([])
+                segmentationBoundaryAxes.set_title(f"{len(numpy.unique(segmentationMap))} segments")
+
+                rewardPixelMaskAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
+                rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
+                rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
+                rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"))
+                rewardPixelMaskAxes.set_xticks([])
+                rewardPixelMaskAxes.set_yticks([])
+                rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
+
+                pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 4)
+                pixelActionMap = self.createPixelActionMap(trace.actionMaps, imageHeight, imageWidth)
+                actionPixelCount = numpy.count_nonzero(pixelActionMap)
+                pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255)
+                pixelActionMapAxes.set_xticks([])
+                pixelActionMapAxes.set_yticks([])
+                pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
+
+                additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
+
+                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = \
+                    self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
+                                "additionalFeature": additionalFeature,
+                                "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap])))
+                                })
+                totalRewardPredictions = (presentRewardPredictions + discountedFutureRewardPredictions).data
+
+                for actionIndex, action in enumerate(self.actionsSorted):
+                    maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
+
+                    rewardPredictionAxes[actionIndex].set_xticks([])
+                    rewardPredictionAxes[actionIndex].set_yticks([])
+                    im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap,
+                                                                  vmin=0, vmax=0.7)
+                    rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
+                    mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
+
+                stampAxes.set_xticks([])
+                stampAxes.set_yticks([])
+                stampIm = stampAxes.imshow(stamp.data[0], cmap=mainColorMap)
+                mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
+                stampAxes.set_title("Memory Stamp")
+
+                # ax.grid()
+                mainFigure.tight_layout()
+                mainFigure.canvas.draw()
+
+                # Now we can save it to a numpy array and paste it into the image
+                mainChart = numpy.fromstring(mainFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
+                mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
+                plotImage[chartTopMargin:, (-rightSize):] = mainChart
 
 
-        extraWidth = leftSize + rightSize
-        extraHeight = topSize + bottomSize
+            extraWidth = leftSize + rightSize
+            extraHeight = topSize + bottomSize
 
-        newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
-        newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
-        addDebugTextToImage(newImage, trace)
-        addDebugCircleToImage(newImage, trace)
-        addRewardChartToImage(newImage, trace)
-        addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
+            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
+            addDebugTextToImage(newImage, trace)
+            addDebugCircleToImage(newImage, trace)
+            addBottomRewardChartToImage(newImage, trace)
+            addRightSideDebugCharts(newImage, rawImage, trace)
 
-        fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
-        filePath = os.path.join(tempScreenshotDirectory, fileName)
-        skimage.io.imsave(filePath, newImage)
+            fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
+            filePath = os.path.join(tempScreenshotDirectory, fileName)
+            skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
-        newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
-        addDebugTextToImage(newImage, trace)
+            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            addDebugTextToImage(newImage, trace)
 
-        newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
-        addRewardChartToImage(newImage, trace)
-        addRewardPredictionsAndStampToImage(newImage, rawImage, trace)
+            newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
+            addBottomRewardChartToImage(newImage, trace)
+            addRightSideDebugCharts(newImage, rawImage, trace)
 
-        fileName = f"kwola-screenshot-{debugImageIndex+1:05d}.png"
-        filePath = os.path.join(tempScreenshotDirectory, fileName)
-        skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
+            fileName = f"kwola-screenshot-{debugImageIndex+1:05d}.png"
+            filePath = os.path.join(tempScreenshotDirectory, fileName)
+            skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
+
+            print ("Completed debug image", fileName, flush=True)
+        except Exception:
+            traceback.print_exc()
+            print("Failed to create debug image!", flush=True)
 
 
     def createRewardPixelMask(self, processedImage, trace):
@@ -679,6 +738,7 @@ class DeepLearningAgent(BaseAgent):
         for batch in grouper(self.agentConfiguration['batch_size'], shuffledTraceFrameList):
             batchProcessedImages = []
             batchAdditionalFeatures = []
+            batchPixelActionMaps = []
             batchActionTypes = []
             batchActionXs = []
             batchActionYs = []
@@ -702,6 +762,9 @@ class DeepLearningAgent(BaseAgent):
                 batchAdditionalFeatures.append(additionalFeature)
 
                 action_index = BradNet.actionDetailsToActionIndex(width, height, len(self.actionsSorted), self.actionsSorted.index(trace.actionPerformed.type), trace.actionPerformed.x, trace.actionPerformed.y)
+
+                pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
+                batchPixelActionMaps.append(pixelActionMap)
 
                 batchActionTypes.append(trace.actionPerformed.type)
                 batchActionXs.append(trace.actionPerformed.x)
@@ -746,6 +809,7 @@ class DeepLearningAgent(BaseAgent):
             batches.append({
                 "processedImages": numpy.array(batchProcessedImages, dtype=numpy.float16),
                 "additionalFeatures": numpy.array(batchAdditionalFeatures, dtype=numpy.float16),
+                "pixelActionMaps": numpy.array(batchPixelActionMaps, dtype=numpy.uint8),
                 "actionTypes": batchActionTypes,
                 "actionXs": numpy.array(batchActionXs, dtype=numpy.int16),
                 "actionYs": numpy.array(batchActionYs, dtype=numpy.int16),
@@ -773,6 +837,7 @@ class DeepLearningAgent(BaseAgent):
         presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures, stamp = self.model({
             "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['processedImages']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
+            "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(batch['pixelActionMaps'])),
             "action_type": batch['actionTypes'],
             "action_x": batch['actionXs'],
             "action_y": batch['actionYs']
@@ -787,6 +852,8 @@ class DeepLearningAgent(BaseAgent):
             # if len(totalRewardLosses) == 0:
             #     cv2.imshow('image', rewardPixelMask * 200)
             #     cv2.waitKey(50)
+            width = presentRewardImage.shape[2]
+            height = presentRewardImage.shape[1]
 
             rewardPixelMask = self.variableWrapperFunc(torch.IntTensor(rewardPixelMask))
             # actionType = self.variableWrapperFunc(torch.IntTensor(actionType))
@@ -799,12 +866,33 @@ class DeepLearningAgent(BaseAgent):
 
             countPixelMask = (rewardPixelMask.sum())
 
-            presentRewardLoss = (presentRewardsMasked - torchBatchPresentRewards).pow(2).sum() / countPixelMask
-            discountedFutureRewardLoss = (discountedFutureRewardsMasked - torchBatchDiscountedFutureRewards).pow(2).sum() / countPixelMask
+            presentRewardLossMap = (torchBatchPresentRewards - presentRewardsMasked)
+            discountedFutureRewardLossMap = (torchBatchDiscountedFutureRewards - discountedFutureRewardsMasked)
 
-            # Target Homogenization loss - basically, all of the features for the masked area should produce similar features
-            pixelFeaturesImageMasked = pixelFeatureImage * rewardPixelMask
-            targetHomogenizationLoss = ((pixelFeaturesImageMasked - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).sum() / (countPixelMask * self.agentConfiguration['pixel_features'])
+            presentRewardLoss = presentRewardLossMap.pow(2).sum() / countPixelMask
+            discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
+
+            if self.agentConfiguration['enable_homogenization_loss']:
+                # Target Homogenization loss - basically, all of the pixels for the masked area should produce similar features to each other and different features
+                # from other pixels.
+                targetHomogenizationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).mean(axis=0)
+                targetDifferentiationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * (1.0 - rewardPixelMask)).pow(2).mean(axis=0)
+                targetHomogenizationLoss = (targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (width * height - countPixelMask))
+                targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
+
+            # if len(totalRewardLosses) == 0:
+            #     showRewardImageDebug(numpy.array(presentRewardsMasked.cpu().data), 'present-reward-prediction-masked', vmin=-0.1, vmax=0.2)
+            #     showRewardImageDebug(numpy.array(discountedFutureRewardsMasked.cpu().data), 'future-reward-prediction-masked', vmin=-0.1, vmax=0.2)
+            #
+            #     showRewardImageDebug(numpy.array(torchBatchPresentRewards.cpu().data), 'present-reward-target', vmin=-0.1, vmax=0.2)
+            #     showRewardImageDebug(numpy.array(torchBatchDiscountedFutureRewards.cpu().data), 'future-reward-target', vmin=-0.1, vmax=0.2)
+            #
+            #     showRewardImageDebug(numpy.array(presentRewardLossMap.cpu().data), 'present-loss', vmin=-0.1, vmax=0.2)
+            #     showRewardImageDebug(numpy.array(discountedFutureRewardLossMap.cpu().data), "future-loss", vmin=-0.1, vmax=0.2)
+            #
+            #     showRewardImageDebug(numpy.array(targetHomogenizationDifferenceMap.cpu().data), 'homogenization')
+            #     showRewardImageDebug(numpy.array(targetDifferentiationDifferenceMap.cpu().data), 'differentiation')
+            #     # cv2.waitKey(50)
 
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
@@ -812,18 +900,31 @@ class DeepLearningAgent(BaseAgent):
             presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
             discountedFutureRewardLosses.append(discountedFutureRewardLoss.unsqueeze(0))
 
-            targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
+        if self.agentConfiguration['enable_trace_prediction_loss']:
+            tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).abs().mean()
+        else:
+            tracePredictionLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
-        tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).abs().mean()
 
-        predictedExecutionFeaturesLoss = (predictedExecutionFeatures - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).abs().mean()
+        if self.agentConfiguration['enable_execution_feature_prediction_loss']:
+            predictedExecutionFeaturesLoss = (predictedExecutionFeatures - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).abs().mean()
+        else:
+            predictedExecutionFeaturesLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
-        predictedCursorLoss = (predictedCursors - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).abs().mean()
+
+        if self.agentConfiguration['enable_cursor_prediction_loss']:
+            predictedCursorLoss = (predictedCursors - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).abs().mean()
+        else:
+            predictedCursorLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
         totalRewardLoss = torch.mean(torch.cat(totalRewardLosses))
         presentRewardLoss = torch.mean(torch.cat(presentRewardLosses))
         discountedFutureRewardLoss = torch.mean(torch.cat(discountedFutureRewardLosses))
-        targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
+
+        if self.agentConfiguration['enable_homogenization_loss']:
+            targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
+        else:
+            targetHomogenizationLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
         totalLoss = totalRewardLoss + tracePredictionLoss + predictedExecutionFeaturesLoss + targetHomogenizationLoss + predictedCursorLoss
 
@@ -843,6 +944,18 @@ class DeepLearningAgent(BaseAgent):
             executionFeaturesAdustment = 1
             homogenizationAdustment = 1
             predictedCursorAdustment = 1
+
+        if not self.agentConfiguration['enable_trace_prediction_loss']:
+            tracePredictionAdustment = 1
+
+        if not self.agentConfiguration['enable_execution_feature_prediction_loss']:
+            executionFeaturesAdustment = 1
+
+        if not self.agentConfiguration['enable_cursor_prediction_loss']:
+            predictedCursorAdustment = 1
+
+        if not self.agentConfiguration['enable_homogenization_loss']:
+            homogenizationAdustment = 1
 
         totalRebalancedLoss = totalRewardLoss + \
                               tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor([tracePredictionAdustment])) + \

@@ -205,9 +205,9 @@ class BradNet(nn.Module):
         pixelFeatureMap = self.mainModelCurrent(merged)
         # print("Output", output.shape, flush=True)
 
-        presentRewards = self.presentRewardConvolutionCurrent(pixelFeatureMap)
-        discountFutureRewards = self.discountedFutureRewardConvolutionCurrent(pixelFeatureMap)
-        totalReward = presentRewards + discountFutureRewards
+        presentRewards = self.presentRewardConvolutionCurrent(pixelFeatureMap) * data['pixelActionMaps']
+        discountFutureRewards = self.discountedFutureRewardConvolutionCurrent(pixelFeatureMap) * data['pixelActionMaps']
+        totalReward = (presentRewards + discountFutureRewards)
 
         action_types = []
         action_xs = []

@@ -93,14 +93,14 @@ def printMovingAverageLosses(trainingStep):
 
 
 def runTrainingStep(trainingSequenceId):
+    agentConfig = config.getAgentConfiguration()
+
     print("Starting Training Step", flush=True)
-    testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(25))
+    testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
     if len(testSequences) == 0:
         print("Error, no test sequences in db to train on for training step.", flush=True)
         print("==== Training Step Completed ====", flush=True)
         return {}
-
-    agentConfig = config.getAgentConfiguration()
 
     trainingStep = TrainingStep()
     trainingStep.startTime = datetime.now()
@@ -145,17 +145,27 @@ def runTrainingStep(trainingSequenceId):
         with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
             with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
                 # First we chuck some sequence requests into the queue into the queue
-                for n in range(agentConfig['training_precompute_sessions_count']):
+                for n in range(agentConfig['training_precompute_sessions_count'] + agentConfig['training_execution_sessions_in_one_loop']):
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
 
                 while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
-                    # Wait on the first future in the list to finish
-                    batches = batchFutures.pop(0).result()
+                    batches = []
 
-                    # Request another session be prepared
-                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
+                    # Snag the batches from several different sessions and shuffle them together in memory before feeding to to the network. Reduces the effect
+                    # of bias caused by training several successive iterations with the same sequence.
+                    for n in range(agentConfig['training_execution_sessions_in_one_loop']):
+                        # Wait on the first future in the list to finish
+                        sessionBatches = batchFutures.pop(0).result()
 
-                    print("Training on execution session with ", len(batches), " batches", flush=True)
+                        # Request another session be prepared
+                        batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
+
+                        batches.extend(sessionBatches)
+
+                    print(f"Training on {agentConfig['training_execution_sessions_in_one_loop']} execution sessions with ", len(batches), " batches between them.", flush=True)
+
+                    # Randomly shuffle all the batches from the different execution sessions in with one another.
+                    random.shuffle(batches)
 
                     for batch in batches:
                         totalReward = 0

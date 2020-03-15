@@ -12,6 +12,7 @@ from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
+from kwola.models.ActionMap import ActionMap
 from kwola.models.ExecutionTraceModel import ExecutionTrace
 import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
@@ -169,12 +170,79 @@ class WebEnvironmentSession(BaseEnvironment):
         return cumulativeBranchExecutionVector
 
 
+    def getActionMaps(self):
+        elementActionMaps = self.driver.execute_script("""
+            function isFunction(functionToCheck) {
+             return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
+            }
+        
+            const actionMaps = [];
+            const domElements = document.querySelectorAll("*");
+            
+            for(let element of domElements)
+            {
+                const bounds = element.getBoundingClientRect();
+                const data = {
+                    canClick: false,
+                    canRightClick: false,
+                    canType: false,
+                    left: bounds.left,
+                    right: bounds.right,
+                    top: bounds.top,
+                    bottom: bounds.bottom,
+                    width: bounds.width,
+                    height: bounds.height
+                };
+                
+                if (element.tagName === "A"
+                        || element.tagName === "BUTTON"
+                        || element.tagName === "AREA"
+                        || element.tagName === "AUDIO"
+                        || element.tagName === "VIDEO"
+                        || element.tagName === "INPUT"
+                        || element.tagName === "SELECT"
+                        || element.tagName === "TEXTAREA")
+                    data.canClick = true;
+                
+                if (element.tagName === "INPUT"
+                        || element.tagName === "SELECT"
+                        || element.tagName === "TEXTAREA")
+                    data.canType = true;
+                
+                if (isFunction(element.onclick) 
+                    || isFunction(element.onauxclick) 
+                    || isFunction(element.onmousedown)
+                    || isFunction(element.onmouseup)
+                    || isFunction(element.ontouchend)
+                    || isFunction(element.ontouchstart))
+                    data.canClick = true;
+                
+                if (isFunction(element.oncontextmenu))
+                    data.canRightClick = true;
+                
+                if (isFunction(element.onkeydown) 
+                    || isFunction(element.onkeypress) 
+                    || isFunction(element.onkeyup))
+                    data.canType = true;
+                
+                if (data.canType || data.canClick || data.canRightClick)
+                    if (data.width > 0 && data.height > 0)
+                        actionMaps.push(data);
+            }
+            
+            return actionMaps;
+        """)
+
+        return [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
+
+
     def runAction(self, action):
         executionTrace = ExecutionTrace()
         executionTrace.time = datetime.now()
         executionTrace.actionPerformed = action
         executionTrace.errorsDetected = []
         executionTrace.startURL = self.driver.current_url
+        executionTrace.actionMaps = self.getActionMaps()
 
         startLogCount = len(self.driver.get_log('browser'))
 
