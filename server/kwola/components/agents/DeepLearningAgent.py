@@ -49,6 +49,8 @@ def grouper(n, iterable):
            return
        yield chunk
 
+
+# noinspection PyUnresolvedReferences
 class DeepLearningAgent(BaseAgent):
     """
         This class represents a deep learning agent, which uses reinforcement learning to make the automated testing more effective
@@ -267,10 +269,13 @@ class DeepLearningAgent(BaseAgent):
                 # areas that have actions associated with them. We use the pixelActionMap to do that.
                 segmentationMapMasked = numpy.array(segmentationMap + 1) * numpy.minimum(pixelActionMap.sum(axis=0), 1)
                 uniqueSegmentsInsideMask = list(sorted(numpy.unique(segmentationMapMasked).tolist()))
-                chosenSegmentation = random.choice(uniqueSegmentsInsideMask[1:]) - 1
-                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
+                chosenSegmentation = random.choice(uniqueSegmentsInsideMask[1:])
+                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMapMasked, chosenSegmentation)
 
-                actionType = random.randrange(0, len(self.actionsSorted))
+                actionsAtPixel = pixelActionMap[:, chosenPixel[1], chosenPixel[0]]
+                actionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if actionsAtPixel[actionIndex]]
+
+                actionType = random.choice(actionIndexes)
                 actionX = chosenPixel[0]
                 actionY = chosenPixel[1]
 
