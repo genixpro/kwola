@@ -22,12 +22,30 @@ import os
 from kwola.config import config
 
 def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, batchDirectory):
-    testSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequenceId)).first()
-    executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
+    agentConfiguration = config.getAgentConfiguration()
 
-    agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu=None)
+    batchCache = redis.Redis(db=3)
+    if agentConfiguration['training_number_shufflings_cached_per_execution_session'] > 1:
+        shuffling = random.randint(0, agentConfiguration['training_number_shufflings_cached_per_execution_session'] - 1)
+        cacheId = str(executionSessionId) + f"_shuffling_{shuffling}"
+    else:
+        cacheId = str(executionSessionId) + f"_shuffling_0"
 
-    sequenceBatches = agent.prepareBatchesForExecutionSession(testSequence, executionSession)
+    cached = batchCache.get(cacheId)
+    if cached is not None:
+        sequenceBatches = pickle.loads(gzip.decompress(cached))
+    else:
+        testSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequenceId)).first()
+        executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
+
+        agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
+
+        sequenceBatches = agent.prepareBatchesForExecutionSession(testSequence, executionSession)
+
+        pickleBytes = pickle.dumps(sequenceBatches)
+        compressedPickleBytes = gzip.compress(pickleBytes)
+
+        batchCache.set(cacheId, compressedPickleBytes, ex=agentConfiguration['training_execution_session_cache_expiration_seconds'])
 
     fileNames = []
 
@@ -35,9 +53,7 @@ def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, bat
         fileDescriptor, fileName = tempfile.mkstemp(".bin", dir=batchDirectory)
 
         with open(fileDescriptor, 'wb') as batchFile:
-            # compressedBatchFile = gzip.open(batchFile, 'wb', compresslevel=5)
             pickle.dump(batch, batchFile)
-            # compressedBatchFile.close()
 
         fileNames.append(fileName)
 
@@ -59,19 +75,6 @@ def loadBatch(batchFilename):
 def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
     testingSequenceId, executionSessionId = random.choice(executionSessions)
 
-    batchCache = redis.Redis(db=3)
-
-    if config.getAgentConfiguration()['training_number_shufflings_cached_per_execution_sequence'] > 1:
-        shuffling = random.randint(0, config.getAgentConfiguration()['training_number_shufflings_cached_per_execution_sequence'] - 1)
-        cacheId = str(executionSessionId) + f"_shuffling_{shuffling}"
-    else:
-        cacheId = str(executionSessionId) + f"_shuffling_0"
-
-    cached = batchCache.get(cacheId)
-    if cached is not None:
-        batches = pickle.loads(cached)
-        return batches
-
     future = processExecutor.submit(prepareBatchesForExecutionSession, testingSequenceId, str(executionSessionId), batchDirectory)
 
     batchFilenames = future.result()
@@ -80,8 +83,6 @@ def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
         batches = threadExecutor.map(loadBatch, batchFilenames)
 
     batches = list(batches)
-
-    batchCache.set(cacheId, pickle.dumps(batches))
 
     return batches
 

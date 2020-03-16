@@ -406,7 +406,7 @@ class DeepLearningAgent(BaseAgent):
 
         mpl.rcParams['figure.max_open_warning'] = 1000
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             futures = []
             for trace, rawImage in zip(executionSession.executionTraces, rawImages):
                 future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
@@ -639,7 +639,7 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionAxes[actionIndex].set_xticks([])
                     rewardPredictionAxes[actionIndex].set_yticks([])
                     im = rewardPredictionAxes[actionIndex].imshow(totalRewardPredictions[0][actionIndex], cmap=mainColorMap,
-                                                                  vmin=-1.00, vmax=10.0)
+                                                                  vmin=-1.00, vmax=5.0)
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
@@ -879,7 +879,7 @@ class DeepLearningAgent(BaseAgent):
         targetHomogenizationLosses = []
         discountedFutureRewardLosses = []
 
-        for presentRewardImage, discountedFutureRewardImage, pixelFeatureImage, rewardPixelMask, presentReward, discountedFutureReward, actionType, actionX, actionY in zip(presentRewardPredictions, discountedFutureRewardPredictions, predictedPixelFeatures, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes'], batch['actionXs'], batch['actionYs']):
+        for presentRewardImage, discountedFutureRewardImage, pixelFeatureImage, rewardPixelMask, presentReward, discountedFutureReward, actionType, actionX, actionY, pixelActionMap in zip(presentRewardPredictions, discountedFutureRewardPredictions, predictedPixelFeatures, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes'], batch['actionXs'], batch['actionYs'], batch['pixelActionMaps']):
             # if len(totalRewardLosses) == 0:
             #     cv2.imshow('image', rewardPixelMask * 200)
             #     cv2.waitKey(50)
@@ -887,6 +887,7 @@ class DeepLearningAgent(BaseAgent):
             height = presentRewardImage.shape[1]
 
             rewardPixelMask = self.variableWrapperFunc(torch.IntTensor(rewardPixelMask))
+            pixelActionMap = self.variableWrapperFunc(torch.IntTensor(pixelActionMap))
             # actionType = self.variableWrapperFunc(torch.IntTensor(actionType))
 
             presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
@@ -897,8 +898,8 @@ class DeepLearningAgent(BaseAgent):
 
             countPixelMask = (rewardPixelMask.sum())
 
-            presentRewardLossMap = (torchBatchPresentRewards - presentRewardsMasked)
-            discountedFutureRewardLossMap = (torchBatchDiscountedFutureRewards - discountedFutureRewardsMasked)
+            presentRewardLossMap = (torchBatchPresentRewards - presentRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
+            discountedFutureRewardLossMap = (torchBatchDiscountedFutureRewards - discountedFutureRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
 
             presentRewardLoss = presentRewardLossMap.pow(2).sum() / countPixelMask
             discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
@@ -912,18 +913,18 @@ class DeepLearningAgent(BaseAgent):
                 targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
 
             # if len(totalRewardLosses) == 0:
-            #     showRewardImageDebug(numpy.array(presentRewardsMasked.cpu().data), 'present-reward-prediction-masked', vmin=-0.1, vmax=0.2)
-            #     showRewardImageDebug(numpy.array(discountedFutureRewardsMasked.cpu().data), 'future-reward-prediction-masked', vmin=-0.1, vmax=0.2)
+            #     showRewardImageDebug(numpy.array(presentRewardsMasked.cpu().data), 'present-reward-prediction-masked', vmin=-10, vmax=20)
+            #     showRewardImageDebug(numpy.array(discountedFutureRewardsMasked.cpu().data), 'future-reward-prediction-masked', vmin=-10, vmax=20)
             #
-            #     showRewardImageDebug(numpy.array(torchBatchPresentRewards.cpu().data), 'present-reward-target', vmin=-0.1, vmax=0.2)
-            #     showRewardImageDebug(numpy.array(torchBatchDiscountedFutureRewards.cpu().data), 'future-reward-target', vmin=-0.1, vmax=0.2)
+            #     showRewardImageDebug(numpy.array(torchBatchPresentRewards.cpu().data), 'present-reward-target', vmin=-10, vmax=20)
+            #     showRewardImageDebug(numpy.array(torchBatchDiscountedFutureRewards.cpu().data), 'future-reward-target', vmin=-10, vmax=20)
             #
-            #     showRewardImageDebug(numpy.array(presentRewardLossMap.cpu().data), 'present-loss', vmin=-0.1, vmax=0.2)
-            #     showRewardImageDebug(numpy.array(discountedFutureRewardLossMap.cpu().data), "future-loss", vmin=-0.1, vmax=0.2)
-            #
-            #     showRewardImageDebug(numpy.array(targetHomogenizationDifferenceMap.cpu().data), 'homogenization')
-            #     showRewardImageDebug(numpy.array(targetDifferentiationDifferenceMap.cpu().data), 'differentiation')
-            #     # cv2.waitKey(50)
+            #     showRewardImageDebug(numpy.array(presentRewardLossMap.cpu().data), 'present-loss', vmin=-10, vmax=20)
+            #     showRewardImageDebug(numpy.array(discountedFutureRewardLossMap.cpu().data), "future-loss", vmin=-10, vmax=20)
+
+                # showRewardImageDebug(numpy.array(targetHomogenizationDifferenceMap.cpu().data), 'homogenization')
+                # showRewardImageDebug(numpy.array(targetDifferentiationDifferenceMap.cpu().data), 'differentiation')
+                # cv2.waitKey(50)
 
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
