@@ -45,7 +45,8 @@ def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, bat
         pickleBytes = pickle.dumps(sequenceBatches)
         compressedPickleBytes = gzip.compress(pickleBytes)
 
-        batchCache.set(cacheId, compressedPickleBytes, ex=agentConfiguration['training_execution_session_cache_expiration_seconds'])
+        # Add small random number here to ensure there isn't a bunch of entries expiring in the cache at the same time
+        batchCache.set(cacheId, compressedPickleBytes, ex=agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, 30))
 
     fileNames = []
 

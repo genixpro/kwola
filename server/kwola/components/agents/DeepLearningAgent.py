@@ -13,6 +13,7 @@ import bz2
 import concurrent.futures
 import cv2
 import cv2
+from datetime import datetime
 import itertools
 import math, random
 import matplotlib as mpl
@@ -227,43 +228,23 @@ class DeepLearningAgent(BaseAgent):
         width = images.shape[3]
         height = images.shape[2]
 
-        for sampleN, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(images)), images, segmentationMaps, additionalFeatures, subEnvActionMaps):
-            epsilon = (float(sampleN + 1) / float(len(images))) * 0.85 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+        batchSampleIndexes = []
+        imageBatch = []
+        additionalFeatureVectorBatch = []
+        pixelActionMapsBatch = []
+        segmentationMapsBatch = []
+
+        for sampleIndex, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(images)), images, segmentationMaps, additionalFeatures, subEnvActionMaps):
+            epsilon = (float(sampleIndex + 1) / float(len(images))) * 0.85 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
 
             pixelActionMap = self.createPixelActionMap(actionMaps, height, width)
-            pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor([pixelActionMap]))
 
             if random.random() > epsilon:
-                image = self.variableWrapperFunc(torch.FloatTensor(numpy.array([image])))
-                additionalFeatureVector = self.variableWrapperFunc(torch.FloatTensor(numpy.array([additionalFeatureVector])))
-
-                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = self.model({
-                    "image": image,
-                    "additionalFeature": additionalFeatureVector,
-                    "pixelActionMaps": pixelActionMapTensor
-                })
-
-                totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
-
-                totalRewardPredictions = totalRewardPredictions
-
-                actionIndexes = totalRewardPredictions.reshape([1, width * height * len(self.actionsSorted)]).argmax(1).data
-
-                actionType, actionX, actionY = BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndexes[0])
-
-                # We take what the neural network chose, but instead of clicking exclusively at that location, we click
-                # anywhere within the segment that pixel is located in based on the segmentation map. This gives a
-                # cleaner result while the neural network can get stuck in a situation of always picking the same
-                # pixel and then it doesn't properly learn behaviours in other spots.
-                chosenSegmentation = segmentationMap[actionY, actionX]
-                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
-                actionX = chosenPixel[0]
-                actionY = chosenPixel[1]
-
-                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
-                action.source = "prediction"
-                actions.append(action)
-
+                batchSampleIndexes.append(sampleIndex)
+                imageBatch.append(image)
+                additionalFeatureVectorBatch.append(additionalFeatureVector)
+                pixelActionMapsBatch.append(pixelActionMap)
+                segmentationMapsBatch.append(segmentationMap)
             else:
                 # Choose a random segment, but we only want to choose from among the segments that reside within
                 # areas that have actions associated with them. We use the pixelActionMap to do that.
@@ -281,9 +262,44 @@ class DeepLearningAgent(BaseAgent):
 
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
-                actions.append(action)
+                actions.append((sampleIndex, action))
 
-        return actions
+        if len(imageBatch) > 0:
+            imageTensor = self.variableWrapperFunc(torch.FloatTensor(numpy.array(imageBatch)))
+            additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor(numpy.array(additionalFeatureVectorBatch)))
+            pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor(pixelActionMapsBatch))
+
+            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp = self.model({
+                "image": imageTensor,
+                "additionalFeature": additionalFeatureTensor,
+                "pixelActionMaps": pixelActionMapTensor
+            })
+
+            totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
+
+            totalRewardPredictions = totalRewardPredictions
+
+            actionIndexes = totalRewardPredictions.reshape([len(imageBatch), width * height * len(self.actionsSorted)]).argmax(1).data
+
+            for sampleIndex, actionIndex, segmentationMap in zip(batchSampleIndexes, actionIndexes, segmentationMapsBatch):
+                actionType, actionX, actionY = BradNet.actionIndexToActionDetails(width, height, len(self.actionsSorted), actionIndex)
+
+                # We take what the neural network chose, but instead of clicking exclusively at that location, we click
+                # anywhere within the segment that pixel is located in based on the segmentation map. This gives a
+                # cleaner result while the neural network can get stuck in a situation of always picking the same
+                # pixel and then it doesn't properly learn behaviours in other spots.
+                chosenSegmentation = segmentationMap[actionY, actionX]
+                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMap, chosenSegmentation)
+                actionX = chosenPixel[0]
+                actionY = chosenPixel[1]
+
+                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
+                action.source = "prediction"
+                actions.append((sampleIndex, action))
+
+        sortedActions = sorted(actions, key=lambda row: row[0])
+
+        return [action[1] for action in sortedActions]
 
     def getRandomPixelOfSegmentation(self, segmentationMap, chosenSegmentation):
         width = segmentationMap.shape[1]
@@ -404,6 +420,7 @@ class DeepLearningAgent(BaseAgent):
 
         lastRawImage = rawImages.pop(0)
 
+        mpl.use('Agg')
         mpl.rcParams['figure.max_open_warning'] = 1000
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
@@ -547,25 +564,26 @@ class DeepLearningAgent(BaseAgent):
                 cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop),
                             cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-            rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
-            rewardChartAxes = rewardChartFigure.add_subplot(111)
-
-            xCoords = numpy.array(range(len(presentRewards)))
-
-            rewardChartAxes.set_ylim(ymin=0.0, ymax=10.0)
-
-            rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
-
-            rewardChartAxes.set_xticks(range(0, len(presentRewards), 5))
-            rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
-            rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
-            rewardChartAxes.set_yticklabels(["" for n in range(2)])
-            rewardChartAxes.set_title("Net Present Reward")
-
-            # ax.grid()
-            rewardChartFigure.tight_layout()
 
             def addBottomRewardChartToImage(image, trace):
+                rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
+                rewardChartAxes = rewardChartFigure.add_subplot(111)
+
+                xCoords = numpy.array(range(len(presentRewards)))
+
+                rewardChartAxes.set_ylim(ymin=0.0, ymax=10.0)
+
+                rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
+
+                rewardChartAxes.set_xticks(range(0, len(presentRewards), 5))
+                rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
+                rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
+                rewardChartAxes.set_yticklabels(["" for n in range(2)])
+                rewardChartAxes.set_title("Net Present Reward")
+
+                # ax.grid()
+                rewardChartFigure.tight_layout()
+
                 rewardChartAxes.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
                 line = rewardChartAxes.axvline(trace.frameNumber - 1, color='black', linewidth=2)
 
@@ -580,6 +598,7 @@ class DeepLearningAgent(BaseAgent):
                 image[topSize + imageHeight:-50, leftSize:-rightSize] = rewardChart
 
                 line.remove()
+                plt.close(rewardChartFigure)
 
             def addRightSideDebugCharts(plotImage, rawImage, trace):
                 chartTopMargin = 75
@@ -657,6 +676,7 @@ class DeepLearningAgent(BaseAgent):
                 mainChart = numpy.fromstring(mainFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
                 mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
                 plotImage[chartTopMargin:, (-rightSize):] = mainChart
+                plt.close(mainFigure)
 
 
             extraWidth = leftSize + rightSize
