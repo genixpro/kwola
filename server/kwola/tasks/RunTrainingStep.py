@@ -147,7 +147,7 @@ def runTrainingStep(trainingSequenceId):
     environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
 
     agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all")
-    agent.initialize(environment)
+    agent.initialize(environment.branchFeatureSize())
     agent.load()
 
     environment.shutdown()

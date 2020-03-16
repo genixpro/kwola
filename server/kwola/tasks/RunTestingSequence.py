@@ -2,16 +2,57 @@ from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
+from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.components.agents.RandomAgent import RandomAgent
 from kwola.components.TaskProcess import TaskProcess
 import random
+import pickle
 from datetime import datetime
+import pandas as pd
+import torch
+import numpy
+import concurrent.futures
 import traceback
 from bson import ObjectId
+import tempfile
 import os
+import multiprocessing
+from multiprocessing import Pool
 from kwola.config import config
+
+def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
+    if shouldBeRandom:
+        agent = RandomAgent()
+    else:
+        agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
+
+    agent.initialize(branchFeatureSize)
+    agent.load()
+
+    while True:
+        message = subProcessCommandQueue.get()
+
+        if message == "quit":
+            break
+        else:
+            inferenceBatchFileName = message
+
+
+        with open(inferenceBatchFileName, 'rb') as file:
+            step, images, envActionMaps, additionalFeatures = pickle.load(file)
+
+        os.unlink(inferenceBatchFileName)
+
+        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures)
+
+        resultFileDescriptor, resultFileName = tempfile.mkstemp()
+        with open(resultFileDescriptor, 'wb') as file:
+            pickle.dump(actions, file)
+
+        subProcessResultQueue.put(resultFileName)
+
 
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     print("Starting New Testing Sequence", flush=True)
@@ -50,20 +91,34 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         errorHashes = set()
         uniqueErrors = []
 
-        if shouldBeRandom:
-            agent = RandomAgent()
-        else:
-            agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
-
-        agent.initialize(environment)
-        agent.load()
-
         step = 0
+
+        subProcessCommandQueue = multiprocessing.Queue()
+        subProcessResultQueue = multiprocessing.Queue()
+        subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+        subProcess.start()
 
         while stepsRemaining > 0:
             stepsRemaining -= 1
 
-            actions = agent.nextBestActions(step)
+            images = environment.getImages()
+            envActionMaps = environment.getActionMaps()
+
+            branchFeature = environment.getBranchFeatures()
+            decayingExecutionTraceFeature = environment.getExecutionTraceFeatures()
+            additionalFeatures = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=1)
+
+            fileDescriptor, inferenceBatchFileName = tempfile.mkstemp()
+
+            with open(fileDescriptor, 'wb') as file:
+                pickle.dump((step, images, envActionMaps, additionalFeatures), file)
+
+            subProcessCommandQueue.put(inferenceBatchFileName)
+            resultFileName = subProcessResultQueue.get()
+            with open(resultFileName, 'rb') as file:
+                actions = pickle.load(file)
+            os.unlink(resultFileName)
+
             step += 1
 
             traces = environment.runActions(actions)
@@ -80,8 +135,21 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                     if hash not in errorHashes:
                         errorHashes.add(hash)
                         uniqueErrors.append(error)
+
+            if stepsRemaining % agentConfig['testing_reset_agent_period'] == (agentConfig['testing_reset_agent_period'] - 1):
+                subProcessCommandQueue.put("quit")
+                subProcess.terminate()
+
+                subProcessCommandQueue = multiprocessing.Queue()
+                subProcessResultQueue = multiprocessing.Queue()
+                subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+                subProcess.start()
+
+            del images, envActionMaps, branchFeature, decayingExecutionTraceFeature, additionalFeatures, traces
             print("", end="", sep="", flush=True)
 
+        subProcessCommandQueue.put("quit")
+        subProcess.terminate()
 
         videoPaths = environment.createMovies()
 
@@ -106,18 +174,23 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         testSequence.executionSessions = executionSessions
         testSequence.save()
 
-        for sessionN, videoPath, executionSession in zip(range(len(videoPaths)), videoPaths, executionSessions):
-            if not shouldBeRandom and sessionN == 0:
-                videoData = agent.createDebugVideoForExecutionSession(executionSession)
-                with open(os.path.join(kwolaDebugVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
-                    cloneFile.write(videoData)
+        if not shouldBeRandom:
+            agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
+            agent.initialize(environment.branchFeatureSize())
+            agent.load()
+
+            videoData = agent.createDebugVideoForExecutionSession(executionSessions[0])
+            with open(os.path.join(kwolaDebugVideoDirectory, f'{str(executionSessions[0].id)}.mp4'), "wb") as cloneFile:
+                cloneFile.write(videoData)
+
+            del agent
 
         environment.shutdown()
     except Exception as e:
         traceback.print_exc()
         print("Unhandled exception occurred during testing sequence", flush=True)
 
-    del environment, agent
+    del environment
 
     # This print statement will trigger the parent manager process to kill this process.
     print("==== Finished Running Testing Sequence! ====", flush=True)

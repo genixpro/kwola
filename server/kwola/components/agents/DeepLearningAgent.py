@@ -146,18 +146,14 @@ class DeepLearningAgent(BaseAgent):
         torch.save(self.model.state_dict(), self.modelPath)
 
 
-    def initialize(self, environment):
+    def initialize(self, branchFeatureSize):
         """
-        Initialize the agent for operating in the given environment.
+        Initialize the agent.
 
-        :param environment:
         :return:
         """
-        self.environment = environment
 
-        rect = environment.screenshotSize()
-
-        self.model = BradNet(self.agentConfiguration, self.environment.branchFeatureSize() * 2, len(self.actions), self.environment.branchFeatureSize(), 12, len(self.cursors), whichGpu=self.whichGpu)
+        self.model = BradNet(self.agentConfiguration, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors), whichGpu=self.whichGpu)
 
         if self.whichGpu == "all":
             self.model = self.model.cuda()
@@ -170,9 +166,7 @@ class DeepLearningAgent(BaseAgent):
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
 
 
-    def getImage(self):
-        images = self.environment.getImages()
-
+    def processImages(self, images):
         convertedImageFutures = []
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -190,11 +184,6 @@ class DeepLearningAgent(BaseAgent):
 
         return numpy.array(converteHSLImages),  numpy.array(convertedSegmentationMaps)
 
-    def getAdditionalFeatures(self):
-        branchFeature = self.environment.getBranchFeatures()
-        decayingExecutionTraceFeature = self.environment.getExecutionTraceFeatures()
-
-        return numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=1)
 
     def createPixelActionMap(self, actionMaps, height, width):
         pixelActionMap = numpy.zeros([3, height, width], dtype=numpy.uint8)
@@ -213,20 +202,18 @@ class DeepLearningAgent(BaseAgent):
 
         return pixelActionMap
 
-    def nextBestActions(self, stepNumber):
+
+    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures):
         """
             Return the next best action predicted by the agent.
 
-            # :param environment:
             :return:
         """
-        images, segmentationMaps = self.getImage()
-        subEnvActionMaps = self.environment.getActionMaps()
-        additionalFeatures = self.getAdditionalFeatures()
+        processedImages, segmentationMaps = self.processImages(rawImages)
         actions = []
 
-        width = images.shape[3]
-        height = images.shape[2]
+        width = processedImages.shape[3]
+        height = processedImages.shape[2]
 
         batchSampleIndexes = []
         imageBatch = []
@@ -234,8 +221,8 @@ class DeepLearningAgent(BaseAgent):
         pixelActionMapsBatch = []
         segmentationMapsBatch = []
 
-        for sampleIndex, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(images)), images, segmentationMaps, additionalFeatures, subEnvActionMaps):
-            epsilon = (float(sampleIndex + 1) / float(len(images))) * 0.85 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+        for sampleIndex, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(processedImages)), processedImages, segmentationMaps, additionalFeatures, envActionMaps):
+            epsilon = (float(sampleIndex + 1) / float(len(processedImages))) * 0.85 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
 
             pixelActionMap = self.createPixelActionMap(actionMaps, height, width)
 
