@@ -12,7 +12,9 @@ import pickle
 from datetime import datetime
 import pandas as pd
 import torch
+import time
 import numpy
+import bson
 import concurrent.futures
 import traceback
 from bson import ObjectId
@@ -54,8 +56,24 @@ def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessComma
         subProcessResultQueue.put(resultFileName)
 
 
+def createDebugVideoSubProcess(branchFeatureSize, executionSessionId, name=""):
+    agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
+    agent.initialize(branchFeatureSize)
+    agent.load()
+
+    kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory("debug_videos")
+
+    executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
+
+    videoData = agent.createDebugVideoForExecutionSession(executionSession)
+    with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
+        cloneFile.write(videoData)
+
+    del agent
+
+
 def runTestingSequence(testingSequenceId, shouldBeRandom=False):
-    print("Starting New Testing Sequence", flush=True)
+    print(datetime.now(), "Starting New Testing Sequence", flush=True)
 
     returnValue = {}
 
@@ -119,6 +137,9 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                 actions = pickle.load(file)
             os.unlink(resultFileName)
 
+            if stepsRemaining % agentConfig['testing_print_every'] == 0:
+                print(datetime.now(), f"Finished {step} testing actions.", flush=True)
+
             step += 1
 
             traces = environment.runActions(actions)
@@ -128,6 +149,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                 trace.save()
 
                 executionSessions[sessionN].executionTraces.append(trace)
+                executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(executionSessions[sessionN])))
 
                 for error in trace.errorsDetected:
                     hash = error.computeHash()
@@ -151,10 +173,10 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         subProcessCommandQueue.put("quit")
         subProcess.terminate()
 
+        print(datetime.now(), f"Creating movies for the execution sessions of this testing sequence.", flush=True)
         videoPaths = environment.createMovies()
 
         kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
-        kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory("debug_videos")
 
         for sessionN, videoPath, executionSession in zip(range(len(videoPaths)), videoPaths, executionSessions):
             with open(videoPath, 'rb') as origFile:
@@ -162,6 +184,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                     cloneFile.write(origFile.read())
 
         for session in executionSessions:
+            print(datetime.now(), f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
             session.save()
 
         testSequence.bugsFound = len(uniqueErrors)
@@ -175,25 +198,28 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         testSequence.save()
 
         if not shouldBeRandom:
-            agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
-            agent.initialize(environment.branchFeatureSize())
-            agent.load()
+            # Start some parallel processes generating debug videos.
+            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[1].id), "prediction"))
+            debugVideoSubprocess1.start()
 
-            videoData = agent.createDebugVideoForExecutionSession(executionSessions[0])
-            with open(os.path.join(kwolaDebugVideoDirectory, f'{str(executionSessions[0].id)}.mp4'), "wb") as cloneFile:
-                cloneFile.write(videoData)
+            # Leave a gap between the two to reduce collision
+            time.sleep(5)
 
-            del agent
+            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 2)].id), "mix"))
+            debugVideoSubprocess2.start()
+
+            debugVideoSubprocess1.join()
+            debugVideoSubprocess2.join()
 
         environment.shutdown()
+
+        del environment
     except Exception as e:
         traceback.print_exc()
-        print("Unhandled exception occurred during testing sequence", flush=True)
-
-    del environment
+        print(datetime.now(), "Unhandled exception occurred during testing sequence", flush=True)
 
     # This print statement will trigger the parent manager process to kill this process.
-    print("==== Finished Running Testing Sequence! ====", flush=True)
+    print(datetime.now(), "Finished Running Testing Sequence!", flush=True)
 
     return returnValue
 

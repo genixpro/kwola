@@ -29,7 +29,7 @@ class BradNet(nn.Module):
 
         self.mainModel = nn.Sequential(
             nn.Conv2d(
-                in_channels=3, 
+                in_channels=2,
                 out_channels=self.agentConfiguration['layer_1_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_1_kernel_size'], 
                 stride=self.agentConfiguration['layer_1_stride'], 
@@ -134,6 +134,8 @@ class BradNet(nn.Module):
         )
         self.predictedCursorLinearParallel = nn.DataParallel(module=self.predictedCursorLinear)
 
+        self.actionSoftmax = nn.Softmax(dim=1)
+
         self.numActions = numActions
 
     @property
@@ -209,31 +211,31 @@ class BradNet(nn.Module):
         discountFutureRewards = self.discountedFutureRewardConvolutionCurrent(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
         totalReward = (presentRewards + discountFutureRewards)
 
-        action_types = []
-        action_xs = []
-        action_ys = []
         if 'action_type' in data:
             action_types = data['action_type']
             action_xs = data['action_x']
             action_ys = data['action_y']
         else:
-            action_indexes = totalReward.reshape([-1, width * height * self.numActions]).argmax(1).data
-
-            for index in action_indexes:
-                action_type, action_x, action_y = BradNet.actionIndexToActionDetails(width, height, self.numActions, index)
-
+            action_types = []
+            action_xs = []
+            action_ys = []
+            for sampleReward in totalReward:
+                action_type = sampleReward.reshape([self.numActions, width * height]).max(dim=1)[0].argmax(0)
                 action_types.append(action_type)
-                action_xs.append(action_x)
+
+                action_y = sampleReward[action_type].max(dim=1)[0].argmax(0)
                 action_ys.append(action_y)
 
+                action_x = sampleReward[action_type, action_y].argmax(0)
+                action_xs.append(action_x)
+
         forwardFeaturesForAuxillaryLosses = []
-        for index, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
-
+        for sampleIndex, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
             # temp fix
-            action_x = min(action_x, width-1)
-            action_y = min(action_y, height-1)
+            # action_x = min(action_x, width-1)
+            # action_y = min(action_y, height-1)
 
-            featuresForAuxillaryLosses = pixelFeatureMap[index, :, int(action_y), int(action_x)].unsqueeze(0)
+            featuresForAuxillaryLosses = pixelFeatureMap[sampleIndex, :, action_y, action_x].unsqueeze(0)
             forwardFeaturesForAuxillaryLosses.append(featuresForAuxillaryLosses)
 
         joinedFeatures = torch.cat(forwardFeaturesForAuxillaryLosses, dim=0)
@@ -241,30 +243,11 @@ class BradNet(nn.Module):
         predictedTraces = self.predictedExecutionTraceLinearCurrent(joinedFeatures)
         predictedExecutionFeatures = self.predictedExecutionFeaturesLinearCurrent(joinedFeatures)
         predictedCursor = self.predictedCursorLinearCurrent(joinedFeatures)
+        actionProbabilities = self.actionSoftmax(totalReward.reshape([-1, width * height * self.numActions])).reshape([-1, height, width, self.numActions])
 
-        return presentRewards, discountFutureRewards, predictedTraces, predictedExecutionFeatures, predictedCursor, pixelFeatureMap, stamp
+        return presentRewards, discountFutureRewards, predictedTraces, predictedExecutionFeatures, predictedCursor, pixelFeatureMap, stamp, actionProbabilities
 
 
     def feature_size(self):
         return self.features(torch.zeros(1, *self.imageInputShape)).view(1, -1).size(1)
-
-
-    @staticmethod
-    def actionDetailsToActionIndex(width, height, numActions, action_type, action_x, action_y):
-        return action_type * width * height \
-               + action_y * width\
-               + action_x
-
-
-    @staticmethod
-    def actionIndexToActionDetails(width, height, numActions, action_index):
-        action_type = int(action_index / (width * height))
-
-        index_within_type = int(action_index % (width * height))
-
-        action_y = int(index_within_type / width)
-
-        action_x = int(index_within_type % width)
-
-        return action_type, action_x, action_y
 

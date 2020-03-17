@@ -18,6 +18,7 @@ import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile
 import skimage.io
+from kwola.config import config
 import subprocess
 import os
 import os.path
@@ -139,7 +140,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
 
     def createMovie(self):
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', self.movieFileName()], cwd=self.screenshotDirectory)
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         return self.movieFilePath()
 
@@ -261,38 +262,53 @@ class WebEnvironmentSession(BaseEnvironment):
                 executionTrace.cursor = None
 
             if isinstance(action, ClickTapAction):
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
-                    if action.times == 1:
+                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                if action.times == 1:
+                    if config.getWebEnvironmentConfiguration()['print_every_action']:
                         print("Clicking", action.x, action.y, action.source, flush=True)
-                        actionChain.click()
-                    elif action.times == 2:
+                    actionChain.click(on_element=element)
+                    actionChain.pause(0.5)
+                elif action.times == 2:
+                    if config.getWebEnvironmentConfiguration()['print_every_action']:
                         print("Double Clicking", action.x, action.y, action.source, flush=True)
-                        actionChain.double_click()
+                    actionChain.double_click(on_element=element)
+                    actionChain.pause(0.5)
 
-                    actionChain.perform()
+                actionChain.perform()
 
             if isinstance(action, RightClickAction):
+                if config.getWebEnvironmentConfiguration()['print_every_action']:
                     print("Right Clicking", action.x, action.y, action.source, flush=True)
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
-                    actionChain.context_click()
-                    actionChain.perform()
+                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.context_click(on_element=element)
+                actionChain.pause(0.5)
+                actionChain.perform()
 
             if isinstance(action, TypeAction):
+                if config.getWebEnvironmentConfiguration()['print_every_action']:
                     print("Typing", action.text, "at", action.x, action.y, action.source, flush=True)
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
-                    actionChain.click()
-                    actionChain.send_keys(action.text)
-                    actionChain.perform()
+                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.click(on_element=element)
+                actionChain.pause(0.5)
+                actionChain.send_keys_to_element(element, action.text)
+                actionChain.pause(0.5)
+                actionChain.perform()
 
             if isinstance(action, WaitAction):
                 # print("Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
-            print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+
+            success = False
+        except selenium.common.exceptions.StaleElementReferenceException as e:
+            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
 
@@ -307,10 +323,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
         cumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(branchTrace)
 
-        if self.lastCumulativeBranchExecutionVector is not None:
-            branchExecutionVector = cumulativeBranchExecutionVector - self.lastCumulativeBranchExecutionVector
-        else:
-            branchExecutionVector = cumulativeBranchExecutionVector
+        branchExecutionVector = cumulativeBranchExecutionVector - self.lastCumulativeBranchExecutionVector
 
         executionTrace.branchExecutionTrace = branchExecutionVector.tolist()
         executionTrace.startCumulativeBranchExecutionTrace = self.lastCumulativeBranchExecutionVector.tolist()
@@ -330,10 +343,7 @@ class WebEnvironmentSession(BaseEnvironment):
         executionTrace.didNewErrorOccur = False
         executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
 
-        if self.lastCumulativeBranchExecutionVector is not None:
-            executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
-        else:
-            executionTrace.didNewBranchesExecute = True
+        executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
 
         executionTrace.hadNetworkTraffic = len(self.pathTracer.recentPaths) > 0
         executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0

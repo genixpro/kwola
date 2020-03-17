@@ -118,7 +118,7 @@ def runMainTrainingLoop(trainingSequence):
 
             for testingSequences in range(agentConfig['testing_sequences_per_training_step']):
                 futures.append(executor.submit(runTestingSubprocess, trainingSequence))
-                time.sleep(1)
+                time.sleep(3)
 
             wait(futures)
 

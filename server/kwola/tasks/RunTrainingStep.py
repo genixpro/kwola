@@ -21,7 +21,7 @@ import pickle
 import os
 from kwola.config import config
 
-def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, batchDirectory):
+def prepareBatchesForExecutionSession(executionSessionId, batchDirectory):
     agentConfiguration = config.getAgentConfiguration()
 
     batchCache = redis.Redis(db=3)
@@ -33,20 +33,23 @@ def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, bat
 
     cached = batchCache.get(cacheId)
     if cached is not None:
+        cacheHit = True
+
         sequenceBatches = pickle.loads(gzip.decompress(cached))
     else:
-        testSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequenceId)).first()
+        cacheHit = False
+
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
 
         agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
 
-        sequenceBatches = agent.prepareBatchesForExecutionSession(testSequence, executionSession)
+        sequenceBatches = agent.prepareBatchesForExecutionSession(executionSession)
 
         pickleBytes = pickle.dumps(sequenceBatches)
         compressedPickleBytes = gzip.compress(pickleBytes)
 
         # Add small random number here to ensure there isn't a bunch of entries expiring in the cache at the same time
-        batchCache.set(cacheId, compressedPickleBytes, ex=agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, 30))
+        batchCache.set(cacheId, compressedPickleBytes, ex=agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, agentConfiguration['training_execution_session_cache_expiration_max_additional_random_seconds']))
 
     fileNames = []
 
@@ -58,9 +61,9 @@ def prepareBatchesForExecutionSession(testingSequenceId, executionSessionId, bat
 
         fileNames.append(fileName)
 
-    # print("Finished writing all batches for execution session", executionSessionId)
+    # print(datetime.now(), "Finished writing all batches for execution session", executionSessionId)
 
-    return fileNames
+    return fileNames, cacheHit
 
 
 def loadBatch(batchFilename):
@@ -74,54 +77,65 @@ def loadBatch(batchFilename):
     return batch
 
 def prepareAndLoadBatches(executionSessions, batchDirectory, processExecutor):
-    testingSequenceId, executionSessionId = random.choice(executionSessions)
+    executionSessionId = random.choice(executionSessions)
 
-    future = processExecutor.submit(prepareBatchesForExecutionSession, testingSequenceId, str(executionSessionId), batchDirectory)
+    future = processExecutor.submit(prepareBatchesForExecutionSession, str(executionSessionId), batchDirectory)
 
-    batchFilenames = future.result()
+    batchFilenames, cacheHit = future.result()
 
     with concurrent.futures.ThreadPoolExecutor() as threadExecutor:
         batches = threadExecutor.map(loadBatch, batchFilenames)
 
     batches = list(batches)
 
-    return batches
+    return batches, cacheHit
 
 
 def printMovingAverageLosses(trainingStep):
     agentConfig = config.getAgentConfiguration()
     movingAverageLength = int(agentConfig['print_loss_moving_average_length'])
 
-    averageTotalRewardLoss = numpy.mean(trainingStep.totalRewardLosses[-movingAverageLength:])
-    averagePresentRewardLoss = numpy.mean(trainingStep.presentRewardLosses[-movingAverageLength:])
-    averageDiscountedFutureRewardLoss = numpy.mean(trainingStep.discountedFutureRewardLosses[-movingAverageLength:])
-    averageTracePredictionLoss = numpy.mean(trainingStep.tracePredictionLosses[-movingAverageLength:])
-    averageExecutionFeatureLoss = numpy.mean(trainingStep.executionFeaturesLosses[-movingAverageLength:])
-    averageTargetHomogenizationLoss = numpy.mean(trainingStep.targetHomogenizationLosses[-movingAverageLength:])
-    averagePredictedCursorLoss = numpy.mean(trainingStep.predictedCursorLosses[-movingAverageLength:])
-    averageTotalLoss = numpy.mean(trainingStep.totalLosses[-movingAverageLength:])
-    averageTotalRebalancedLoss = numpy.mean(trainingStep.totalRebalancedLosses[-movingAverageLength:])
+    averageStart = max(0, min(len(trainingStep.totalRewardLosses) - 1, movingAverageLength))
 
-    print("Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
-    print("Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
-    print("Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
-    print("Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
-    print("Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
-    print("Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
-    print("Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
-    print("Moving Average Total Loss:", averageTotalLoss, flush=True)
-    print("Moving Average Total Rebalanced Loss:", averageTotalRebalancedLoss, flush=True)
+    averageTotalRewardLoss = numpy.mean(trainingStep.totalRewardLosses[-averageStart:])
+    averagePresentRewardLoss = numpy.mean(trainingStep.presentRewardLosses[-averageStart:])
+    averageDiscountedFutureRewardLoss = numpy.mean(trainingStep.discountedFutureRewardLosses[-averageStart:])
+    averageTracePredictionLoss = numpy.mean(trainingStep.tracePredictionLosses[-averageStart:])
+    averageExecutionFeatureLoss = numpy.mean(trainingStep.executionFeaturesLosses[-averageStart:])
+    averageTargetHomogenizationLoss = numpy.mean(trainingStep.targetHomogenizationLosses[-averageStart:])
+    averagePredictedCursorLoss = numpy.mean(trainingStep.predictedCursorLosses[-averageStart:])
+    averageTotalLoss = numpy.mean(trainingStep.totalLosses[-averageStart:])
+    averageTotalRebalancedLoss = numpy.mean(trainingStep.totalRebalancedLosses[-averageStart:])
+
+    print(datetime.now(), "Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
+    print(datetime.now(), "Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
+    print(datetime.now(), "Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
+    print(datetime.now(), "Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
+    print(datetime.now(), "Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
+    print(datetime.now(), "Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
+    print(datetime.now(), "Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
+    if agentConfig['enable_loss_balancing']:
+        print(datetime.now(), "Moving Average Total Raw Loss:", averageTotalLoss, flush=True)
+        print(datetime.now(), "Moving Average Total Rebalanced Loss:", averageTotalRebalancedLoss, flush=True)
+    else:
+        print(datetime.now(), "Moving Average Total Loss:", averageTotalLoss, flush=True)
 
 
 def runTrainingStep(trainingSequenceId):
     agentConfig = config.getAgentConfiguration()
 
-    print("Starting Training Step", flush=True)
+    print(datetime.now(), "Starting Training Step", flush=True)
     testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
     if len(testSequences) == 0:
-        print("Error, no test sequences in db to train on for training step.", flush=True)
-        print("==== Training Step Completed ====", flush=True)
+        print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
+        print(datetime.now(), "==== Training Step Completed ====", flush=True)
         return {}
+
+    executionSessions = []
+    for testSequence in testSequences:
+        for session in testSequence.executionSessions:
+            executionSessions.append(str(session.id))
+    del testSequences
 
     trainingStep = TrainingStep()
     trainingStep.startTime = datetime.now()
@@ -138,11 +152,6 @@ def runTrainingStep(trainingSequenceId):
     trainingStep.totalLosses = []
     trainingStep.totalRebalancedLosses = []
     trainingStep.save()
-
-    executionSessions = []
-    for testSequence in testSequences:
-        for session in testSequence.executionSessions:
-            executionSessions.append((str(testSequence.id), str(session.id)))
 
     environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
 
@@ -166,6 +175,8 @@ def runTrainingStep(trainingSequenceId):
 
         batchFutures = []
 
+        recentCacheHits = []
+
         with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
             with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
                 # First we chuck some sequence requests into the queue into the queue
@@ -180,7 +191,8 @@ def runTrainingStep(trainingSequenceId):
                     # of bias caused by training several successive iterations with the same sequence.
                     for n in range(agentConfig['training_execution_sessions_in_one_loop']):
                         # Wait on the first future in the list to finish
-                        sessionBatches = batchFutures.pop(0).result()
+                        sessionBatches, cacheHit = batchFutures.pop(0).result()
+                        recentCacheHits.append(int(cacheHit))
 
                         if sessionsPrepared < totalSessionsNeeded + 1:
                             # Request another session be prepared
@@ -188,7 +200,7 @@ def runTrainingStep(trainingSequenceId):
 
                         batches.extend(sessionBatches)
 
-                    print(f"Training on {agentConfig['training_execution_sessions_in_one_loop']} execution sessions with ", len(batches), " batches between them.", flush=True)
+                    print(datetime.now(), f"Training on {agentConfig['training_execution_sessions_in_one_loop']} execution sessions with ", len(batches), " batches between them.", flush=True)
 
                     # Randomly shuffle all the batches from the different execution sessions in with one another.
                     random.shuffle(batches)
@@ -211,8 +223,10 @@ def runTrainingStep(trainingSequenceId):
                         trainingStep.numberOfIterationsCompleted += 1
 
                         if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
-                            print("Completed", trainingStep.numberOfIterationsCompleted, "batches", flush=True)
+                            print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted, "batches", flush=True)
                             printMovingAverageLosses(trainingStep)
+                            if agentConfig['print_cache_hit_rate']:
+                                print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%")
 
                         if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
                             trainingStep.save()
@@ -223,11 +237,15 @@ def runTrainingStep(trainingSequenceId):
         trainingStep.status = "completed"
         trainingStep.save()
 
-        agent.save()
-        print("Agent saved!", flush=True)
+        # Safe guard, don't save the model if any nan's were detected
+        if numpy.count_nonzero(numpy.isnan(trainingStep.totalLosses)) == 0:
+            agent.save()
+            print(datetime.now(), "Agent saved!", flush=True)
+        else:
+            print("ERROR! A NaN was detected in this models output. Not saving model.", flush=True)
 
     except Exception as e:
-        print(f"Error occurred while learning sequence!", flush=True)
+        print(datetime.now(), f"Error occurred while learning sequence!", flush=True)
         traceback.print_exc()
     finally:
         files = os.listdir(batchDirectory)
@@ -238,7 +256,7 @@ def runTrainingStep(trainingSequenceId):
         del agent
 
     # This print statement will trigger the parent manager process to kill this process.
-    print("==== Training Step Completed ====", flush=True)
+    print(datetime.now(), "==== Training Step Completed ====", flush=True)
     return {"trainingStepId": str(trainingStep.id)}
 
 
