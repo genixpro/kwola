@@ -19,14 +19,17 @@ export default class extends Component {
   state = {
     result: '',
   };
-  onSubmit = values => {
 
+  onSubmit(values)
+  {
     axios.post("/api/application", {... values}).then((response) =>
     {
-
+        this.props.history.push(`/applications/${response.data.applicationId}`);
     });
   };
-  render() {
+
+  render()
+  {
     const { result } = this.state;
     return (
       <Provider store={store}>
@@ -35,7 +38,7 @@ export default class extends Component {
             <FormsComponentWrapper className=" mateFormsComponent ">
               <FullColumn>
                 <Papersheet>
-                  <Form onSubmit={this.onSubmit} />
+                  <Form onSubmit={this.onSubmit.bind(this)} />
                 </Papersheet>
               </FullColumn>
             </FormsComponentWrapper>
@@ -45,3 +48,4 @@ export default class extends Component {
     );
   }
 }
+

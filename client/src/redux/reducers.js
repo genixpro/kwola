@@ -3,7 +3,6 @@ import App from './app/reducer';
 import ThemeSwitcher from './themeSwitcher/reducer';
 import LanguageSwitcher from './languageSwitcher/reducer';
 import ListApplications from './ListApplications/reducers';
-import ViewApplication from './ViewApplication/reducers';
 import ViewTestingSequence from './ViewTestingSequence/reducers';
 import ViewTrainingSequence from './ViewTrainingSequence/reducers';
 import ViewTrainingStep from './ViewTrainingStep/reducers';
@@ -16,7 +15,6 @@ export default {
   ThemeSwitcher,
   LanguageSwitcher,
   ListApplications,
-  ViewApplication,
   ViewTestingSequence,
   ViewTrainingSequence,
   ViewTrainingStep,

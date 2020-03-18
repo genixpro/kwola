@@ -622,6 +622,7 @@ class DeepLearningAgent(BaseAgent):
                 boundaryImageShrinkRatio = 3
 
                 mainColorMap = plt.get_cmap('inferno')
+                greyColorMap = plt.get_cmap('gray')
 
                 mainFigure = plt.figure(
                     figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
@@ -650,13 +651,13 @@ class DeepLearningAgent(BaseAgent):
                 rewardPixelMaskAxes.set_yticks([])
                 rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
 
-                # pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 4)
+                pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 4)
                 pixelActionMap = self.createPixelActionMap(trace.actionMaps, imageHeight, imageWidth)
-                # actionPixelCount = numpy.count_nonzero(pixelActionMap)
-                # pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
-                # pixelActionMapAxes.set_xticks([])
-                # pixelActionMapAxes.set_yticks([])
-                # pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
+                actionPixelCount = numpy.count_nonzero(pixelActionMap)
+                pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
+                pixelActionMapAxes.set_xticks([])
+                pixelActionMapAxes.set_yticks([])
+                pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
 
                 additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
@@ -694,13 +695,13 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (3,3), numpy.max)
 
                     im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap,
-                                                                  vmin=-0.50, vmax=3.5, interpolation="bilinear")
+                                                                  vmin=-0.50, vmax=3.5, interpolation="nearest")
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
                 stampAxes.set_xticks([])
                 stampAxes.set_yticks([])
-                stampIm = stampAxes.imshow(stamp.data[0], cmap=mainColorMap, interpolation="nearest")
+                stampIm = stampAxes.imshow(stamp.data[0], cmap=greyColorMap, interpolation="nearest")
                 mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
                 stampAxes.set_title("Memory Stamp")
 
@@ -724,7 +725,7 @@ class DeepLearningAgent(BaseAgent):
             addDebugCircleToImage(newImage, trace)
             addCropViewToImage(newImage, trace)
             addBottomRewardChartToImage(newImage, trace)
-            addRightSideDebugCharts(newImage, rawImage, trace)
+            addRightSideDebugCharts(newImage, lastRawImage, trace)
 
             fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
@@ -735,7 +736,7 @@ class DeepLearningAgent(BaseAgent):
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
             addBottomRewardChartToImage(newImage, trace)
-            addRightSideDebugCharts(newImage, rawImage, trace)
+            addRightSideDebugCharts(newImage, lastRawImage, trace)
 
             fileName = f"kwola-screenshot-{debugImageIndex+1:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)

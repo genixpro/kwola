@@ -16,7 +16,7 @@ class TrainingSequencesGroup(Resource):
         # self.postParser.add_argument('status', help='This field cannot be blank', required=False)
 
     def get(self):
-        trainingSequences = TrainingSequence.objects().order_by("-startTime").to_json()
+        trainingSequences = TrainingSequence.objects().order_by("-startTime").limit(20).to_json()
 
         return {"trainingSequences": json.loads(trainingSequences)}
 

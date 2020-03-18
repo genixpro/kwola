@@ -7,7 +7,6 @@ import PageTitle from '../../components/utility/paperTitle';
 import Papersheet, { DemoWrapper } from '../../components/utility/papersheet';
 import { FullColumn , HalfColumn, OneThirdColumn, TwoThirdColumn, Row, Column} from '../../components/utility/rowColumn';
 import {withStyles} from "@material-ui/core";
-import action from "../../redux/ViewApplication/actions";
 import {store} from "../../redux/store";
 import SingleCard from '../Shuffle/singleCard.js';
 import BoxCard from '../../components/boxCard';
@@ -21,36 +20,55 @@ import {Chip, Wrapper} from "../UiElements/Chips/chips.style";
 import Avatar from "../../components/uielements/avatars";
 import {Table} from "../ListApplications/materialUiTables.style";
 import {TableBody, TableCell, TableHead, TableRow} from "../../components/uielements/table";
+import axios from "axios";
 
 class ViewApplication extends Component {
     state = {
         result: '',
     };
 
-    componentDidMount() {
-        store.dispatch(action.requestApplication(this.props.match.params.id));
+    componentDidMount()
+    {
+        axios.get(`/api/application/${this.props.match.params.id}`).then((response) =>
+        {
+            this.setState({application: response.data})
+        });
+
+
+        axios.get(`/api/testing_sequences`).then((response) =>
+        {
+            this.setState({testingSequences: response.data.testingSequences})
+        });
+
+        axios.get(`/api/training_sequences`).then((response) =>
+        {
+            this.setState({trainingSequences: response.data.trainingSequences})
+        });
+
     }
 
-    launchTestingSequenceButtonClicked() {
-        store.dispatch(action.requestNewTestingSequence(this.props.match.params.id));
+    launchTestingSequenceButtonClicked()
+    {
+        axios.post(`/api/application/${this.props.match.params.id}/testing_sequences`, {applicationId: this.props.match.params.id}).then(() =>
+        {
+
+        });
     }
 
     render() {
-        console.log(this.props.testingSequences);
-
         const { result } = this.state;
         return (
-                this.props.application ?
+                this.state.application ?
                     <LayoutWrapper>
                         <FullColumn>
                             <Row>
                                 <HalfColumn>
-                                            <SingleCard src={Img7} grid/>
+                                            <SingleCard src={`http://localhost:8000/api/application/${this.props.match.params.id}/image`} grid/>
                                 </HalfColumn>
 
                                 <HalfColumn>
                                     <Papersheet
-                                        title={`${this.props.application.name}`}
+                                        title={`${this.state.application.name}`}
                                         subtitle={`Last Tested ${moment(this.props.timestamp).format('MMM Do, YYYY')}`}
                                     >
                                         <Row>
@@ -96,21 +114,19 @@ class ViewApplication extends Component {
                                         <Table>
                                             <TableHead>
                                                 <TableRow>
-                                                    <TableCell>ID</TableCell>
-                                                    <TableCell>Status</TableCell>
                                                     <TableCell>Test Start Time</TableCell>
+                                                    <TableCell>Status</TableCell>
                                                     {/*<TableCell>Test Finish Time</TableCell>*/}
                                                     <TableCell>Bug Found</TableCell>
                                                 </TableRow>
                                             </TableHead>
                                             <TableBody>
 
-                                                {(this.props.testingSequences || []).map(testingSequence => {
+                                                {(this.state.testingSequences || []).map(testingSequence => {
                                                     return (
                                                         <TableRow key={testingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/testing_sequences/${testingSequence._id.$oid}`)}>
-                                                            <TableCell>{testingSequence._id.$oid}</TableCell>
-                                                            <TableCell>{testingSequence.status}</TableCell>
                                                             <TableCell>{moment(testingSequence.startTime).format('HH:mm MMM Do')}</TableCell>
+                                                            <TableCell>{testingSequence.status}</TableCell>
                                                             {/*<TableCell>{testingSequence.endDate}</TableCell>*/}
                                                             <TableCell>{testingSequence.bugsFound}</TableCell>
                                                         </TableRow>
@@ -139,7 +155,7 @@ class ViewApplication extends Component {
                                             </TableHead>
                                             <TableBody>
 
-                                                {(this.props.trainingSequences || []).map(trainingSequence => {
+                                                {(this.state.trainingSequences || []).map(trainingSequence => {
                                                     return (
                                                         <TableRow key={trainingSequence._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/training_sequences/${trainingSequence._id.$oid}`)}>
                                                             <TableCell>{trainingSequence._id.$oid}</TableCell>
