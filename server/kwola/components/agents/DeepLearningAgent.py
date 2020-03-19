@@ -29,6 +29,7 @@ import scipy.signal
 import shutil
 import skimage
 import skimage.color
+import sklearn.preprocessing
 import skimage.draw
 import skimage.io
 import skimage.measure
@@ -562,10 +563,10 @@ class DeepLearningAgent(BaseAgent):
                 cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX,
                             fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
-                cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.6f}",
+                cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.3f}",
                             (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
                             cv2.LINE_AA)
-                cv2.putText(image, f"Present Reward: {(presentReward):.6f}", (columnThreeLeft, lineThreeTop),
+                cv2.putText(image, f"Present Reward: {(presentReward):.3f}", (columnThreeLeft, lineThreeTop),
                             cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
                 cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%",
@@ -581,7 +582,7 @@ class DeepLearningAgent(BaseAgent):
                             cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
                 if trace.actionPerformed.predictedReward:
-                    cv2.putText(image, f"Predicted Reward: {(trace.actionPerformed.predictedReward):.6f}", (columnThreeLeft, lineEightTop),
+                    cv2.putText(image, f"Predicted Normalized Reward: {(trace.actionPerformed.predictedReward):.3f}", (columnThreeLeft, lineEightTop),
                                 cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
 
@@ -702,7 +703,7 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (3,3), numpy.max)
 
                     im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap,
-                                                                  vmin=-0.50, vmax=3.5, interpolation="nearest")
+                                                                  vmin=-3.00, vmax=3.00, interpolation="nearest")
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
@@ -788,11 +789,36 @@ class DeepLearningAgent(BaseAgent):
         return (int(cropLeft), int(cropTop), int(cropRight), int(cropBottom))
 
 
-    def prepareBatchesForExecutionSession(self, executionSession):
+    @staticmethod
+    def createTrainingRewardNormalizer(execusionSessions):
+        rewardSequences = []
+        longest = 0
+        for session in execusionSessions:
+            presentRewards = DeepLearningAgent.computePresentRewards(session)
+            futureRewards = DeepLearningAgent.computeDiscountedFutureRewards(session)
+
+            rewardSequences.append([present + future for present, future in zip(presentRewards, futureRewards)])
+            longest = max(longest, len(rewardSequences))
+
+        for rewards in rewardSequences:
+            while len(rewards) < longest:
+                # This isn't the greatest solution for handling execution sessions with different lengths, but it works
+                # for now when we pretty much always have execution sessions of the same length except when debugging.
+                rewards.append(0)
+
+        rewardSequences = numpy.array(rewardSequences)
+        trainingRewardNormalizer = sklearn.preprocessing.StandardScaler().fit(rewardSequences)
+
+        return trainingRewardNormalizer
+
+
+
+    def prepareBatchesForExecutionSession(self, executionSession, trainingRewardNormalizer=None):
         """
             This function prepares batches that can be fed to the neural network.
 
             :param executionSession:
+            :param , trainingRewardNormalizer
             :return:
         """
         processedImages = []
@@ -807,6 +833,32 @@ class DeepLearningAgent(BaseAgent):
 
         # Now compute the discounted reward
         discountedFutureRewards = DeepLearningAgent.computeDiscountedFutureRewards(executionSession)
+
+        # If there is a normalizer, use if to normalize the rewards
+        if trainingRewardNormalizer is not None:
+            if len(presentRewards) < len(trainingRewardNormalizer.mean_):
+               presentRewardsNormalizationInput = presentRewards  + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
+               discountedFutureRewardsNormalizationInput = discountedFutureRewards + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
+            else:
+                presentRewardsNormalizationInput = presentRewards
+                discountedFutureRewardsNormalizationInput = discountedFutureRewards
+
+            # Compute the total rewards and normalize
+            totalRewardsNormalizationInput = numpy.array([presentRewardsNormalizationInput]) + numpy.array([discountedFutureRewardsNormalizationInput])
+            normalizedTotalRewards = trainingRewardNormalizer.transform(totalRewardsNormalizationInput)[0]
+
+            normalizedPresentRewards = [
+                (present/(present+future)) * normalized for present, future, normalized
+                in zip(presentRewards, discountedFutureRewards, normalizedTotalRewards[:len(presentRewards)])
+            ]
+
+            normalizedDiscountedFutureRewards = [
+                (future/(present+future)) * normalized for present, future, normalized
+                in zip(presentRewards, discountedFutureRewards, normalizedTotalRewards[:len(presentRewards)])
+            ]
+
+            presentRewards = normalizedPresentRewards
+            discountedFutureRewards = normalizedDiscountedFutureRewards
 
         # Create the decaying future execution trace for the prediction algorithm
         tracesReversed = list(executionSession.executionTraces)
