@@ -40,7 +40,7 @@ def prepareBatchesForExecutionSession(executionSessionId, batchDirectory):
     else:
         cacheHit = False
 
-        with open(os.path.join(config.getKwolaUserDataDirectory("model"), "reward_normalizer"), "rb") as normalizerFile:
+        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
             trainingRewardNormalizer = pickle.load(normalizerFile)
 
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
@@ -126,60 +126,64 @@ def printMovingAverageLosses(trainingStep):
 
 
 def runTrainingStep(trainingSequenceId):
-    agentConfig = config.getAgentConfiguration()
+    try:
+        agentConfig = config.getAgentConfiguration()
 
-    print(datetime.now(), "Starting Training Step", flush=True)
-    testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
-    if len(testSequences) == 0:
-        print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
-        print(datetime.now(), "==== Training Step Completed ====", flush=True)
+        print(datetime.now(), "Starting Training Step", flush=True)
+        testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
+        if len(testSequences) == 0:
+            print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
+            print(datetime.now(), "==== Training Step Completed ====", flush=True)
+            return {}
+
+        executionSessionIds = []
+        for testSequence in testSequences:
+            for session in testSequence.executionSessions:
+                executionSessionIds.append(str(session.id))
+
+        trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, agentConfig['training_reward_normalizer_fit_population_size']))
+
+        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
+            pickle.dump(trainingRewardNormalizer, normalizerFile)
+
+        del testSequences
+
+        trainingStep = TrainingStep()
+        trainingStep.startTime = datetime.now()
+        trainingStep.trainingSequenceId = trainingSequenceId
+        trainingStep.status = "running"
+        trainingStep.numberOfIterationsCompleted = 0
+        trainingStep.presentRewardLosses = []
+        trainingStep.discountedFutureRewardLosses = []
+        trainingStep.tracePredictionLosses = []
+        trainingStep.executionFeaturesLosses = []
+        trainingStep.targetHomogenizationLosses = []
+        trainingStep.predictedCursorLosses = []
+        trainingStep.totalRewardLosses = []
+        trainingStep.totalLosses = []
+        trainingStep.totalRebalancedLosses = []
+        trainingStep.save()
+
+        environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
+
+        agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all")
+        agent.initialize(environment.branchFeatureSize())
+        agent.load()
+
+        environment.shutdown()
+
+        # Haven't decided yet whether we should force Kwola to always write to disc or spool in memory
+        # using /tmp. The following lines switch between the two approaches
+        # batchDirectory = tempfile.mkdtemp(dir=getKwolaUserDataDirectory("batches"))
+        batchDirectory = tempfile.mkdtemp()
+
+        # Force it to destroy now to save memory
+        del environment
+
+    except Exception as e:
+        print(datetime.now(), f"Error occurred during initiation of training!", flush=True)
+        traceback.print_exc()
         return {}
-
-    executionSessions = []
-    executionSessionIds = []
-    for testSequence in testSequences:
-        for session in testSequence.executionSessions:
-            executionSessions.append(session)
-            executionSessionIds.append(str(session.id))
-
-    trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(executionSessions)
-
-    with open(os.path.join(config.getKwolaUserDataDirectory("model"), "reward_normalizer"), "wb") as normalizerFile:
-        pickle.dump(trainingRewardNormalizer, normalizerFile)
-
-    del testSequences, executionSessions
-
-    trainingStep = TrainingStep()
-    trainingStep.startTime = datetime.now()
-    trainingStep.trainingSequenceId = trainingSequenceId
-    trainingStep.status = "running"
-    trainingStep.numberOfIterationsCompleted = 0
-    trainingStep.presentRewardLosses = []
-    trainingStep.discountedFutureRewardLosses = []
-    trainingStep.tracePredictionLosses = []
-    trainingStep.executionFeaturesLosses = []
-    trainingStep.targetHomogenizationLosses = []
-    trainingStep.predictedCursorLosses = []
-    trainingStep.totalRewardLosses = []
-    trainingStep.totalLosses = []
-    trainingStep.totalRebalancedLosses = []
-    trainingStep.save()
-
-    environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
-
-    agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all")
-    agent.initialize(environment.branchFeatureSize())
-    agent.load()
-
-    environment.shutdown()
-
-    # Haven't decided yet whether we should force Kwola to always write to disc or spool in memory
-    # using /tmp. The following lines switch between the two approaches
-    # batchDirectory = tempfile.mkdtemp(dir=getKwolaUserDataDirectory("batches"))
-    batchDirectory = tempfile.mkdtemp()
-
-    # Force it to destroy now to save memory
-    del environment
 
     try:
         totalSessionsNeeded = 1 + (agentConfig['iterations_per_training_step'] * agentConfig['batch_size']) / agentConfig['testing_sequence_length']

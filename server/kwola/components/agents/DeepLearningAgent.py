@@ -3,6 +3,7 @@ from .BradNet import BradNet
 from kwola.components.utilities.debug_plot import showRewardImageDebug
 from kwola.config import config
 from kwola.models.ExecutionTraceModel import ExecutionTrace
+from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
@@ -12,6 +13,7 @@ from skimage.segmentation import felzenszwalb, mark_boundaries
 import bz2
 import concurrent.futures
 import cv2
+import bson
 import cv2
 from datetime import datetime
 import itertools
@@ -790,21 +792,34 @@ class DeepLearningAgent(BaseAgent):
 
 
     @staticmethod
-    def createTrainingRewardNormalizer(execusionSessions):
+    def computeTotalRewardsParallel(execusionSessionId):
+        session = ExecutionSession.objects(id=bson.ObjectId(execusionSessionId)).first()
+
+        presentRewards = DeepLearningAgent.computePresentRewards(session)
+        futureRewards = DeepLearningAgent.computeDiscountedFutureRewards(session)
+
+        return [present + future for present, future in zip(presentRewards, futureRewards)]
+
+    @staticmethod
+    def createTrainingRewardNormalizer(execusionSessionIds):
+        rewardFutures = []
+
         rewardSequences = []
         longest = 0
-        for session in execusionSessions:
-            presentRewards = DeepLearningAgent.computePresentRewards(session)
-            futureRewards = DeepLearningAgent.computeDiscountedFutureRewards(session)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=32) as executor:
+            for sessionId in execusionSessionIds:
+                rewardFutures.append(executor.submit(DeepLearningAgent.computeTotalRewardsParallel, str(sessionId)))
 
-            rewardSequences.append([present + future for present, future in zip(presentRewards, futureRewards)])
-            longest = max(longest, len(rewardSequences))
+            for rewardFuture in concurrent.futures.as_completed(rewardFutures):
+                totalRewards = rewardFuture.result()
+                rewardSequences.append(totalRewards)
+                longest = max(longest, len(rewardSequences))
 
-        for rewards in rewardSequences:
-            while len(rewards) < longest:
+        for totalRewards in rewardSequences:
+            while len(totalRewards) < longest:
                 # This isn't the greatest solution for handling execution sessions with different lengths, but it works
                 # for now when we pretty much always have execution sessions of the same length except when debugging.
-                rewards.append(0)
+                totalRewards.append(0)
 
         rewardSequences = numpy.array(rewardSequences)
         trainingRewardNormalizer = sklearn.preprocessing.StandardScaler().fit(rewardSequences)
@@ -837,7 +852,7 @@ class DeepLearningAgent(BaseAgent):
         # If there is a normalizer, use if to normalize the rewards
         if trainingRewardNormalizer is not None:
             if len(presentRewards) < len(trainingRewardNormalizer.mean_):
-               presentRewardsNormalizationInput = presentRewards  + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
+               presentRewardsNormalizationInput = presentRewards + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
                discountedFutureRewardsNormalizationInput = discountedFutureRewards + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
             else:
                 presentRewardsNormalizationInput = presentRewards
@@ -848,12 +863,12 @@ class DeepLearningAgent(BaseAgent):
             normalizedTotalRewards = trainingRewardNormalizer.transform(totalRewardsNormalizationInput)[0]
 
             normalizedPresentRewards = [
-                (present/(present+future)) * normalized for present, future, normalized
+                (abs(present) / (abs(present) + abs(future) + 0.01)) * normalized for present, future, normalized
                 in zip(presentRewards, discountedFutureRewards, normalizedTotalRewards[:len(presentRewards)])
             ]
 
             normalizedDiscountedFutureRewards = [
-                (future/(present+future)) * normalized for present, future, normalized
+                (abs(future) / (abs(present) + abs(future) + 0.01)) * normalized for present, future, normalized
                 in zip(presentRewards, discountedFutureRewards, normalizedTotalRewards[:len(presentRewards)])
             ]
 
