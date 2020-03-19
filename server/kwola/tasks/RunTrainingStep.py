@@ -17,6 +17,7 @@ import redis
 import json
 import bson
 import tempfile
+import sklearn.preprocessing
 import pickle
 import os
 from kwola.config import config
@@ -39,11 +40,14 @@ def prepareBatchesForExecutionSession(executionSessionId, batchDirectory):
     else:
         cacheHit = False
 
+        with open(os.path.join(config.getKwolaUserDataDirectory("model"), "reward_normalizer"), "rb") as normalizerFile:
+            trainingRewardNormalizer = pickle.load(normalizerFile)
+
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
 
         agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
 
-        sequenceBatches = agent.prepareBatchesForExecutionSession(executionSession)
+        sequenceBatches = agent.prepareBatchesForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
 
         pickleBytes = pickle.dumps(sequenceBatches)
         compressedPickleBytes = gzip.compress(pickleBytes)
@@ -132,10 +136,18 @@ def runTrainingStep(trainingSequenceId):
         return {}
 
     executionSessions = []
+    executionSessionIds = []
     for testSequence in testSequences:
         for session in testSequence.executionSessions:
-            executionSessions.append(str(session.id))
-    del testSequences
+            executionSessions.append(session)
+            executionSessionIds.append(str(session.id))
+
+    trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(executionSessions)
+
+    with open(os.path.join(config.getKwolaUserDataDirectory("model"), "reward_normalizer"), "wb") as normalizerFile:
+        pickle.dump(trainingRewardNormalizer, normalizerFile)
+
+    del testSequences, executionSessions
 
     trainingStep = TrainingStep()
     trainingStep.startTime = datetime.now()
@@ -181,7 +193,7 @@ def runTrainingStep(trainingSequenceId):
             with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
                 # First we chuck some sequence requests into the queue into the queue
                 for n in range(agentConfig['training_precompute_sessions_count'] + agentConfig['training_execution_sessions_in_one_loop']):
-                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
+                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessionIds, batchDirectory, processExecutor))
                     sessionsPrepared += 1
 
                 while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
@@ -196,7 +208,7 @@ def runTrainingStep(trainingSequenceId):
 
                         if sessionsPrepared < totalSessionsNeeded + 1:
                             # Request another session be prepared
-                            batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessions, batchDirectory, processExecutor))
+                            batchFutures.append(threadExecutor.submit(prepareAndLoadBatches, executionSessionIds, batchDirectory, processExecutor))
 
                         batches.extend(sessionBatches)
 
