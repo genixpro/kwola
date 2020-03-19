@@ -207,16 +207,22 @@ class WebEnvironmentSession(BaseEnvironment):
             for(let element of domElements)
             {
                 const bounds = element.getBoundingClientRect();
+                
+                const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
+                const paddingRight = Number(window.getComputedStyle(element, null).getPropertyValue('padding-right').replace("px", ""));
+                const paddingTop = Number(window.getComputedStyle(element, null).getPropertyValue('padding-top').replace("px", ""));
+                const paddingBottom = Number(window.getComputedStyle(element, null).getPropertyValue('padding-bottom').replace("px", ""));
+                
                 const data = {
                     canClick: false,
                     canRightClick: false,
                     canType: false,
-                    left: bounds.left,
-                    right: bounds.right,
-                    top: bounds.top,
-                    bottom: bounds.bottom,
-                    width: bounds.width,
-                    height: bounds.height
+                    left: bounds.left + paddingLeft + 3,
+                    right: bounds.right - paddingRight - 3,
+                    top: bounds.top + paddingTop + 3,
+                    bottom: bounds.bottom - paddingBottom - 3,
+                    width: bounds.width - paddingLeft - paddingRight - 6,
+                    height: bounds.height - paddingTop - paddingBottom - 6,
                 };
                 
                 if (element.tagName === "A"
@@ -258,7 +264,8 @@ class WebEnvironmentSession(BaseEnvironment):
             return actionMaps;
         """)
 
-        return [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
+        actionMaps = [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
+        return actionMaps
 
 
     def runAction(self, action):
@@ -378,7 +385,8 @@ class WebEnvironmentSession(BaseEnvironment):
         executionTrace.finishURL = self.driver.current_url
 
         executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-        executionTrace.didNewErrorOccur = hadNewException
+        # executionTrace.didNewErrorOccur = hadNewException
+        executionTrace.didNewErrorOccur = False
         executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
 
         executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)

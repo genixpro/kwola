@@ -240,15 +240,22 @@ class DeepLearningAgent(BaseAgent):
                 # areas that have actions associated with them. We use the pixelActionMap to do that.
                 segmentationMapMasked = numpy.array(segmentationMap + 1) * numpy.minimum(pixelActionMap.sum(axis=0), 1)
                 uniqueSegmentsInsideMask = list(sorted(numpy.unique(segmentationMapMasked).tolist()))
-                chosenSegmentation = random.choice(uniqueSegmentsInsideMask[1:])
-                chosenPixel = self.getRandomPixelOfSegmentation(segmentationMapMasked, chosenSegmentation)
 
-                possibleActionsAtPixel = pixelActionMap[:, chosenPixel[1], chosenPixel[0]]
-                possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+                if len(uniqueSegmentsInsideMask) == 1:
+                    print("Error! No segments to pick. Choosing random spot. This usually means there are no available actions on the tested application, such as a blank screen with no text, links, buttons or input elements, or that the action-mapping for this environment is not working for some reason.", flush=True)
+                    actionX = random.randrange(0, width)
+                    actionY = random.randrange(0, height)
+                    actionType = random.randrange(0, len(self.actionsSorted))
+                else:
+                    chosenSegmentation = random.choice(uniqueSegmentsInsideMask[1:])
+                    chosenPixel = self.getRandomPixelOfSegmentation(segmentationMapMasked, chosenSegmentation)
 
-                actionType = random.choice(possibleActionIndexes)
-                actionX = chosenPixel[0]
-                actionY = chosenPixel[1]
+                    possibleActionsAtPixel = pixelActionMap[:, chosenPixel[1], chosenPixel[0]]
+                    possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+
+                    actionType = random.choice(possibleActionIndexes)
+                    actionX = chosenPixel[0]
+                    actionY = chosenPixel[1]
 
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"

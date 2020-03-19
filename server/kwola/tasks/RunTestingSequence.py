@@ -199,13 +199,13 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
 
         if not shouldBeRandom:
             # Start some parallel processes generating debug videos.
-            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[1].id), "prediction"))
+            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
             debugVideoSubprocess1.start()
 
             # Leave a gap between the two to reduce collision
             time.sleep(5)
 
-            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 2)].id), "mix"))
+            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix"))
             debugVideoSubprocess2.start()
 
             debugVideoSubprocess1.join()

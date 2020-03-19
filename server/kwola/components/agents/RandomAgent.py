@@ -4,6 +4,7 @@ from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
 import random
+import numpy
 
 class RandomAgent(BaseAgent):
     """
@@ -48,8 +49,10 @@ class RandomAgent(BaseAgent):
         """
         actions = []
 
-        height = images.shape[2]
-        width = images.shape[3]
+        images = numpy.array(images)
+
+        height = images.shape[1]
+        width = images.shape[2]
 
         for sessionN in range(len(images)):
 
