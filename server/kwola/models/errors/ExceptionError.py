@@ -12,6 +12,12 @@ class ExceptionError(BaseError):
 
     message = StringField()
 
+    source = StringField()
+
+    lineNumber = IntField()
+
+    columnNumber = IntField()
+
     def computeHash(self):
         hasher = hashlib.md5()
         hasher.update(self.stacktrace)

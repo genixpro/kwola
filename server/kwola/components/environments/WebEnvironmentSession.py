@@ -12,6 +12,7 @@ from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
 from kwola.models.ExecutionTraceModel import ExecutionTrace
+from kwola.models.errors.ExceptionError import ExceptionError
 import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile
@@ -54,11 +55,20 @@ class WebEnvironmentSession(BaseEnvironment):
               window.outerHeight - window.innerHeight + arguments[1]];
             """, 800, 600)
         self.driver.set_window_size(*window_size)
-
         self.driver.get(targetURL)
 
         # HACK! give time for page to load before proceeding.
         time.sleep(1)
+
+        # Inject bug detection script
+        # self.driver.execute_script("""
+        #     window.kwolaExceptions = [];
+        #     const currentOnError = window.onerror;
+        #     window.onerror=function(msg, source, lineno, colno, error) {
+        #         currentOnError(msg, source, lineno, colno, error);
+        #         window.kwolaExceptions.push([msg, source, lineno, colno, error.stack]);
+        #     }
+        # """)
 
         self.lastScreenshotHash = None
         self.lastProxyPaths = set()
@@ -88,6 +98,8 @@ class WebEnvironmentSession(BaseEnvironment):
 
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(self.extractBranchTrace())
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
+
+        self.exceptionHashes = set()
 
 
     def __del__(self):
@@ -145,6 +157,18 @@ class WebEnvironmentSession(BaseEnvironment):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
         injected_javascript = (
             'return window.kwolaCounters;'
+        )
+
+        result = self.driver.execute_script(injected_javascript)
+
+        return result
+
+
+    def extractExceptions(self):
+        # The JavaScript that we want to inject. This will extract out the exceptions
+        # that the Kwola error handler was able to pick up
+        injected_javascript = (
+            'const exceptions = window.kwolaExceptions; window.kwolaExceptions = []; return exceptions;'
         )
 
         result = self.driver.execute_script(injected_javascript)
@@ -230,6 +254,20 @@ class WebEnvironmentSession(BaseEnvironment):
 
         executionTrace.didActionSucceed = success
 
+        # hadNewException = False
+        # exceptions = self.extractExceptions()
+        # for exception in exceptions:
+        #     msg, source, lineno, colno, stack = tuple(exception)
+        #     executionTrace.errorsDetected.append(ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno))
+        #
+        #     hasher = hashlib.md5()
+        #     hasher.update(stack)
+        #     exceptionHash = hasher.hexdigest()
+        #
+        #     if exceptionHash not in self.exceptionHashes:
+        #         self.exceptionHashes.add(exceptionHash)
+        #         hadNewException = True
+
         screenHash = self.addScreenshot()
 
         branchTrace = self.extractBranchTrace()
@@ -259,7 +297,7 @@ class WebEnvironmentSession(BaseEnvironment):
         executionTrace.finishURL = self.driver.current_url
 
         executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-        executionTrace.didNewErrorOccur = False
+        executionTrace.didNewErrorOccur = hadNewException
         executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
 
         if self.lastCumulativeBranchExecutionVector is not None:
