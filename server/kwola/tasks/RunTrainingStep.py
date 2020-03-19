@@ -40,7 +40,7 @@ def prepareBatchesForExecutionSession(executionSessionId, batchDirectory):
     else:
         cacheHit = False
 
-        with open(os.path.join(config.getKwolaUserDataDirectory("model"), "reward_normalizer"), "rb") as normalizerFile:
+        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
             trainingRewardNormalizer = pickle.load(normalizerFile)
 
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
@@ -143,7 +143,7 @@ def runTrainingStep(trainingSequenceId):
 
         trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, agentConfig['training_reward_normalizer_fit_population_size']))
 
-        with open(os.path.join(config.getKwolaUserDataDirectory("model"), "reward_normalizer"), "wb") as normalizerFile:
+        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
             pickle.dump(trainingRewardNormalizer, normalizerFile)
 
         del testSequences

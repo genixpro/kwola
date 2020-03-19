@@ -852,7 +852,7 @@ class DeepLearningAgent(BaseAgent):
         # If there is a normalizer, use if to normalize the rewards
         if trainingRewardNormalizer is not None:
             if len(presentRewards) < len(trainingRewardNormalizer.mean_):
-               presentRewardsNormalizationInput = presentRewards  + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
+               presentRewardsNormalizationInput = presentRewards + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
                discountedFutureRewardsNormalizationInput = discountedFutureRewards + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
             else:
                 presentRewardsNormalizationInput = presentRewards
@@ -863,12 +863,12 @@ class DeepLearningAgent(BaseAgent):
             normalizedTotalRewards = trainingRewardNormalizer.transform(totalRewardsNormalizationInput)[0]
 
             normalizedPresentRewards = [
-                (present/(present+future)) * normalized for present, future, normalized
+                (abs(present) / (abs(present) + abs(future) + 0.01)) * normalized for present, future, normalized
                 in zip(presentRewards, discountedFutureRewards, normalizedTotalRewards[:len(presentRewards)])
             ]
 
             normalizedDiscountedFutureRewards = [
-                (future/(present+future)) * normalized for present, future, normalized
+                (abs(future) / (abs(present) + abs(future) + 0.01)) * normalized for present, future, normalized
                 in zip(presentRewards, discountedFutureRewards, normalizedTotalRewards[:len(presentRewards)])
             ]
 
