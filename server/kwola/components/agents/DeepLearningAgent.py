@@ -582,7 +582,7 @@ class DeepLearningAgent(BaseAgent):
                             cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
                 if trace.actionPerformed.predictedReward:
-                    cv2.putText(image, f"Predicted Normalized Reward: {(trace.actionPerformed.predictedReward):.3f}", (columnThreeLeft, lineEightTop),
+                    cv2.putText(image, f"Predicted Reward: {(trace.actionPerformed.predictedReward):.3f}", (columnThreeLeft, lineEightTop),
                                 cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
 
@@ -703,7 +703,7 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (3,3), numpy.max)
 
                     im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap,
-                                                                  vmin=-3.00, vmax=3.00, interpolation="nearest")
+                                                                  vmin=-2.00, vmax=2.00, interpolation="nearest")
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
