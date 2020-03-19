@@ -30,17 +30,17 @@ class RandomAgent(BaseAgent):
         """
 
 
-    def initialize(self, environment):
+    def initialize(self, branchFeatureSize):
         """
         Initialize the agent for operating in the given environment.
 
-        :param environment:
+        :param branchFeatureSize:
         :return:
         """
 
-        self.environment = environment
+        self.branchFeatureSize = branchFeatureSize
 
-    def nextBestActions(self, stepNumber):
+    def nextBestActions(self, stepNumber, images, envActionMaps, additionalFeatures):
         """
             Return the next best action predicted by the agent.
             :param screenshot:
@@ -48,11 +48,13 @@ class RandomAgent(BaseAgent):
         """
         actions = []
 
-        for sessionN in range(self.environment.numberParallelSessions()):
-            rect = self.environment.screenshotSize()
+        height = images.shape[2]
+        width = images.shape[3]
 
-            x = random.randrange(0, rect['width'])
-            y = random.randrange(0, rect['height'])
+        for sessionN in range(len(images)):
+
+            x = random.randrange(0, width)
+            y = random.randrange(0, height)
 
             actionIndex = random.randrange(0, len(self.actionsSorted))
 

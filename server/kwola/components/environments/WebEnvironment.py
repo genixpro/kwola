@@ -95,6 +95,20 @@ class WebEnvironment(BaseEnvironment):
         ]
         return images
 
+
+    def getActionMaps(self):
+        actionMapFutures = []
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for session in self.sessions:
+                resultFuture = executor.submit(session.getActionMaps)
+                actionMapFutures.append(resultFuture)
+
+        actionMaps = [
+            imageFuture.result() for imageFuture in actionMapFutures
+        ]
+        return actionMaps
+
     def getBranchFeatures(self):
         tabFeatures = [
             tab.getBranchFeature()

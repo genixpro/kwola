@@ -20,3 +20,5 @@ class BaseAction(EmbeddedDocument):
 
     source = StringField()
 
+    predictedReward = FloatField()
+

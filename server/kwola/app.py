@@ -13,7 +13,7 @@ api = Api(app)
 CORS(app)
 
 # import models
-from .resources.ApplicationResource import ApplicationGroup, ApplicationSingle
+from .resources.ApplicationResource import ApplicationGroup, ApplicationSingle, ApplicationImage
 from .resources.TestingSequenceResource import TestingSequencesGroup, TestingSequencesSingle
 from .resources.ExecutionSessionResource import ExecutionSessionGroup, ExecutionSessionSingle, ExecutionSessionVideo
 from .resources.ExecutionTraceResource import ExecutionTraceGroup, ExecutionTraceSingle
@@ -22,6 +22,7 @@ from .resources.TrainingStepResources import TrainingStepGroup, TrainingStepSing
 
 api.add_resource(ApplicationGroup, '/api/application')
 api.add_resource(ApplicationSingle, '/api/application/<string:application_id>')
+api.add_resource(ApplicationImage, '/api/application/<string:application_id>/image')
 
 
 api.add_resource(TestingSequencesGroup, '/api/testing_sequences')

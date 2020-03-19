@@ -15,3 +15,5 @@ class ExecutionSession(Document):
 
     tabNumber = IntField()
 
+    totalReward = FloatField()
+

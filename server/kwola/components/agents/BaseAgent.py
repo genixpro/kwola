@@ -48,17 +48,16 @@ class BaseAgent:
         """
 
 
-    def initialize(self, environment):
+    def initialize(self, branchFeatureSize):
         """
         Initialize the agent for operating in the given environment.
 
-        :param environment:
+        :param branchFeatureSize:
         :return:
         """
 
-    def nextBestActions(self, screenshot):
+    def nextBestActions(self, stepNumber, images, envActionMaps, additionalFeatures):
         """
             Return the next best action predicted by the agent.
-            :param screenshot:
             :return:
         """

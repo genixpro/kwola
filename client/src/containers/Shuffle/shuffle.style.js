@@ -93,11 +93,10 @@ const WDSingleCardWrapper = styled.div`
   &.grid {
     .cardImage {
       width: 100%;
-      height: 260px;
       display: flex;
 
       @media only screen and (min-width: 960px) {
-        height: 330px;
+
       }
     }
 

@@ -26,32 +26,41 @@ def getKwolaUserDataDirectory(subDirName):
 
 
 
-
+globalAgentConfiguration = None
 def getAgentConfiguration():
     """
         This function returns the configuration for the core machine learning model of the agent.
 
         :return:
     """
+    global globalAgentConfiguration
 
-    modelConfig = json.load(open(f"kwola/config/agent_configs/{config_name}.json"))
+    if globalAgentConfiguration is not None:
+        return globalAgentConfiguration
 
-    return modelConfig
+    globalAgentConfiguration = json.load(open(f"kwola/config/agent_configs/{config_name}.json"))
+
+    return globalAgentConfiguration
 
 
 
 
 
+globalWebEnvironmentConfiguration = None
 def getWebEnvironmentConfiguration():
     """
         This function returns the configuration for the core machine learning model of the agent.
 
         :return:
     """
+    global globalWebEnvironmentConfiguration
 
-    modelConfig = json.load(open(f"kwola/config/web_environment_configs/{config_name}.json"))
+    if globalWebEnvironmentConfiguration is not None:
+        return globalWebEnvironmentConfiguration
 
-    return modelConfig
+    globalWebEnvironmentConfiguration = json.load(open(f"kwola/config/web_environment_configs/{config_name}.json"))
+
+    return globalWebEnvironmentConfiguration
 
 
 

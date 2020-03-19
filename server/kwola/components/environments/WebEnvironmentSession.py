@@ -3,6 +3,7 @@ from selenium import webdriver
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from selenium.webdriver.chrome.options import Options
 import time
+import traceback
 import numpy as np
 from mitmproxy.tools.dump import DumpMaster
 from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
@@ -11,11 +12,14 @@ from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
+from kwola.models.ActionMap import ActionMap
 from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.models.errors.ExceptionError import ExceptionError
 import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile
+import skimage.io
+from kwola.config import config
 import subprocess
 import os
 import os.path
@@ -148,7 +152,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
 
     def createMovie(self):
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', self.movieFileName()], cwd=self.screenshotDirectory)
+        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         return self.movieFilePath()
 
@@ -191,12 +195,79 @@ class WebEnvironmentSession(BaseEnvironment):
         return cumulativeBranchExecutionVector
 
 
+    def getActionMaps(self):
+        elementActionMaps = self.driver.execute_script("""
+            function isFunction(functionToCheck) {
+             return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
+            }
+        
+            const actionMaps = [];
+            const domElements = document.querySelectorAll("*");
+            
+            for(let element of domElements)
+            {
+                const bounds = element.getBoundingClientRect();
+                const data = {
+                    canClick: false,
+                    canRightClick: false,
+                    canType: false,
+                    left: bounds.left,
+                    right: bounds.right,
+                    top: bounds.top,
+                    bottom: bounds.bottom,
+                    width: bounds.width,
+                    height: bounds.height
+                };
+                
+                if (element.tagName === "A"
+                        || element.tagName === "BUTTON"
+                        || element.tagName === "AREA"
+                        || element.tagName === "AUDIO"
+                        || element.tagName === "VIDEO"
+                        || element.tagName === "INPUT"
+                        || element.tagName === "SELECT"
+                        || element.tagName === "TEXTAREA")
+                    data.canClick = true;
+                
+                if (element.tagName === "INPUT"
+                        || element.tagName === "SELECT"
+                        || element.tagName === "TEXTAREA")
+                    data.canType = true;
+                
+                if (isFunction(element.onclick) 
+                    || isFunction(element.onauxclick) 
+                    || isFunction(element.onmousedown)
+                    || isFunction(element.onmouseup)
+                    || isFunction(element.ontouchend)
+                    || isFunction(element.ontouchstart))
+                    data.canClick = true;
+                
+                if (isFunction(element.oncontextmenu))
+                    data.canRightClick = true;
+                
+                if (isFunction(element.onkeydown) 
+                    || isFunction(element.onkeypress) 
+                    || isFunction(element.onkeyup))
+                    data.canType = true;
+                
+                if (data.canType || data.canClick || data.canRightClick)
+                    if (data.width > 0 && data.height > 0)
+                        actionMaps.push(data);
+            }
+            
+            return actionMaps;
+        """)
+
+        return [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
+
+
     def runAction(self, action):
         executionTrace = ExecutionTrace()
         executionTrace.time = datetime.now()
         executionTrace.actionPerformed = action
         executionTrace.errorsDetected = []
         executionTrace.startURL = self.driver.current_url
+        executionTrace.actionMaps = self.getActionMaps()
 
         startLogCount = len(self.driver.get_log('browser'))
 
@@ -215,40 +286,53 @@ class WebEnvironmentSession(BaseEnvironment):
                 executionTrace.cursor = None
 
             if isinstance(action, ClickTapAction):
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
-                    actionChain.move_by_offset(action.x, action.y)
-                    if action.times == 1:
-                        print("Clicking", action.x, action.y, action.source)
-                        actionChain.click()
-                    elif action.times == 2:
-                        print("Double Clicking", action.x, action.y, action.source)
-                        actionChain.double_click()
+                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                if action.times == 1:
+                    if config.getWebEnvironmentConfiguration()['print_every_action']:
+                        print("Clicking", action.x, action.y, action.source, flush=True)
+                    actionChain.click(on_element=element)
+                    actionChain.pause(0.5)
+                elif action.times == 2:
+                    if config.getWebEnvironmentConfiguration()['print_every_action']:
+                        print("Double Clicking", action.x, action.y, action.source, flush=True)
+                    actionChain.double_click(on_element=element)
+                    actionChain.pause(0.5)
 
-                    actionChain.perform()
+                actionChain.perform()
 
             if isinstance(action, RightClickAction):
-                    print("Right Clicking", action.x, action.y, action.source)
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
-                    actionChain.move_by_offset(action.x, action.y)
-                    actionChain.context_click()
-                    actionChain.perform()
+                if config.getWebEnvironmentConfiguration()['print_every_action']:
+                    print("Right Clicking", action.x, action.y, action.source, flush=True)
+                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.context_click(on_element=element)
+                actionChain.pause(0.5)
+                actionChain.perform()
 
             if isinstance(action, TypeAction):
-                    print("Typing", action.text, "at", action.x, action.y, action.source)
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), 0, 0)
-                    actionChain.move_by_offset(action.x, action.y)
-                    actionChain.send_keys(action.text)
-                    actionChain.perform()
+                if config.getWebEnvironmentConfiguration()['print_every_action']:
+                    print("Typing", action.text, "at", action.x, action.y, action.source, flush=True)
+                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.click(on_element=element)
+                actionChain.pause(0.5)
+                actionChain.send_keys_to_element(element, action.text)
+                actionChain.pause(0.5)
+                actionChain.perform()
 
             if isinstance(action, WaitAction):
                 # print("Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
-        except selenium.common.exceptions.MoveTargetOutOfBoundsException:
-            print("Running action failed!")
+        except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
+            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+
+            success = False
+        except selenium.common.exceptions.StaleElementReferenceException as e:
+            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
 
@@ -277,10 +361,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
         cumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(branchTrace)
 
-        if self.lastCumulativeBranchExecutionVector is not None:
-            branchExecutionVector = cumulativeBranchExecutionVector - self.lastCumulativeBranchExecutionVector
-        else:
-            branchExecutionVector = cumulativeBranchExecutionVector
+        branchExecutionVector = cumulativeBranchExecutionVector - self.lastCumulativeBranchExecutionVector
 
         executionTrace.branchExecutionTrace = branchExecutionVector.tolist()
         executionTrace.startCumulativeBranchExecutionTrace = self.lastCumulativeBranchExecutionVector.tolist()
@@ -300,10 +381,7 @@ class WebEnvironmentSession(BaseEnvironment):
         executionTrace.didNewErrorOccur = hadNewException
         executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
 
-        if self.lastCumulativeBranchExecutionVector is not None:
-            executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
-        else:
-            executionTrace.didNewBranchesExecute = True
+        executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
 
         executionTrace.hadNetworkTraffic = len(self.pathTracer.recentPaths) > 0
         executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
@@ -338,6 +416,8 @@ class WebEnvironmentSession(BaseEnvironment):
 
     def getImage(self):
         image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
+
+        image = numpy.flip(image[:, :, :3], axis=2)# OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
 
         return image
 

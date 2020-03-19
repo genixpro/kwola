@@ -17,7 +17,7 @@ class TestingSequencesGroup(Resource):
         self.postParser.add_argument('status', help='This field cannot be blank', required=False)
 
     def get(self):
-        testingSequences = TestingSequenceModel.objects().order_by("-startTime").to_json()
+        testingSequences = TestingSequenceModel.objects().order_by("-startTime").limit(20).to_json()
 
         return {"testingSequences": json.loads(testingSequences)}
 

@@ -13,6 +13,7 @@ import BasicTable from './basicTable';
 import {Root, Table} from "./materialUiTables.style";
 import {TableBody, TableCell, TableHead, TableRow} from "../../components/uielements/table";
 import Scrollbars from "../../components/utility/customScrollBar";
+import axios from "axios";
 
 const styles = theme => ({
   root: {
@@ -28,9 +29,18 @@ const styles = theme => ({
   },
 });
 
-class ListApplications extends Component {
-  componentDidMount() {
-    store.dispatch(applicationActions.requestApplicationList());
+class ListApplications extends Component
+{
+  state = {
+    applications: []
+  };
+
+  componentDidMount()
+  {
+    axios.get("/api/application").then((response) =>
+    {
+        this.setState({applications: response.data.applications})
+    })
   }
 
 
@@ -49,7 +59,7 @@ class ListApplications extends Component {
                     </TableHead>
                     <TableBody>
 
-                      {(this.props.applications || []).map(application => {
+                      {(this.state.applications || []).map(application => {
                         return (
                             <TableRow key={application._id.$oid} hover={true} onClick={() => this.props.history.push(`/dashboard/applications/${application._id.$oid}`)}>
                               <TableCell>{application.name}</TableCell>
@@ -67,5 +77,4 @@ class ListApplications extends Component {
   }
 }
 
-const mapStateToProps = (state) => {return { ...state.ListApplications} };
-export default connect(mapStateToProps)(withStyles(styles, { withTheme: true })(ListApplications));
+export default withStyles(styles, { withTheme: true })(ListApplications);

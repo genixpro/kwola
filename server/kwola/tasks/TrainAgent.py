@@ -110,7 +110,7 @@ def runMainTrainingLoop(trainingSequence):
     stepStartTime = datetime.datetime.now()
 
     while stepsCompleted < agentConfig['training_steps_needed']:
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + 1)) as executor:
             futures = []
 
             trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence)
@@ -118,6 +118,7 @@ def runMainTrainingLoop(trainingSequence):
 
             for testingSequences in range(agentConfig['testing_sequences_per_training_step']):
                 futures.append(executor.submit(runTestingSubprocess, trainingSequence))
+                time.sleep(3)
 
             wait(futures)
 

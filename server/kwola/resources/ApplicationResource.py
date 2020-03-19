@@ -4,7 +4,10 @@ from flask_jwt_extended import (create_access_token, create_refresh_token,
 
 from ..models.ApplicationModel import ApplicationModel
 import json
-
+from selenium import webdriver
+from selenium.webdriver.common.proxy import Proxy, ProxyType
+from selenium.webdriver.chrome.options import Options
+import flask
 
 class ApplicationGroup(Resource):
     def __init__(self):
@@ -28,7 +31,7 @@ class ApplicationGroup(Resource):
 
         newApplication.save()
 
-        return {}
+        return {"applicationId": str(newApplication.id)}
 
         # if not current_user:
         #     return {'message': 'User {} doesn\'t exist'.format(data['username'])}
@@ -52,3 +55,21 @@ class ApplicationSingle(Resource):
         application = ApplicationModel.objects(id=application_id).limit(1)[0].to_json()
 
         return json.loads(application)
+
+
+class ApplicationImage(Resource):
+    def get(self, application_id):
+        application = ApplicationModel.objects(id=application_id).limit(1).first()
+
+        chrome_options = Options()
+        chrome_options.headless = True
+
+        driver = webdriver.Chrome(chrome_options=chrome_options)
+        driver.get(application.url)
+        screenshotData = driver.get_screenshot_as_png()
+        driver.quit()
+
+        response = flask.make_response(screenshotData)
+        response.headers['content-type'] = 'image/png'
+        return response
+

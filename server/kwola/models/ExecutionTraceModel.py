@@ -2,6 +2,7 @@ from mongoengine import *
 import datetime
 from .actions.BaseAction import BaseAction
 from .errors.BaseError import BaseError
+from .ActionMap import ActionMap
 import numpy
 
 class ExecutionTrace(Document):
@@ -10,6 +11,8 @@ class ExecutionTrace(Document):
     executionSessionId = StringField()
 
     testingSequenceId = StringField()
+
+    actionMaps = EmbeddedDocumentListField(ActionMap)
 
     actionPerformed = EmbeddedDocumentField(BaseAction)
 
