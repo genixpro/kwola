@@ -711,7 +711,7 @@ class DeepLearningAgent(BaseAgent):
 
                 stampAxes.set_xticks([])
                 stampAxes.set_yticks([])
-                stampIm = stampAxes.imshow(stamp.data[0], cmap=greyColorMap, interpolation="nearest")
+                stampIm = stampAxes.imshow(stamp.data[0], cmap=greyColorMap, interpolation="nearest", vmin=-15.0, vmax=15.0)
                 mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
                 stampAxes.set_title("Memory Stamp")
 
