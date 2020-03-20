@@ -81,7 +81,7 @@
   "training_execution_sessions_in_one_loop": 10,
   "training_max_main_process_workers": 8,
   "training_max_main_thread_workers": 8,
-  "training_number_of_recent_testing_sequences_to_use": 250,
+  "training_number_of_recent_testing_sequences_to_use": 100,
   "training_number_shufflings_cached_per_execution_session": 1,
   "training_precompute_sessions_count": 60,
   "training_reward_normalizer_fit_population_size": 1500,
