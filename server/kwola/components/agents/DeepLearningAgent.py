@@ -227,17 +227,18 @@ class DeepLearningAgent(BaseAgent):
         epsilonsPerSample = []
 
         for sampleIndex, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(processedImages)), processedImages, segmentationMaps, additionalFeatures, envActionMaps):
-            epsilon = (float(sampleIndex + 1) / float(len(processedImages))) * 0.75 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+            randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.75 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+            weightedRandomActionProbability = (float(sampleIndex + 2) / float(len(processedImages))) * 1.00 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
 
             pixelActionMap = self.createPixelActionMap(actionMaps, height, width)
 
-            if random.random() > epsilon:
+            if random.random() > randomActionProbability:
                 batchSampleIndexes.append(sampleIndex)
                 imageBatch.append(image)
                 additionalFeatureVectorBatch.append(additionalFeatureVector)
                 pixelActionMapsBatch.append(pixelActionMap)
                 segmentationMapsBatch.append(segmentationMap)
-                epsilonsPerSample.append(epsilon)
+                epsilonsPerSample.append(weightedRandomActionProbability)
             else:
                 # Choose a random segment, but we only want to choose from among the segments that reside within
                 # areas that have actions associated with them. We use the pixelActionMap to do that.
@@ -711,7 +712,7 @@ class DeepLearningAgent(BaseAgent):
 
                 stampAxes.set_xticks([])
                 stampAxes.set_yticks([])
-                stampIm = stampAxes.imshow(stamp.data[0], cmap=greyColorMap, interpolation="nearest", vmin=-15.0, vmax=15.0)
+                stampIm = stampAxes.imshow(stamp.data[0], cmap=greyColorMap, interpolation="nearest", vmin=-20.0, vmax=20.0)
                 mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
                 stampAxes.set_title("Memory Stamp")
 
