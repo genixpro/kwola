@@ -141,7 +141,7 @@ def runTrainingStep(trainingSequenceId):
             for session in testSequence.executionSessions:
                 executionSessionIds.append(str(session.id))
 
-        trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, agentConfig['training_reward_normalizer_fit_population_size']))
+        trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), agentConfig['training_reward_normalizer_fit_population_size'])))
 
         with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
             pickle.dump(trainingRewardNormalizer, normalizerFile)
