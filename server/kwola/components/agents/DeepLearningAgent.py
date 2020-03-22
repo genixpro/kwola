@@ -827,8 +827,7 @@ class DeepLearningAgent(BaseAgent):
 
         return trainingRewardNormalizer
 
-    @staticmethod
-    def augmentProcessedImageForTraining(processedImage):
+    def augmentProcessedImageForTraining(self, processedImage):
         # Add random noise
         augmentedImage = processedImage + numpy.random.normal(loc=0, scale=self.agentConfiguration['training_image_gaussian_noise_scale'], size=processedImage.shape)
 
