@@ -827,6 +827,15 @@ class DeepLearningAgent(BaseAgent):
 
         return trainingRewardNormalizer
 
+    @staticmethod
+    def augmentProcessedImageForTraining(processedImage):
+        # Add random noise
+        augmentedImage = processedImage + numpy.random.normal(loc=0, scale=self.agentConfiguration['training_image_gaussian_noise_scale'], size=processedImage.shape)
+
+        # Clip the bounds to between 0 and 1
+        augmentedImage = numpy.maximum(numpy.zeros_like(augmentedImage), numpy.minimum(numpy.ones_like(augmentedImage), augmentedImage))
+
+        return augmentedImage
 
 
     def prepareBatchesForExecutionSession(self, executionSession, trainingRewardNormalizer=None):
@@ -913,7 +922,8 @@ class DeepLearningAgent(BaseAgent):
                 width = processedImage.shape[2]
                 height = processedImage.shape[1]
 
-                processedImage = processedImage + numpy.random.normal(loc=0, scale=self.agentConfiguration['training_image_gaussian_noise_scale'], size=processedImage.shape)
+                # Add random noise and then clip the bounds to between 0 and 1
+                augmentedImage = self.augmentProcessedImageForTraining(processedImage)
 
                 cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
 
@@ -921,7 +931,7 @@ class DeepLearningAgent(BaseAgent):
                 decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
                 additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
-                batchProcessedImages.append(processedImage[:, cropTop:cropBottom, cropLeft:cropRight])
+                batchProcessedImages.append(augmentedImage[:, cropTop:cropBottom, cropLeft:cropRight])
                 batchAdditionalFeatures.append(additionalFeature)
 
                 pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
