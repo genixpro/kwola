@@ -297,12 +297,12 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
                 if action.times == 1:
                     if config.getWebEnvironmentConfiguration()['print_every_action']:
-                        print("Clicking", action.x, action.y, action.source, flush=True)
+                        print(datetime.now(), "Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.click(on_element=element)
                     actionChain.pause(0.5)
                 elif action.times == 2:
                     if config.getWebEnvironmentConfiguration()['print_every_action']:
-                        print("Double Clicking", action.x, action.y, action.source, flush=True)
+                        print(datetime.now(), "Double Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.double_click(on_element=element)
                     actionChain.pause(0.5)
 
@@ -310,7 +310,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
             if isinstance(action, RightClickAction):
                 if config.getWebEnvironmentConfiguration()['print_every_action']:
-                    print("Right Clicking", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), "Right Clicking", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
                 actionChain.context_click(on_element=element)
@@ -319,7 +319,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
             if isinstance(action, TypeAction):
                 if config.getWebEnvironmentConfiguration()['print_every_action']:
-                    print("Typing", action.text, "at", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
                 actionChain.click(on_element=element)
@@ -329,7 +329,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain.perform()
 
             if isinstance(action, WaitAction):
-                # print("Waiting for ", action.time, "at", action.x, action.y, action.source)
+                print(datetime.now(), "Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:

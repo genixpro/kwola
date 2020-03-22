@@ -913,6 +913,8 @@ class DeepLearningAgent(BaseAgent):
                 width = processedImage.shape[2]
                 height = processedImage.shape[1]
 
+                processedImage = processedImage + numpy.random.normal(loc=0, scale=self.agentConfiguration['training_image_gaussian_noise_scale'], size=processedImage.shape)
+
                 cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
 
                 branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
@@ -1037,7 +1039,7 @@ class DeepLearningAgent(BaseAgent):
                 # from other pixels.
                 targetHomogenizationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).mean(axis=0)
                 targetDifferentiationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * (1.0 - rewardPixelMask)).pow(2).mean(axis=0)
-                targetHomogenizationLoss = (targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (width * height - countPixelMask))
+                targetHomogenizationLoss = torch.abs((targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (width * height - countPixelMask)))
                 targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
 
             # if len(totalRewardLosses) == 0:
