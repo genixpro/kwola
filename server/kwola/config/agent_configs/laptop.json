@@ -72,7 +72,7 @@
   "testing_reset_agent_period": 5,
   "testing_print_every": 1,
   "testing_sequence_length": 10,
-  "testing_sequences_in_parallel_per_training_step": 2,
+  "testing_sequences_in_parallel_per_training_step": 1,
   "testing_sequences_per_training_step": 1,
   "training_crop_height": 256,
   "training_crop_width": 256,

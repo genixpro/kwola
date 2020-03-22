@@ -246,7 +246,7 @@ class DeepLearningAgent(BaseAgent):
                 uniqueSegmentsInsideMask = list(sorted(numpy.unique(segmentationMapMasked).tolist()))
 
                 if len(uniqueSegmentsInsideMask) == 1:
-                    print("Error! No segments to pick. Choosing random spot. This usually means there are no available actions on the tested application, such as a blank screen with no text, links, buttons or input elements, or that the action-mapping for this environment is not working for some reason.", flush=True)
+                    print(datetime.now(), "Error! No segments to pick. Choosing random spot. This usually means there are no available actions on the tested application, such as a blank screen with no text, links, buttons or input elements, or that the action-mapping for this environment is not working for some reason.", flush=True)
                     actionX = random.randrange(0, width)
                     actionY = random.randrange(0, height)
                     actionType = random.randrange(0, len(self.actionsSorted))
@@ -455,7 +455,7 @@ class DeepLearningAgent(BaseAgent):
 
             concurrent.futures.wait(futures)
 
-        subprocess.run(['ffmpeg', '-r', '60', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', '-pix_fmt', 'yuv420p', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
 
@@ -674,7 +674,7 @@ class DeepLearningAgent(BaseAgent):
 
                 presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = \
                     self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
-                                "additionalFeature": additionalFeature,
+                                "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(additionalFeature)),
                                 "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap])))
                                 })
                 totalRewardPredictions = numpy.array((presentRewardPredictions + discountedFutureRewardPredictions).data)
@@ -771,7 +771,7 @@ class DeepLearningAgent(BaseAgent):
     def prepareAdditionalFeaturesForTrace(self, trace):
         branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
         decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
-        additionalFeature = self.variableWrapperFunc(torch.FloatTensor(numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)))
+        additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
         return additionalFeature
 
@@ -1175,6 +1175,9 @@ def processRawImageParallel(rawImage, doSegmentation=True):
 
     # Convert to grey-scale image
     processedImage = numpy.array([skimage.color.rgb2gray(rawImage[:, :, :3])])
+
+    # Round the float values down to 0. This minimizes some the error introduced by the video codecs
+    processedImage = numpy.around(processedImage, decimals=2)
 
     if doSegmentation:
         segmentationMap = globalSegmentImage(rawImage)
