@@ -13,7 +13,7 @@ import time
 import psutil
 import subprocess
 import traceback
-import datetime
+from datetime import datetime
 import atexit
 import bson
 from kwola.config import config
@@ -37,7 +37,7 @@ def runRandomInitializationSubprocess(trainingSequence):
 
 
 def runRandomInitialization(trainingSequence):
-    print("Starting random testing sequences for initialization", flush=True)
+    print(datetime.now(), "Starting random testing sequences for initialization", flush=True)
 
     agentConfig = config.getAgentConfiguration()
 
@@ -58,11 +58,11 @@ def runRandomInitialization(trainingSequence):
 
         for future in as_completed(futures):
             result = future.result()
-            print("Random Testing Sequence Completed", flush=True)
+            print(datetime.now(), "Random Testing Sequence Completed", flush=True)
 
     # Save the training sequence with all the data on the initialization sequences
     trainingSequence.save()
-    print("Random initialization completed", flush=True)
+    print(datetime.now(), "Random initialization completed", flush=True)
 
 
 
@@ -82,7 +82,7 @@ def runTrainingSubprocess(trainingSequence):
             trainingSequence.save()
     except Exception as e:
         traceback.print_exc()
-        print("Training task subprocess appears to have failed")
+        print(datetime.now(), "Training task subprocess appears to have failed", flush=True)
 
 
 def runTestingSubprocess(trainingSequence):
@@ -107,7 +107,7 @@ def runMainTrainingLoop(trainingSequence):
 
     stepsCompleted = 0
 
-    stepStartTime = datetime.datetime.now()
+    stepStartTime = datetime.now()
 
     while stepsCompleted < agentConfig['training_steps_needed']:
         with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + 1)) as executor:
@@ -122,19 +122,19 @@ def runMainTrainingLoop(trainingSequence):
 
             wait(futures)
 
-            print("Completed one parallel training & testing step! Hooray!", flush=True)
+            print(datetime.now(), "Completed one parallel training & testing step! Hooray!", flush=True)
 
             stepsCompleted += 1
 
         trainingSequence.trainingStepsCompleted += 1
-        trainingSequence.averageTimePerStep = (datetime.datetime.now() - stepStartTime).total_seconds() / stepsCompleted
+        trainingSequence.averageTimePerStep = (datetime.now() - stepStartTime).total_seconds() / stepsCompleted
         trainingSequence.save()
 
 
 def trainAgent():
     trainingSequence = TrainingSequence()
 
-    trainingSequence.startTime = datetime.datetime.now()
+    trainingSequence.startTime = datetime.now()
     trainingSequence.status = "running"
     trainingSequence.trainingStepsCompleted = 0
 
@@ -142,7 +142,7 @@ def trainAgent():
     runMainTrainingLoop(trainingSequence)
 
     trainingSequence.status = "completed"
-    trainingSequence.endTime = datetime.datetime.now()
+    trainingSequence.endTime = datetime.now()
     trainingSequence.save()
 
 
