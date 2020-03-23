@@ -254,8 +254,6 @@ def runTrainingStep(trainingSequenceId):
 
                     totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses = agent.learnFromBatch(batch)
 
-                    print(sampleRewardLosses)
-
                     for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
                         trace = executionTraceIdMap[executionTraceId]
                         trace.lastTrainingRewardLoss = sampleRewardLoss
