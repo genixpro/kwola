@@ -85,6 +85,8 @@ def isNumpyArray(obj):
 def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, processExecutor, subProcessBatchResultQueue):
     agentConfig = config.getAgentConfiguration()
 
+    agent = DeepLearningAgent(agentConfiguration=agentConfig, whichGpu=None)
+
     traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
     countWithLossValue = numpy.count_nonzero(traceWeights)
 
@@ -124,6 +126,15 @@ def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap,
             batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
         else:
             batch[key] = [sample[key][0] for sample in samples]
+
+    # Add augmentation to the processed images. This is done at this stage
+    # so that we don't store the augmented version in the redis cache.
+    # Instead, we want the pure version in the redis cache and create a
+    # new augmentation every time we load it.
+    for imageIndex in range(len(batch['processedImages'])):
+        processedImage = batch['processedImages'][imageIndex]
+        augmentedImage = agent.augmentProcessedImageForTraining(processedImage)
+        batch['processedImages'][imageIndex] = augmentedImage
 
     cacheHitRate = numpy.mean(cacheHits)
 

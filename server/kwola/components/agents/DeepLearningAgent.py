@@ -936,16 +936,13 @@ class DeepLearningAgent(BaseAgent):
 
             batchTraceIds.append(str(trace.id))
 
-            # Add random noise and then clip the bounds to between 0 and 1
-            augmentedImage = self.augmentProcessedImageForTraining(processedImage)
-
             cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
 
             branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
             decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
             additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
-            batchProcessedImages.append(augmentedImage[:, cropTop:cropBottom, cropLeft:cropRight])
+            batchProcessedImages.append(processedImage[:, cropTop:cropBottom, cropLeft:cropRight])
             batchAdditionalFeatures.append(additionalFeature)
 
             pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
