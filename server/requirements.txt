@@ -19,3 +19,4 @@ opencv-python
 torchvision
 redis
 psutil
+scipy

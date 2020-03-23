@@ -71,6 +71,9 @@ class ExecutionTrace(Document):
     # This field is compressed using a transparent algorithm that makes sparse arrays smaller
     branchExecutionTraceCompressed = ListField()
 
+    # This field is used by the training routine to track how much loss the network had on this execution trace.
+    lastTrainingRewardLoss = FloatField(default=0)
+
     # We use Python getter / setter methods to transparently compress and decompress
     # these fields as they go into and out of the database model.
     @property

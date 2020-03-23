@@ -78,16 +78,16 @@
   "training_crop_width": 256,
   "training_execution_session_cache_expiration_seconds": 600,
   "training_execution_session_cache_expiration_max_additional_random_seconds": 30,
-  "training_execution_sessions_in_one_loop": 2,
   "training_max_main_process_workers": 12,
   "training_max_main_thread_workers": 12,
   "training_number_of_recent_testing_sequences_to_use": 50,
   "training_number_shufflings_cached_per_execution_session": 1,
-  "training_precompute_sessions_count": 1,
+  "training_precompute_batches_count": 1,
   "training_reward_normalizer_fit_population_size": 50,
   "training_random_initialization_sequences": 0,
   "training_random_initialization_workers": 1,
   "training_step_timeout": 800,
   "training_steps_needed": 3,
-  "training_image_gaussian_noise_scale": 0.1
+  "training_image_gaussian_noise_scale": 0.1,
+  "training_trace_selection_minimum_weight": 0.05
 }

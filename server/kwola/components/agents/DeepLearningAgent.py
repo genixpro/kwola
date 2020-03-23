@@ -847,9 +847,12 @@ class DeepLearningAgent(BaseAgent):
         return augmentedImage
 
 
-    def prepareBatchesForExecutionSession(self, executionSession, trainingRewardNormalizer=None):
+    def prepareBatchForExecutionSession(self, executionSession, trainingRewardNormalizer=None):
         """
-            This function prepares batches that can be fed to the neural network.
+            This function prepares samples so that can be fed to the neural network. It will return a single
+            batch containing all of the samples in this session. NOTE! It does not return a batch of the size
+            set in the config files. This must be done by surrounding code. This will return a batch containing
+            *all* samples in this execution session.
 
             :param executionSession:
             :param , trainingRewardNormalizer
@@ -908,104 +911,96 @@ class DeepLearningAgent(BaseAgent):
 
         executionTraces.reverse()
 
-        shuffledTraceFrameList = list(zip(executionSession.executionTraces, processedImages, discountedFutureRewards, presentRewards, executionTraces))
-        random.shuffle(shuffledTraceFrameList)
+        batchTraceIds = []
+        batchProcessedImages = []
+        batchAdditionalFeatures = []
+        batchPixelActionMaps = []
+        batchActionTypes = []
+        batchActionXs = []
+        batchActionYs = []
+        batchExecutionTraces = []
+        batchDiscountedFutureRewards = []
+        batchPresentRewards = []
+        batchRewardPixelMasks = []
+        batchExecutionFeatures = []
+        batchCursors = []
 
-        batches = []
+        for trace, processedImage, discountedFutureReward, presentReward, executionTrace in zip(executionSession.executionTraces, processedImages, discountedFutureRewards, presentRewards, executionTraces):
+            width = processedImage.shape[2]
+            height = processedImage.shape[1]
 
-        for batch in grouper(self.agentConfiguration['batch_size'], shuffledTraceFrameList):
-            batchProcessedImages = []
-            batchAdditionalFeatures = []
-            batchPixelActionMaps = []
-            batchActionTypes = []
-            batchActionXs = []
-            batchActionYs = []
-            batchExecutionTraces = []
-            batchDiscountedFutureRewards = []
-            batchPresentRewards = []
-            batchRewardPixelMasks = []
-            batchExecutionFeatures = []
-            batchCursors = []
+            batchTraceIds.append(str(trace.id))
 
-            for trace, processedImage, discountedFutureReward, presentReward, executionTrace in batch:
-                width = processedImage.shape[2]
-                height = processedImage.shape[1]
+            # Add random noise and then clip the bounds to between 0 and 1
+            augmentedImage = self.augmentProcessedImageForTraining(processedImage)
 
-                # Add random noise and then clip the bounds to between 0 and 1
-                augmentedImage = self.augmentProcessedImageForTraining(processedImage)
+            cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
 
-                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
+            branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
+            decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
+            additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
-                branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
-                decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
-                additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
+            batchProcessedImages.append(augmentedImage[:, cropTop:cropBottom, cropLeft:cropRight])
+            batchAdditionalFeatures.append(additionalFeature)
 
-                batchProcessedImages.append(augmentedImage[:, cropTop:cropBottom, cropLeft:cropRight])
-                batchAdditionalFeatures.append(additionalFeature)
+            pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
+            batchPixelActionMaps.append(pixelActionMap[:, cropTop:cropBottom, cropLeft:cropRight])
 
-                pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
-                batchPixelActionMaps.append(pixelActionMap[:, cropTop:cropBottom, cropLeft:cropRight])
+            batchActionTypes.append(trace.actionPerformed.type)
+            batchActionXs.append(trace.actionPerformed.x - cropLeft)
+            batchActionYs.append(trace.actionPerformed.y - cropTop)
 
-                batchActionTypes.append(trace.actionPerformed.type)
-                batchActionXs.append(trace.actionPerformed.x - cropLeft)
-                batchActionYs.append(trace.actionPerformed.y - cropTop)
+            cursorVector = [0] * len(self.cursors)
+            if trace.cursor in self.cursors:
+                cursorVector[self.cursors.index(trace.cursor)] = 1
+            else:
+                cursorVector[self.cursors.index("none")] = 1
 
-                cursorVector = [0] * len(self.cursors)
-                if trace.cursor in self.cursors:
-                    cursorVector[self.cursors.index(trace.cursor)] = 1
-                else:
-                    cursorVector[self.cursors.index("none")] = 1
+            batchCursors.append(cursorVector)
 
-                batchCursors.append(cursorVector)
+            executionFeatures = [
+                trace.didActionSucceed,
+                trace.didErrorOccur,
+                trace.didNewErrorOccur,
+                trace.didCodeExecute,
+                trace.didNewBranchesExecute,
+                trace.hadNetworkTraffic,
+                trace.hadNewNetworkTraffic,
+                trace.didScreenshotChange,
+                trace.isScreenshotNew,
+                trace.didURLChange,
+                trace.isURLNew,
+                trace.hadLogOutput,
+            ]
 
-                executionFeatures = [
-                    trace.didActionSucceed,
-                    trace.didErrorOccur,
-                    trace.didNewErrorOccur,
-                    trace.didCodeExecute,
-                    trace.didNewBranchesExecute,
-                    trace.hadNetworkTraffic,
-                    trace.hadNewNetworkTraffic,
-                    trace.didScreenshotChange,
-                    trace.isScreenshotNew,
-                    trace.didURLChange,
-                    trace.isURLNew,
-                    trace.hadLogOutput,
-                ]
+            batchExecutionTraces.append(executionTrace)
 
-                batchExecutionTraces.append(executionTrace)
+            batchDiscountedFutureRewards.append(discountedFutureReward)
+            batchPresentRewards.append(presentReward)
 
-                batchDiscountedFutureRewards.append(discountedFutureReward)
-                batchPresentRewards.append(presentReward)
+            rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
 
-                rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
+            batchRewardPixelMasks.append(rewardPixelMask[cropTop:cropBottom, cropLeft:cropRight])
 
-                batchRewardPixelMasks.append(rewardPixelMask[cropTop:cropBottom, cropLeft:cropRight])
+            batchExecutionFeatures.append(executionFeatures)
 
-                batchExecutionFeatures.append(executionFeatures)
-
-            # Append an array with all the data to the list of batches.
-            # Add the same time we down-sample some of the data points to be more compact.
-            # We don't need a high precision for the image itself
-            batches.append({
-                "processedImages": numpy.array(batchProcessedImages, dtype=numpy.float16),
-                "additionalFeatures": numpy.array(batchAdditionalFeatures, dtype=numpy.float16),
-                "pixelActionMaps": numpy.array(batchPixelActionMaps, dtype=numpy.uint8),
-                "actionTypes": batchActionTypes,
-                "actionXs": numpy.array(batchActionXs, dtype=numpy.int16),
-                "actionYs": numpy.array(batchActionYs, dtype=numpy.int16),
-                "executionTraces": numpy.array(batchExecutionTraces, dtype=numpy.int8),
-                "discountedFutureRewards": numpy.array(batchDiscountedFutureRewards, dtype=numpy.float32),
-                "presentRewards": numpy.array(batchPresentRewards, dtype=numpy.float32),
-                "rewardPixelMasks": numpy.array(batchRewardPixelMasks, dtype=numpy.uint8),
-                "executionFeatures": numpy.array(batchExecutionFeatures, dtype=numpy.uint8),
-                "cursors": numpy.array(batchCursors, dtype=numpy.uint8)
-            })
-            # print(datetime.now(), "Finished preparing batch #", len(batches), "for", str(executionSession.id), flush=True)
-
-        # print(datetime.now(), "Finished preparing all batches for", str(executionSession.id), flush=True)
-
-        return batches
+        # We down-sample some of the data points in the batch to be more compact.
+        # We don't need a high precision for most of this data, so its better to be compact and save the ram
+        return {
+            "traceIds": batchTraceIds,
+            "processedImages": numpy.array(batchProcessedImages, dtype=numpy.float16),
+            "additionalFeatures": numpy.array(batchAdditionalFeatures, dtype=numpy.float16),
+            "pixelActionMaps": numpy.array(batchPixelActionMaps, dtype=numpy.uint8),
+            "actionTypes": batchActionTypes,
+            "actionXs": numpy.array(batchActionXs, dtype=numpy.int16),
+            "actionYs": numpy.array(batchActionYs, dtype=numpy.int16),
+            "executionTraces": numpy.array(batchExecutionTraces, dtype=numpy.int8),
+            "discountedFutureRewards": numpy.array(batchDiscountedFutureRewards, dtype=numpy.float32),
+            "presentRewards": numpy.array(batchPresentRewards, dtype=numpy.float32),
+            "rewardPixelMasks": numpy.array(batchRewardPixelMasks, dtype=numpy.uint8),
+            "executionFeatures": numpy.array(batchExecutionFeatures, dtype=numpy.uint8),
+            "cursors": numpy.array(batchCursors, dtype=numpy.uint8)
+        }
 
     def learnFromBatch(self, batch):
         """
@@ -1177,7 +1172,9 @@ class DeepLearningAgent(BaseAgent):
         self.trainingLosses["totalLoss"].append(totalLoss)
         self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
 
-        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward
+        sampleRewardLosses = [tensor.data.item() for tensor in totalRewardLosses]
+
+        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses
 
 
 
