@@ -818,7 +818,7 @@ class DeepLearningAgent(BaseAgent):
             for rewardFuture in concurrent.futures.as_completed(rewardFutures):
                 totalRewards = rewardFuture.result()
                 rewardSequences.append(totalRewards)
-                longest = max(longest, len(rewardSequences))
+                longest = max(longest, len(totalRewards))
 
         for totalRewards in rewardSequences:
             while len(totalRewards) < longest:
