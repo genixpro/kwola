@@ -294,7 +294,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
             if isinstance(action, ClickTapAction):
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
                     if config.getWebEnvironmentConfiguration()['print_every_action']:
                         print(datetime.now(), "Clicking", action.x, action.y, action.source, flush=True)
@@ -312,7 +312,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 if config.getWebEnvironmentConfiguration()['print_every_action']:
                     print(datetime.now(), "Right Clicking", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
                 actionChain.pause(0.5)
                 actionChain.perform()
@@ -321,7 +321,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 if config.getWebEnvironmentConfiguration()['print_every_action']:
                     print(datetime.now(), "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                actionChain.move_to_element_with_offset(self.driver.find_element_by_tag_name('body'), action.x, action.y)
+                actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
                 actionChain.pause(0.5)
                 actionChain.send_keys_to_element(element, action.text)
