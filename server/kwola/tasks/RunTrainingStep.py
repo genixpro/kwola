@@ -258,7 +258,7 @@ def runTrainingStep(trainingSequenceId):
             agent.save()
             print(datetime.now(), "Agent saved!", flush=True)
         else:
-            print("ERROR! A NaN was detected in this models output. Not saving model.", flush=True)
+            print(datetime.now(), "ERROR! A NaN was detected in this models output. Not saving model.", flush=True)
 
     except Exception as e:
         print(datetime.now(), f"Error occurred while learning sequence!", flush=True)
