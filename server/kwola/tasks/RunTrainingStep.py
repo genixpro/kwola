@@ -4,6 +4,7 @@ from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
 from kwola.models.TrainingStepModel import TrainingStep
 from kwola.models.ExecutionSessionModel import ExecutionSession
+from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.config.config import getKwolaUserDataDirectory
 from kwola.components.TaskProcess import TaskProcess
@@ -24,13 +25,7 @@ import os
 from kwola.config import config
 
 def getCacheIdForExecutionTraceId(executionTraceId):
-    agentConfiguration = config.getAgentConfiguration()
-    if agentConfiguration['training_number_shufflings_cached_per_execution_session'] > 1:
-        shuffling = random.randint(0, agentConfiguration['training_number_shufflings_cached_per_execution_session'] - 1)
-        cacheId = str(executionTraceId) + f"_shuffling_{shuffling}"
-    else:
-        cacheId = str(executionTraceId) + f"_shuffling_0"
-    return cacheId
+    return "execution-trace-" + str(executionTraceId)
 
 
 def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchDirectory):
@@ -76,8 +71,6 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
 
     with open(fileDescriptor, 'wb') as batchFile:
         pickle.dump(sampleBatch, batchFile)
-
-    # print(datetime.now(), "Finished writing all batches for execution session", executionSessionId)
 
     return fileName, cacheHit
 
@@ -159,33 +152,65 @@ def printMovingAverageLosses(trainingStep):
         print(datetime.now(), "Moving Average Total Loss:", averageTotalLoss, flush=True)
 
 
+def loadExecutionSession(sessionId):
+    session = ExecutionSession.objects(id=bson.ObjectId(sessionId)).no_dereference().first()
+    return session
+
+
+def loadExecutionTrace(traceId):
+    trace = ExecutionTrace.objects(id=bson.ObjectId(traceId)).no_dereference().only('executionSessionId', 'lastTrainingRewardLoss').first()
+    return pickle.dumps(trace)
+
+
 def runTrainingStep(trainingSequenceId):
     try:
         agentConfig = config.getAgentConfiguration()
 
         print(datetime.now(), "Starting Training Step", flush=True)
-        testSequences = list(TestingSequenceModel.objects(status="completed").order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
+        testSequences = list(TestingSequenceModel.objects(status="completed").no_dereference().order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
         if len(testSequences) == 0:
             print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
             print(datetime.now(), "==== Training Step Completed ====", flush=True)
             return {}
 
+        # We use this mechanism to force parallel preloading of all the execution traces
         executionSessionIds = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+            executionSessionFutures = []
+            for testSequence in testSequences:
+                for session in testSequence.executionSessions:
+                    executionSessionIds.append(str(session['_ref'].id))
+                    executionSessionFutures.append(executor.submit(loadExecutionSession, session['_ref'].id))
+
+            executionSessions = [future.result() for future in executionSessionFutures]
+
+        print(datetime.now(), "Starting loading of execution traces.")
+
         executionTraces = []
         executionTraceIdMap = {}
-        for testSequence in testSequences:
-            for session in testSequence.executionSessions:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+            executionTraceFutures = []
+            for session in executionSessions:
                 for trace in session.executionTraces:
-                    executionTraces.append(trace)
-                    executionTraceIdMap[str(trace.id)] = trace
-                executionSessionIds.append(str(session.id))
+                    executionTraceFutures.append(executor.submit(loadExecutionTrace, trace['_ref'].id))
+
+            for traceFuture in executionTraceFutures:
+                trace = pickle.loads(traceFuture.result())
+                executionTraces.append(trace)
+                executionTraceIdMap[str(trace.id)] = trace
+
+        print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.")
+        print(datetime.now(), "Starting creation of the reward normalizer.")
 
         trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), agentConfig['training_reward_normalizer_fit_population_size'])))
 
         with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
             pickle.dump(trainingRewardNormalizer, normalizerFile)
 
-        del testSequences
+        del testSequences, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
+
+        print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
+        print(datetime.now(), "Finished initialization for training step.", flush=True)
 
         trainingStep = TrainingStep()
         trainingStep.startTime = datetime.now()

@@ -4,7 +4,7 @@ import os.path
 
 import json
 
-config_name = "laptop"
+config_name = "rig"
 
 def getKwolaUserDataDirectory(subDirName):
     """

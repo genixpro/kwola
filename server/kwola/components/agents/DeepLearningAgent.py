@@ -804,7 +804,12 @@ class DeepLearningAgent(BaseAgent):
 
     @staticmethod
     def computeTotalRewardsParallel(execusionSessionId):
-        session = ExecutionSession.objects(id=bson.ObjectId(execusionSessionId)).first()
+        session = ExecutionSession.objects(id=bson.ObjectId(execusionSessionId)).no_dereference().first()
+
+        session.executionTraces = [
+            ExecutionTrace.objects(id=traceId['_ref'].id).exclude("branchExecutionTraceCompressed", "startDecayingExecutionTraceCompressed", "startCumulativeBranchExecutionTraceCompressed").first()
+            for traceId in session.executionTraces
+        ]
 
         presentRewards = DeepLearningAgent.computePresentRewards(session)
         futureRewards = DeepLearningAgent.computeDiscountedFutureRewards(session)
