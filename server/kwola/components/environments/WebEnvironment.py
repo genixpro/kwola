@@ -43,7 +43,7 @@ class WebEnvironment(BaseEnvironment):
     def startProxyServer(self):
         self.proxyPort = self.findFreePort()
 
-        self.proxyThread = Thread(target=lambda: self.runProxyServer())
+        self.proxyThread = Thread(target=lambda: self.runProxyServer(), daemon=True)
         self.proxyThread.start()
 
         # Hack, wait for proxy thread to start

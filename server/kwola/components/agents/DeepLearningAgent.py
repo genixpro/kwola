@@ -292,7 +292,13 @@ class DeepLearningAgent(BaseAgent):
                     samplePredictedReward = sampleRewardPredictions[actionType, actionY, actionX].data.item()
                 else:
                     reshaped = numpy.array(sampleActionProbs.data).reshape([len(self.actionsSorted) * height * width])
-                    actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
+                    try:
+                        actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
+                    except ValueError:
+                        # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
+                        # So instead we just pick an action randomly with no probabilities.
+                        actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width))
+
                     newProbs = numpy.zeros([len(self.actionsSorted) * height * width])
                     newProbs[actionIndex] = 1
 
