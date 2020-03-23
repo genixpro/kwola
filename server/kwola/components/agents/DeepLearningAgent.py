@@ -710,7 +710,7 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (3,3), numpy.max)
 
                     im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap,
-                                                                  vmin=-0.50, vmax=0.75, interpolation="nearest")
+                                                                  vmin=-2.00, vmax=3.00, interpolation="nearest")
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
