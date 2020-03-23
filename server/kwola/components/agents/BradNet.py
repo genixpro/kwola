@@ -243,7 +243,7 @@ class BradNet(nn.Module):
         predictedTraces = self.predictedExecutionTraceLinearCurrent(joinedFeatures)
         predictedExecutionFeatures = self.predictedExecutionFeaturesLinearCurrent(joinedFeatures)
         predictedCursor = self.predictedCursorLinearCurrent(joinedFeatures)
-        actionProbabilities = self.actionSoftmax(totalReward.reshape([-1, width * height * self.numActions])).reshape([-1, height, width, self.numActions])
+        actionProbabilities = self.actionSoftmax(totalReward.reshape([-1, self.numActions * height * width ])).reshape([-1, self.numActions, height, width])
 
         return presentRewards, discountFutureRewards, predictedTraces, predictedExecutionFeatures, predictedCursor, pixelFeatureMap, stamp, actionProbabilities
 

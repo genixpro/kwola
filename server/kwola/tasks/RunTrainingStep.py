@@ -239,7 +239,7 @@ def runTrainingStep(trainingSequenceId):
                         trainingStep.numberOfIterationsCompleted += 1
 
                         if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
-                            print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted, "batches", flush=True)
+                            print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
                             printMovingAverageLosses(trainingStep)
                             if agentConfig['print_cache_hit_rate']:
                                 print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%")

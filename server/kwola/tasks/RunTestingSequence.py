@@ -138,7 +138,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
             os.unlink(resultFileName)
 
             if stepsRemaining % agentConfig['testing_print_every'] == 0:
-                print(datetime.now(), f"Finished {step} testing actions.", flush=True)
+                print(datetime.now(), f"Finished {step + 1} testing actions.", flush=True)
 
             step += 1
 

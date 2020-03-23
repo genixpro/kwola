@@ -178,7 +178,7 @@ class DeepLearningAgent(BaseAgent):
                 convertedImageFuture = executor.submit(processRawImageParallel, image)
                 convertedImageFutures.append(convertedImageFuture)
 
-        converteHSLImages = [
+        convertedProcessedImages = [
             convertedImageFuture.result()[0] for convertedImageFuture in convertedImageFutures
         ]
 
@@ -186,7 +186,7 @@ class DeepLearningAgent(BaseAgent):
             convertedImageFuture.result()[1] for convertedImageFuture in convertedImageFutures
         ]
 
-        return numpy.array(converteHSLImages),  numpy.array(convertedSegmentationMaps)
+        return numpy.array(convertedProcessedImages),  numpy.array(convertedSegmentationMaps)
 
 
     def createPixelActionMap(self, actionMaps, height, width):
@@ -271,11 +271,13 @@ class DeepLearningAgent(BaseAgent):
             additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor(numpy.array(additionalFeatureVectorBatch)))
             pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor(pixelActionMapsBatch))
 
-            presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = self.model({
-                "image": imageTensor,
-                "additionalFeature": additionalFeatureTensor,
-                "pixelActionMaps": pixelActionMapTensor
-            })
+            with torch.no_grad():
+                self.model.eval()
+                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = self.model({
+                    "image": imageTensor,
+                    "additionalFeature": additionalFeatureTensor,
+                    "pixelActionMaps": pixelActionMapTensor
+                })
 
             totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
@@ -672,12 +674,14 @@ class DeepLearningAgent(BaseAgent):
 
                 additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
-                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = \
-                    self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
-                                "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(additionalFeature)),
-                                "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap])))
-                                })
-                totalRewardPredictions = numpy.array((presentRewardPredictions + discountedFutureRewardPredictions).data)
+                with torch.no_grad():
+                    self.model.eval()
+                    presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = \
+                        self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
+                                    "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(additionalFeature)),
+                                    "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap])))
+                                    })
+                    totalRewardPredictions = numpy.array((presentRewardPredictions + discountedFutureRewardPredictions).data)
 
 
                 for actionIndex, action in enumerate(self.actionsSorted):
