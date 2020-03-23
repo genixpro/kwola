@@ -11,6 +11,7 @@ from kwola.components.TaskProcess import TaskProcess
 import concurrent.futures
 import random
 import numpy
+import multiprocessing
 import gzip
 from datetime import datetime
 import traceback
@@ -23,6 +24,7 @@ import sklearn.preprocessing
 import pickle
 import os
 from kwola.config import config
+
 
 def getCacheIdForExecutionTraceId(executionTraceId):
     return "execution-trace-" + str(executionTraceId)
@@ -62,7 +64,8 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
             compressedPickleBytes = gzip.compress(pickleBytes)
 
             # Add small random number here to ensure there isn't a bunch of entries expiring in the cache at the same time
-            sampleCache.set(cacheId, compressedPickleBytes, ex=agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, agentConfiguration['training_execution_session_cache_expiration_max_additional_random_seconds']))
+            expiration = agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, agentConfiguration['training_execution_session_cache_expiration_max_additional_random_seconds'])
+            sampleCache.set(cacheId, compressedPickleBytes, ex=expiration)
 
             if str(executionSession.executionTraces[traceIndex].id) == executionTraceId:
                 sampleBatch = traceBatch
@@ -74,52 +77,135 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
 
     return fileName, cacheHit
 
+
 def isNumpyArray(obj):
     return type(obj).__module__ == numpy.__name__
 
 
-def prepareAndLoadBatch(executionTraces, executionTraceIdMap, batchDirectory, processExecutor):
-    agentConfig = config.getAgentConfiguration()
+def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue):
+    try:
+        agentConfig = config.getAgentConfiguration()
 
-    traceWeights = [max(agentConfig['training_trace_selection_minimum_weight'], trace.lastTrainingRewardLoss) for trace in executionTraces]
-    traceProbabilities = scipy.special.softmax(traceWeights)
-    traceIds = [trace.id for trace in executionTraces]
+        print(datetime.now(), "Starting initialization for batch preparation sub process.", flush=True)
 
-    # print(traceWeights, flush=True)
+        testSequences = list(TestingSequenceModel.objects(status="completed").no_dereference().order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
+        if len(testSequences) == 0:
+            print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
+            return
 
-    chosenExecutionTraceIds = numpy.random.choice(traceIds, [agentConfig['batch_size']], p=traceProbabilities)
+        # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
+        executionSessionIds = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+            executionSessionFutures = []
+            for testSequence in testSequences:
+                for session in testSequence.executionSessions:
+                    executionSessionIds.append(str(session['_ref'].id))
+                    executionSessionFutures.append(executor.submit(loadExecutionSession, session['_ref'].id))
 
-    # print(chosenExecutionTraceIds, flush=True)
+            executionSessions = [future.result() for future in executionSessionFutures]
 
-    futures = []
-    for traceId in chosenExecutionTraceIds:
-        trace = executionTraceIdMap[str(traceId)]
+        print(datetime.now(), "Starting loading of execution traces.", flush=True)
 
-        future = processExecutor.submit(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
-        futures.append(future)
+        executionTraces = []
+        executionTraceIdMap = {}
+        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+            executionTraceFutures = []
+            for session in executionSessions:
+                for trace in session.executionTraces:
+                    executionTraceFutures.append(executor.submit(loadExecutionTrace, trace['_ref'].id))
 
-    cacheHits = []
-    samples = []
-    for future in futures:
-        batchFilename, cacheHit = future.result()
-        cacheHits.append(float(cacheHit))
+            for traceFuture in executionTraceFutures:
+                trace = pickle.loads(traceFuture.result())
+                executionTraces.append(trace)
+                executionTraceIdMap[str(trace.id)] = trace
 
-        with open(batchFilename, 'rb') as batchFile:
-            sampleBatch = pickle.load(batchFile)
-            samples.append(sampleBatch)
+        print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.", flush=True)
+        print(datetime.now(), "Starting creation of the reward normalizer.", flush=True)
 
-        os.unlink(batchFilename)
+        trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), agentConfig['training_reward_normalizer_fit_population_size'])))
 
-    batch = {}
-    for key in samples[0].keys():
-        if isNumpyArray(samples[0][key]):
-            batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
-        else:
-            batch[key] = [sample[key][0] for sample in samples]
+        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
+            pickle.dump(trainingRewardNormalizer, normalizerFile)
 
-    cacheHitRate = numpy.mean(cacheHits)
+        del testSequences, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
 
-    return batch, cacheHitRate
+        print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
+        print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
+            while True:
+                message, data = subProcessCommandQueue.get()
+
+                if message == "quit":
+                    break
+                elif message == "batch":
+                    traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
+                    countWithLossValue = numpy.count_nonzero(traceWeights)
+
+                    if (countWithLossValue / len(executionTraces)) > 0.2:
+                        traceWeights = numpy.minimum(agentConfig['training_trace_selection_maximum_weight'], traceWeights)
+                        traceWeights = numpy.maximum(agentConfig['training_trace_selection_minimum_weight'], traceWeights)
+                    else:
+                        traceWeights = numpy.ones_like(traceWeights)
+
+                    traceProbabilities = scipy.special.softmax(traceWeights)
+                    traceIds = [trace.id for trace in executionTraces]
+
+                    chosenExecutionTraceIds = numpy.random.choice(traceIds, [agentConfig['batch_size']], p=traceProbabilities)
+
+                    futures = []
+                    for traceId in chosenExecutionTraceIds:
+                        trace = executionTraceIdMap[str(traceId)]
+
+                        future = processExecutor.submit(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
+                        futures.append(future)
+
+                    cacheHits = []
+                    samples = []
+                    for future in futures:
+                        batchFilename, cacheHit = future.result()
+                        cacheHits.append(float(cacheHit))
+
+                        with open(batchFilename, 'rb') as batchFile:
+                            sampleBatch = pickle.load(batchFile)
+                            samples.append(sampleBatch)
+
+                        os.unlink(batchFilename)
+
+                    batch = {}
+                    for key in samples[0].keys():
+                        if isNumpyArray(samples[0][key]):
+                            batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
+                        else:
+                            batch[key] = [sample[key][0] for sample in samples]
+
+                    cacheHitRate = numpy.mean(cacheHits)
+
+                    resultFileDescriptor, resultFileName = tempfile.mkstemp()
+                    with open(resultFileDescriptor, 'wb') as file:
+                        pickle.dump((batch, cacheHitRate), file)
+
+                    subProcessBatchResultQueue.put(resultFileName)
+                elif message == "update-loss":
+                    executionTraceId = data["executionTraceId"]
+                    sampleRewardLoss = data["sampleRewardLoss"]
+                    trace = executionTraceIdMap[executionTraceId]
+                    trace.lastTrainingRewardLoss = sampleRewardLoss
+                    trace.save()
+    except Exception:
+        print(datetime.now(), f"Error occurred in the batch preparation sub-process. Exiting.", flush=True)
+        traceback.print_exc()
+
+
+def prepareAndLoadBatch(subProcessCommandQueue, subProcessBatchResultQueue):
+    subProcessCommandQueue.put(("batch", {}))
+
+    batchFileName = subProcessBatchResultQueue.get()
+    with open(batchFileName, 'rb') as file:
+        batch, cacheHit = pickle.load(file)
+    os.unlink(batchFileName)
+
+    return batch, cacheHit
 
 
 def printMovingAverageLosses(trainingStep):
@@ -173,45 +259,6 @@ def runTrainingStep(trainingSequenceId):
             print(datetime.now(), "==== Training Step Completed ====", flush=True)
             return {}
 
-        # We use this mechanism to force parallel preloading of all the execution traces
-        executionSessionIds = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
-            executionSessionFutures = []
-            for testSequence in testSequences:
-                for session in testSequence.executionSessions:
-                    executionSessionIds.append(str(session['_ref'].id))
-                    executionSessionFutures.append(executor.submit(loadExecutionSession, session['_ref'].id))
-
-            executionSessions = [future.result() for future in executionSessionFutures]
-
-        print(datetime.now(), "Starting loading of execution traces.")
-
-        executionTraces = []
-        executionTraceIdMap = {}
-        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
-            executionTraceFutures = []
-            for session in executionSessions:
-                for trace in session.executionTraces:
-                    executionTraceFutures.append(executor.submit(loadExecutionTrace, trace['_ref'].id))
-
-            for traceFuture in executionTraceFutures:
-                trace = pickle.loads(traceFuture.result())
-                executionTraces.append(trace)
-                executionTraceIdMap[str(trace.id)] = trace
-
-        print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.")
-        print(datetime.now(), "Starting creation of the reward normalizer.")
-
-        trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), agentConfig['training_reward_normalizer_fit_population_size'])))
-
-        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
-            pickle.dump(trainingRewardNormalizer, normalizerFile)
-
-        del testSequences, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
-
-        print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
-        print(datetime.now(), "Finished initialization for training step.", flush=True)
-
         trainingStep = TrainingStep()
         trainingStep.startTime = datetime.now()
         trainingStep.trainingSequenceId = trainingSequenceId
@@ -244,6 +291,11 @@ def runTrainingStep(trainingSequenceId):
         # Force it to destroy now to save memory
         del environment
 
+        subProcessCommandQueue = multiprocessing.Queue()
+        subProcessBatchResultQueue = multiprocessing.Queue()
+        subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue))
+        subProcess.start()
+
     except Exception as e:
         print(datetime.now(), f"Error occurred during initiation of training!", flush=True)
         traceback.print_exc()
@@ -257,52 +309,48 @@ def runTrainingStep(trainingSequenceId):
 
         recentCacheHits = []
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
-                # First we chuck some batch requests into the queue.
-                for n in range(agentConfig['training_precompute_batches_count']):
-                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, executionTraces, executionTraceIdMap, batchDirectory, processExecutor))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
+            # First we chuck some batch requests into the queue.
+            for n in range(agentConfig['training_precompute_batches_count']):
+                batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueue, subProcessBatchResultQueue))
+                batchesPrepared += 1
+
+            while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
+                batch, cacheHitRate = batchFutures.pop(0).result()
+                recentCacheHits.append(float(cacheHitRate))
+
+                if batchesPrepared <= totalBatchesNeeded:
+                    # Request another session be prepared
+                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueue, subProcessBatchResultQueue))
                     batchesPrepared += 1
 
-                while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
-                    batch, cacheHitRate = batchFutures.pop(0).result()
-                    recentCacheHits.append(float(cacheHitRate))
+                totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, \
+                    executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
+                    totalLoss, totalRebalancedLoss, batchReward, \
+                    sampleRewardLosses = agent.learnFromBatch(batch)
 
-                    if batchesPrepared <= totalBatchesNeeded:
-                        # Request another session be prepared
-                        batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, executionTraces, executionTraceIdMap, batchDirectory, processExecutor))
-                        batchesPrepared += 1
+                for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
+                    subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
 
-                    print(datetime.now(), f"Training on batch.", flush=True)
+                trainingStep.presentRewardLosses.append(presentRewardLoss)
+                trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
+                trainingStep.tracePredictionLosses.append(tracePredictionLoss)
+                trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
+                trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
+                trainingStep.predictedCursorLosses.append(predictedCursorLoss)
+                trainingStep.totalRewardLosses.append(totalRewardLoss)
+                trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
+                trainingStep.totalLosses.append(totalLoss)
+                trainingStep.numberOfIterationsCompleted += 1
 
-                    totalReward = 0
+                if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
+                    print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
+                    printMovingAverageLosses(trainingStep)
+                    if agentConfig['print_cache_hit_rate']:
+                        print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%")
 
-                    totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses = agent.learnFromBatch(batch)
-
-                    for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                        trace = executionTraceIdMap[executionTraceId]
-                        trace.lastTrainingRewardLoss = sampleRewardLoss
-
-                    trainingStep.presentRewardLosses.append(presentRewardLoss)
-                    trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
-                    trainingStep.tracePredictionLosses.append(tracePredictionLoss)
-                    trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
-                    trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
-                    trainingStep.predictedCursorLosses.append(predictedCursorLoss)
-                    trainingStep.totalRewardLosses.append(totalRewardLoss)
-                    trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
-                    trainingStep.totalLosses.append(totalLoss)
-                    totalReward += batchReward
-                    trainingStep.numberOfIterationsCompleted += 1
-
-                    if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
-                        print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
-                        printMovingAverageLosses(trainingStep)
-                        if agentConfig['print_cache_hit_rate']:
-                            print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%")
-
-                    if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
-                        trainingStep.save()
+                if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
+                    trainingStep.save()
 
         trainingStep.endTime = datetime.now()
         trainingStep.averageTimePerIteration = (trainingStep.endTime - trainingStep.startTime).total_seconds() / trainingStep.numberOfIterationsCompleted
@@ -310,8 +358,7 @@ def runTrainingStep(trainingSequenceId):
         trainingStep.status = "completed"
         trainingStep.save()
 
-        for executionTrace in executionTraces:
-            executionTrace.save()
+        subProcessCommandQueue.put(("quit", {}))
 
         # Safe guard, don't save the model if any nan's were detected
         if numpy.count_nonzero(numpy.isnan(trainingStep.totalLosses)) == 0:
@@ -320,7 +367,7 @@ def runTrainingStep(trainingSequenceId):
         else:
             print(datetime.now(), "ERROR! A NaN was detected in this models output. Not saving model.", flush=True)
 
-    except Exception as e:
+    except Exception:
         print(datetime.now(), f"Error occurred while learning sequence!", flush=True)
         traceback.print_exc()
     finally:
@@ -339,7 +386,6 @@ def runTrainingStep(trainingSequenceId):
 @app.task
 def runTrainingStepTask(trainingSequenceId):
     runTrainingStep(trainingSequenceId)
-
 
 
 if __name__ == "__main__":

@@ -78,16 +78,17 @@
   "training_crop_width": 256,
   "training_execution_session_cache_expiration_seconds": 7200,
   "training_execution_session_cache_expiration_max_additional_random_seconds": 600,
-  "training_max_main_process_workers": 12,
-  "training_max_main_thread_workers": 12,
+  "training_max_main_process_workers": 8,
+  "training_max_main_thread_workers": 8,
   "training_max_initialization_workers": 64,
   "training_number_of_recent_testing_sequences_to_use": 100,
   "training_precompute_batches_count": 60,
-  "training_reward_normalizer_fit_population_size": 500,
+  "training_reward_normalizer_fit_population_size": 1500,
   "training_random_initialization_sequences": 0,
   "training_random_initialization_workers": 2,
   "training_step_timeout": 1800,
   "training_steps_needed": 1000,
   "training_image_gaussian_noise_scale": 0.1,
-  "training_trace_selection_minimum_weight": 0.1
+  "training_trace_selection_minimum_weight": 0.2,
+  "training_trace_selection_maximum_weight": 5.0
 }
