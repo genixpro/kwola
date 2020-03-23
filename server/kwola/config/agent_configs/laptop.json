@@ -90,5 +90,6 @@
   "training_steps_needed": 3,
   "training_image_gaussian_noise_scale": 0.1,
   "training_trace_selection_minimum_weight": 0.2,
-  "training_trace_selection_maximum_weight": 5.0
+  "training_trace_selection_maximum_weight": 5.0,
+  "training_surplus_batches": 10
 }

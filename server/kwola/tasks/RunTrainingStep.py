@@ -82,6 +82,58 @@ def isNumpyArray(obj):
     return type(obj).__module__ == numpy.__name__
 
 
+def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, processExecutor, subProcessBatchResultQueue):
+    agentConfig = config.getAgentConfiguration()
+
+    traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
+    countWithLossValue = numpy.count_nonzero(traceWeights)
+
+    if (countWithLossValue / len(executionTraces)) > 0.2:
+        traceWeights = numpy.minimum(agentConfig['training_trace_selection_maximum_weight'], traceWeights)
+        traceWeights = numpy.maximum(agentConfig['training_trace_selection_minimum_weight'], traceWeights)
+    else:
+        traceWeights = numpy.ones_like(traceWeights)
+
+    traceProbabilities = scipy.special.softmax(traceWeights)
+    traceIds = [trace.id for trace in executionTraces]
+
+    chosenExecutionTraceIds = numpy.random.choice(traceIds, [agentConfig['batch_size']], p=traceProbabilities)
+
+    futures = []
+    for traceId in chosenExecutionTraceIds:
+        trace = executionTraceIdMap[str(traceId)]
+
+        future = processExecutor.submit(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
+        futures.append(future)
+
+    cacheHits = []
+    samples = []
+    for future in futures:
+        batchFilename, cacheHit = future.result()
+        cacheHits.append(float(cacheHit))
+
+        with open(batchFilename, 'rb') as batchFile:
+            sampleBatch = pickle.load(batchFile)
+            samples.append(sampleBatch)
+
+        os.unlink(batchFilename)
+
+    batch = {}
+    for key in samples[0].keys():
+        if isNumpyArray(samples[0][key]):
+            batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
+        else:
+            batch[key] = [sample[key][0] for sample in samples]
+
+    cacheHitRate = numpy.mean(cacheHits)
+
+    resultFileDescriptor, resultFileName = tempfile.mkstemp()
+    with open(resultFileDescriptor, 'wb') as file:
+        pickle.dump((batch, cacheHitRate), file)
+
+    subProcessBatchResultQueue.put(resultFileName)
+
+
 def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue):
     try:
         agentConfig = config.getAgentConfiguration()
@@ -133,65 +185,19 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
 
         with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
-            while True:
-                message, data = subProcessCommandQueue.get()
-
-                if message == "quit":
-                    break
-                elif message == "batch":
-                    traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
-                    countWithLossValue = numpy.count_nonzero(traceWeights)
-
-                    if (countWithLossValue / len(executionTraces)) > 0.2:
-                        traceWeights = numpy.minimum(agentConfig['training_trace_selection_maximum_weight'], traceWeights)
-                        traceWeights = numpy.maximum(agentConfig['training_trace_selection_minimum_weight'], traceWeights)
-                    else:
-                        traceWeights = numpy.ones_like(traceWeights)
-
-                    traceProbabilities = scipy.special.softmax(traceWeights)
-                    traceIds = [trace.id for trace in executionTraces]
-
-                    chosenExecutionTraceIds = numpy.random.choice(traceIds, [agentConfig['batch_size']], p=traceProbabilities)
-
-                    futures = []
-                    for traceId in chosenExecutionTraceIds:
-                        trace = executionTraceIdMap[str(traceId)]
-
-                        future = processExecutor.submit(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
-                        futures.append(future)
-
-                    cacheHits = []
-                    samples = []
-                    for future in futures:
-                        batchFilename, cacheHit = future.result()
-                        cacheHits.append(float(cacheHit))
-
-                        with open(batchFilename, 'rb') as batchFile:
-                            sampleBatch = pickle.load(batchFile)
-                            samples.append(sampleBatch)
-
-                        os.unlink(batchFilename)
-
-                    batch = {}
-                    for key in samples[0].keys():
-                        if isNumpyArray(samples[0][key]):
-                            batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
-                        else:
-                            batch[key] = [sample[key][0] for sample in samples]
-
-                    cacheHitRate = numpy.mean(cacheHits)
-
-                    resultFileDescriptor, resultFileName = tempfile.mkstemp()
-                    with open(resultFileDescriptor, 'wb') as file:
-                        pickle.dump((batch, cacheHitRate), file)
-
-                    subProcessBatchResultQueue.put(resultFileName)
-                elif message == "update-loss":
-                    executionTraceId = data["executionTraceId"]
-                    sampleRewardLoss = data["sampleRewardLoss"]
-                    trace = executionTraceIdMap[executionTraceId]
-                    trace.lastTrainingRewardLoss = sampleRewardLoss
-                    trace.save()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
+                while True:
+                    message, data = subProcessCommandQueue.get()
+                    if message == "quit":
+                        break
+                    elif message == "batch":
+                        threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, processExecutor, subProcessBatchResultQueue)
+                    elif message == "update-loss":
+                        executionTraceId = data["executionTraceId"]
+                        sampleRewardLoss = data["sampleRewardLoss"]
+                        trace = executionTraceIdMap[executionTraceId]
+                        trace.lastTrainingRewardLoss = sampleRewardLoss
+                        trace.save()
     except Exception:
         print(datetime.now(), f"Error occurred in the batch preparation sub-process. Exiting.", flush=True)
         traceback.print_exc()
@@ -302,7 +308,7 @@ def runTrainingStep(trainingSequenceId):
         return {}
 
     try:
-        totalBatchesNeeded = agentConfig['iterations_per_training_step'] + 1
+        totalBatchesNeeded = agentConfig['iterations_per_training_step'] + int(agentConfig['training_surplus_batches'])
         batchesPrepared = 0
 
         batchFutures = []
