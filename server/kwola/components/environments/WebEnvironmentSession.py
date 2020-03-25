@@ -10,6 +10,7 @@ from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
 from kwola.components.proxy.PathTracer import PathTracer
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
+from kwola.models.actions.ClearFieldAction import ClearFieldAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
 from kwola.models.ActionMapModel import ActionMap
@@ -328,6 +329,11 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain.send_keys_to_element(element, action.text)
                 actionChain.pause(0.5)
                 actionChain.perform()
+
+            if isinstance(action, ClearFieldAction):
+                if config.getWebEnvironmentConfiguration()['print_every_action']:
+                    print(datetime.now(), "Clearing field at", action.x, action.y, action.source, flush=True)
+                element.clear()
 
             if isinstance(action, WaitAction):
                 print(datetime.now(), "Waiting for ", action.time, "at", action.x, action.y, action.source)

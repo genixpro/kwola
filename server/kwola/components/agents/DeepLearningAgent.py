@@ -190,16 +190,24 @@ class DeepLearningAgent(BaseAgent):
 
 
     def createPixelActionMap(self, actionMaps, height, width):
-        pixelActionMap = numpy.zeros([3, height, width], dtype=numpy.uint8)
+        pixelActionMap = numpy.zeros([len(self.actionsSorted), height, width], dtype=numpy.uint8)
 
         for element in actionMaps:
             actionTypes = []
 
             if element['canClick']:
                 actionTypes.append(self.actionsSorted.index("click"))
+                actionTypes.append(self.actionsSorted.index("double_click"))
             if element['canType']:
                 actionTypes.append(self.actionsSorted.index("typeEmail"))
                 actionTypes.append(self.actionsSorted.index("typePassword"))
+                actionTypes.append(self.actionsSorted.index("typeName"))
+                actionTypes.append(self.actionsSorted.index("typeNumber"))
+                actionTypes.append(self.actionsSorted.index("typeBrackets"))
+                actionTypes.append(self.actionsSorted.index("typeMath"))
+                actionTypes.append(self.actionsSorted.index("typeOtherSymbol"))
+                actionTypes.append(self.actionsSorted.index("typeParagraph"))
+                actionTypes.append(self.actionsSorted.index("clear"))
 
             for actionTypeIndex in actionTypes:
                 pixelActionMap[actionTypeIndex, int(element['top']):int(element['bottom']), int(element['left']):int(element['right'])] = 1
@@ -736,13 +744,13 @@ class DeepLearningAgent(BaseAgent):
                 rewardPixelMaskAxes.set_yticks([])
                 rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
 
-                pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
-                pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, imageHeight, imageWidth)
-                actionPixelCount = numpy.count_nonzero(pixelActionMap)
-                pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
-                pixelActionMapAxes.set_xticks([])
-                pixelActionMapAxes.set_yticks([])
-                pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
+                # pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
+                # pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, imageHeight, imageWidth)
+                # actionPixelCount = numpy.count_nonzero(pixelActionMap)
+                # pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
+                # pixelActionMapAxes.set_xticks([])
+                # pixelActionMapAxes.set_yticks([])
+                # pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
 
                 additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
