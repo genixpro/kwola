@@ -167,7 +167,11 @@ class DeepLearningAgent(BaseAgent):
             self.model = self.model.to(torch.device(f"cuda:{self.whichGpu}"))
         # self.model = self.model
 
-        self.optimizer = optim.Adamax(self.model.parameters(), lr=1e-4, betas=(0.98, 0.999))
+        self.optimizer = optim.Adamax(self.model.parameters(),
+                                      lr=self.agentConfiguration['training_learning_rate'],
+                                      betas=(self.agentConfiguration['training_gradient_exponential_moving_average_decay'],
+                                             self.agentConfiguration['training_gradient_squared_exponential_moving_average_decay'])
+                                      )
 
 
     def processImages(self, images):
@@ -179,14 +183,10 @@ class DeepLearningAgent(BaseAgent):
                 convertedImageFutures.append(convertedImageFuture)
 
         convertedProcessedImages = [
-            convertedImageFuture.result()[0] for convertedImageFuture in convertedImageFutures
+            convertedImageFuture.result() for convertedImageFuture in convertedImageFutures
         ]
 
-        convertedSegmentationMaps = [
-            convertedImageFuture.result()[1] for convertedImageFuture in convertedImageFutures
-        ]
-
-        return numpy.array(convertedProcessedImages),  numpy.array(convertedSegmentationMaps)
+        return numpy.array(convertedProcessedImages)
 
 
     def createPixelActionMap(self, actionMaps, height, width):
@@ -206,14 +206,21 @@ class DeepLearningAgent(BaseAgent):
 
         return pixelActionMap
 
+    def getActionMapsForAction(self, action, actionMaps):
+        selected = []
+        for actionMap in actionMaps:
+            if actionMap.left <= action.x <= actionMap.right and actionMap.top <= action.y <= actionMap.bottom:
+                selected.append(actionMap)
 
-    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures):
+        return selected
+
+    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, recentActions):
         """
             Return the next best action predicted by the agent.
 
             :return:
         """
-        processedImages, segmentationMaps = self.processImages(rawImages)
+        processedImages = self.processImages(rawImages)
         actions = []
 
         width = processedImages.shape[3]
@@ -223,43 +230,61 @@ class DeepLearningAgent(BaseAgent):
         imageBatch = []
         additionalFeatureVectorBatch = []
         pixelActionMapsBatch = []
-        segmentationMapsBatch = []
         epsilonsPerSample = []
+        recentActionsBatch = []
+        actionMapsBatch = []
 
-        for sampleIndex, image, segmentationMap, additionalFeatureVector, actionMaps in zip(range(len(processedImages)), processedImages, segmentationMaps, additionalFeatures, envActionMaps):
-            randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.75 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
-            weightedRandomActionProbability = (float(sampleIndex + 2) / float(len(processedImages))) * 1.00 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+        for sampleIndex, image, additionalFeatureVector, sampleActionMaps, sampleRecentActions in zip(range(len(processedImages)), processedImages, additionalFeatures, envActionMaps, recentActions):
+            randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
+            weightedRandomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
 
-            pixelActionMap = self.createPixelActionMap(actionMaps, height, width)
+            filteredSampleActionMaps = []
+            filteredSampleActionRecentActionCounts = []
+            for map in sampleActionMaps:
+                # Check to see if the map is out of the screen
+                if map.top > height or map.bottom < 0 or map.left > width or map.right < 0:
+                    # skip this action map, don't add it to the filtered list
+                    continue
+
+                count = 0
+                for recentAction in sampleRecentActions:
+                    for recentActionMap in recentAction.actionMaps:
+                        if map == recentActionMap:
+                            count += 1
+                            break
+                if count < self.agentConfiguration['testing_max_repeat_action_maps_without_new_branches']:
+                    filteredSampleActionMaps.append(map)
+                    filteredSampleActionRecentActionCounts.append(count)
+
+            if len(filteredSampleActionMaps) > 0:
+                sampleActionMaps = filteredSampleActionMaps
+                sampleActionRecentActionCounts = filteredSampleActionRecentActionCounts
+            else:
+                sampleActionRecentActionCounts = [1] * len(sampleActionMaps)
+
+            pixelActionMap = self.createPixelActionMap(sampleActionMaps, height, width)
 
             if random.random() > randomActionProbability:
                 batchSampleIndexes.append(sampleIndex)
                 imageBatch.append(image)
                 additionalFeatureVectorBatch.append(additionalFeatureVector)
+                actionMapsBatch.append(sampleActionMaps)
                 pixelActionMapsBatch.append(pixelActionMap)
-                segmentationMapsBatch.append(segmentationMap)
+                recentActionsBatch.append(sampleRecentActions)
                 epsilonsPerSample.append(weightedRandomActionProbability)
             else:
-                # Choose a random segment, but we only want to choose from among the segments that reside within
-                # areas that have actions associated with them. We use the pixelActionMap to do that.
-                segmentationMapMasked = numpy.array(segmentationMap + 1) * numpy.minimum(pixelActionMap.sum(axis=0), 1)
-                uniqueSegmentsInsideMask = list(sorted(numpy.unique(segmentationMapMasked).tolist()))
+                actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, 0.5) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)
 
-                if len(uniqueSegmentsInsideMask) == 1:
-                    print(datetime.now(), "Error! No segments to pick. Choosing random spot. This usually means there are no available actions on the tested application, such as a blank screen with no text, links, buttons or input elements, or that the action-mapping for this environment is not working for some reason.", flush=True)
-                    actionX = random.randrange(0, width)
-                    actionY = random.randrange(0, height)
-                    actionType = random.randrange(0, len(self.actionsSorted))
-                else:
-                    chosenSegmentation = random.choice(uniqueSegmentsInsideMask[1:])
-                    chosenPixel = self.getRandomPixelOfSegmentation(segmentationMapMasked, chosenSegmentation)
+                chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
+                chosenActionMap = sampleActionMaps[chosenActionMapIndex]
 
-                    possibleActionsAtPixel = pixelActionMap[:, chosenPixel[1], chosenPixel[0]]
-                    possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+                actionX = random.randint(max(0, chosenActionMap.left), min(chosenActionMap.right - 1, width - 1))
+                actionY = random.randint(max(0, chosenActionMap.top), min(chosenActionMap.bottom - 1, height - 1))
 
-                    actionType = random.choice(possibleActionIndexes)
-                    actionX = chosenPixel[0]
-                    actionY = chosenPixel[1]
+                possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
+                possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+                possibleActionWeights = [self.actionBaseWeights[actionIndex] for actionIndex in possibleActionIndexes]
+                actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(possibleActionWeights))
 
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
@@ -281,8 +306,14 @@ class DeepLearningAgent(BaseAgent):
 
             totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
-            for sampleIndex, segmentationMap, sampleEpsilon, sampleActionProbs, sampleRewardPredictions in zip(batchSampleIndexes, segmentationMapsBatch, epsilonsPerSample, actionProbabilities, totalRewardPredictions):
-                if random.random() > sampleEpsilon:
+            for sampleIndex, sampleEpsilon, sampleActionProbs, sampleRewardPredictions, sampleRecentActions, sampleActionMaps in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, totalRewardPredictions, recentActionsBatch, actionMapsBatch):
+                weighted = bool(random.random() < sampleEpsilon)
+                source = None
+                actionType = None
+                actionX = None
+                actionY = None
+                samplePredictedReward = None
+                if not weighted:
                     source = "prediction"
 
                     actionType = sampleRewardPredictions.reshape([len(self.actionsSorted), width * height]).max(dim=1)[0].argmax(0).data.item()
@@ -290,7 +321,37 @@ class DeepLearningAgent(BaseAgent):
                     actionX = sampleRewardPredictions[actionType, actionY].argmax(0).data.item()
 
                     samplePredictedReward = sampleRewardPredictions[actionType, actionY, actionX].data.item()
-                else:
+
+                    potentialAction = self.actions[self.actionsSorted[actionType]](actionX, actionY)
+                    potentialActionMaps = self.getActionMapsForAction(potentialAction, sampleActionMaps)
+
+                    # If the network is predicting the same action as it did within the recent turns list, down to the exact pixels
+                    # of the action maps, that usually implies its stuck and its action had no effect on the environment. Switch
+                    # to random weighted to try and break out of this stuck condition. The recent action list is reset every
+                    # time the algorithm discovers new code branches, e.g. new functionality so this helps ensure the algorithm
+                    # stays exploring instead of getting stuck but can learn different behaviours with the same elements
+                    for recentAction in sampleRecentActions:
+                        recentActionMaps = recentAction.actionMaps
+
+                        if recentAction.type != potentialAction.type:
+                            continue
+
+                        allEqual = True
+                        for recentMap in recentActionMaps:
+                            found = False
+                            for potentialMap in potentialActionMaps:
+                                if recentMap == potentialMap:
+                                    found = True
+                                    break
+                            if not found:
+                                allEqual = False
+                                break
+
+                        if allEqual:
+                            weighted = True
+                            break
+
+                if weighted:
                     reshaped = numpy.array(sampleActionProbs.data).reshape([len(self.actionsSorted) * height * width])
                     try:
                         actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
@@ -308,30 +369,18 @@ class DeepLearningAgent(BaseAgent):
                     actionY = newProbs[actionType].max(axis=1).argmax(axis=0)
                     actionX = newProbs[actionType, actionY].argmax(axis=0)
 
-
                     source = "weighted_random"
                     samplePredictedReward = sampleRewardPredictions[actionType, actionY, actionX].data.item()
 
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = source
                 action.predictedReward = samplePredictedReward
+                action.actionMaps = self.getActionMapsForAction(action, sampleActionMaps)
                 actions.append((sampleIndex, action))
 
         sortedActions = sorted(actions, key=lambda row: row[0])
 
         return [action[1] for action in sortedActions]
-
-    def getRandomPixelOfSegmentation(self, segmentationMap, chosenSegmentation):
-        width = segmentationMap.shape[1]
-        height = segmentationMap.shape[0]
-        possiblePixels = []
-        for x in range(width):
-            for y in range(height):
-                if segmentationMap[y, x] == chosenSegmentation:
-                    possiblePixels.append((x, y))
-
-        chosenPixel = random.choice(possiblePixels)
-        return chosenPixel
 
     @staticmethod
     def computePresentRewards(executionSession):
@@ -653,16 +702,9 @@ class DeepLearningAgent(BaseAgent):
 
                 stampAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 1)
 
-                processedImage, segmentationMap = processRawImageParallel(rawImage)
-                boundaryImage = skimage.segmentation.mark_boundaries(rawImage[::boundaryImageShrinkRatio, ::boundaryImageShrinkRatio], segmentationMap[::boundaryImageShrinkRatio, ::boundaryImageShrinkRatio])
+                processedImage = processRawImageParallel(rawImage)
 
-                segmentationBoundaryAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 2)
-                segmentationBoundaryAxes.imshow(boundaryImage, vmin=0, vmax=1, interpolation="bilinear")
-                segmentationBoundaryAxes.set_xticks([])
-                segmentationBoundaryAxes.set_yticks([])
-                segmentationBoundaryAxes.set_title(f"{len(numpy.unique(segmentationMap))} segments")
-
-                rewardPixelMaskAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
+                rewardPixelMaskAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 2)
                 rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
                 rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
                 rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"), interpolation="bilinear")
@@ -670,7 +712,7 @@ class DeepLearningAgent(BaseAgent):
                 rewardPixelMaskAxes.set_yticks([])
                 rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
 
-                pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 4)
+                pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
                 pixelActionMap = self.createPixelActionMap(trace.actionMaps, imageHeight, imageWidth)
                 actionPixelCount = numpy.count_nonzero(pixelActionMap)
                 pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
@@ -835,7 +877,7 @@ class DeepLearningAgent(BaseAgent):
             while len(totalRewards) < longest:
                 # This isn't the greatest solution for handling execution sessions with different lengths, but it works
                 # for now when we pretty much always have execution sessions of the same length except when debugging.
-                totalRewards.append(0)
+                totalRewards.append(numpy.nan)
 
         rewardSequences = numpy.array(rewardSequences)
         trainingRewardNormalizer = sklearn.preprocessing.StandardScaler().fit(rewardSequences)
@@ -867,7 +909,7 @@ class DeepLearningAgent(BaseAgent):
 
         videoPath = config.getKwolaUserDataDirectory("videos")
         for rawImage in DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')):
-            processedImage = processRawImageParallel(rawImage, doSegmentation=False)
+            processedImage = processRawImageParallel(rawImage)
             processedImages.append(processedImage)
 
         # First compute the present reward at each time step
@@ -1180,15 +1222,7 @@ class DeepLearningAgent(BaseAgent):
 
 
 
-def globalSegmentImage(rawImage):
-    # Segment the image. We use this to help the algorithm with randomly choosing
-    # sections
-    segmentationMap = felzenszwalb(rawImage, scale=300, sigma=0.50, min_size=70)
-    return segmentationMap
-
-
-
-def processRawImageParallel(rawImage, doSegmentation=True):
+def processRawImageParallel(rawImage):
     # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
 
     # Convert to grey-scale image
@@ -1197,9 +1231,4 @@ def processRawImageParallel(rawImage, doSegmentation=True):
     # Round the float values down to 0. This minimizes some the error introduced by the video codecs
     processedImage = numpy.around(processedImage, decimals=2)
 
-    if doSegmentation:
-        segmentationMap = globalSegmentImage(rawImage)
-
-        return processedImage, segmentationMap
-    else:
-        return processedImage
+    return processedImage

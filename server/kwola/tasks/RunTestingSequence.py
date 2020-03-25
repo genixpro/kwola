@@ -43,11 +43,11 @@ def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessComma
 
 
         with open(inferenceBatchFileName, 'rb') as file:
-            step, images, envActionMaps, additionalFeatures = pickle.load(file)
+            step, images, envActionMaps, additionalFeatures, lastActions = pickle.load(file)
 
         os.unlink(inferenceBatchFileName)
 
-        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures)
+        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures, lastActions)
 
         resultFileDescriptor, resultFileName = tempfile.mkstemp()
         with open(resultFileDescriptor, 'wb') as file:
@@ -116,6 +116,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
         subProcess.start()
 
+        recentActions = [[] for n in range(environment.numberParallelSessions())]
+
         while stepsRemaining > 0:
             stepsRemaining -= 1
 
@@ -129,7 +131,9 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
             fileDescriptor, inferenceBatchFileName = tempfile.mkstemp()
 
             with open(fileDescriptor, 'wb') as file:
-                pickle.dump((step, images, envActionMaps, additionalFeatures), file)
+                pickle.dump((step, images, envActionMaps, additionalFeatures, recentActions), file)
+
+            del images, envActionMaps, branchFeature, decayingExecutionTraceFeature, additionalFeatures
 
             subProcessCommandQueue.put(inferenceBatchFileName)
             resultFileName = subProcessResultQueue.get()
@@ -167,8 +171,16 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                 subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
                 subProcess.start()
 
-            del images, envActionMaps, branchFeature, decayingExecutionTraceFeature, additionalFeatures, traces
+            for sampleRecentActions, action, trace in zip(recentActions, actions, traces):
+                # Clear the recent actions list every time new branches of code get executed.
+                if trace.didNewBranchesExecute:
+                    sampleRecentActions.clear()
+
+                sampleRecentActions.append(action)
+
+            del traces
             print("", end="", sep="", flush=True)
+
 
         subProcessCommandQueue.put("quit")
         subProcess.terminate()

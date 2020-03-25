@@ -12,7 +12,7 @@ from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
-from kwola.models.ActionMap import ActionMap
+from kwola.models.ActionMapModel import ActionMap
 from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.models.errors.ExceptionError import ExceptionError
 import selenium.common.exceptions
@@ -223,6 +223,7 @@ class WebEnvironmentSession(BaseEnvironment):
                     bottom: bounds.bottom - paddingBottom - 3,
                     width: bounds.width - paddingLeft - paddingRight - 6,
                     height: bounds.height - paddingTop - paddingBottom - 6,
+                    elementType: element.tagName.toLowerCase()
                 };
                 
                 if (element.tagName === "A"
@@ -230,9 +231,10 @@ class WebEnvironmentSession(BaseEnvironment):
                         || element.tagName === "AREA"
                         || element.tagName === "AUDIO"
                         || element.tagName === "VIDEO"
-                        || element.tagName === "INPUT"
-                        || element.tagName === "SELECT"
-                        || element.tagName === "TEXTAREA")
+                        || element.tagName === "SELECT")
+                    data.canClick = true;
+                
+                if (element.tagName === "INPUT" && element.getAttribute("type") !== "text")
                     data.canClick = true;
                 
                 if (element.tagName === "INPUT"

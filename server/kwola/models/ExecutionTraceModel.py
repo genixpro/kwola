@@ -2,7 +2,7 @@ from mongoengine import *
 import datetime
 from .actions.BaseAction import BaseAction
 from .errors.BaseError import BaseError
-from .ActionMap import ActionMap
+from .ActionMapModel import ActionMap
 import numpy
 
 class ExecutionTrace(Document):

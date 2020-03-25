@@ -3,7 +3,7 @@ from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
 from kwola.models.actions.WaitAction import WaitAction
-
+import scipy.special
 
 
 class BaseAgent:
@@ -26,6 +26,23 @@ class BaseAgent:
             "typePassword": lambda x,y: TypeAction(type="typePassword", x=x, y=y, label="password", text="test1"),
             # "typeName": lambda x,y: TypeAction(type="typeName", x=x, y=y, label="name", text="Brad"),
             # "typeParagraph": lambda x,y: TypeAction(type="typeParagraph", x=x, y=y, label="paragraph", text="Dolore prodesset incorrupte duo te, natum pericula te sea. Vis no vero ludus noster, eu eum eros nusquam inciderint, his in elit possit torquatos. Ne est eros expetenda, ne quis nostrum vis. His in scripserit signiferumque, ut minim harum graece nam. At errem noluisse partiendo per, nec ex accusata dissentiunt. Simul populo appareat cu quo, dicam prompta virtute eu nec, nobis pertinax in nam.")
+        }
+
+        self.actionBaseWeights = [
+            0.7,
+            1.0,
+            1.0
+        ]
+
+        self.elementBaseWeights = {
+            "a": 0.5,
+            "input": 1.0,
+            "button": 0.7,
+            "p": 0.7,
+            "span": 0.7,
+            "div": 1.0,
+            "canvas": 1.0,
+            "other": 0.5
         }
 
         self.actionsSorted = sorted(self.actions.keys())

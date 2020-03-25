@@ -1,5 +1,6 @@
 from mongoengine import *
 import datetime
+from kwola.models.ActionMapModel import ActionMap
 
 
 class BaseAction(EmbeddedDocument):
@@ -19,6 +20,8 @@ class BaseAction(EmbeddedDocument):
     y = FloatField()
 
     source = StringField()
+
+    actionMaps = EmbeddedDocumentListField(ActionMap)
 
     predictedReward = FloatField()
 
