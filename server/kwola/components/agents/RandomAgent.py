@@ -41,7 +41,7 @@ class RandomAgent(BaseAgent):
 
         self.branchFeatureSize = branchFeatureSize
 
-    def nextBestActions(self, stepNumber, images, envActionMaps, additionalFeatures):
+    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, recentActions):
         """
             Return the next best action predicted by the agent.
             :param screenshot:

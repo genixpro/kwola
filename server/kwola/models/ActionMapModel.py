@@ -25,6 +25,8 @@ class ActionMap(EmbeddedDocument):
     canRightClick = BooleanField()
 
     elementType = StringField()
+    
+    keywords = StringField()
 
     def __eq__(self, other):
         if self.elementType != other.elementType:

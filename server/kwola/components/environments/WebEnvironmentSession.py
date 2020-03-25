@@ -223,7 +223,8 @@ class WebEnvironmentSession(BaseEnvironment):
                     bottom: bounds.bottom - paddingBottom - 3,
                     width: bounds.width - paddingLeft - paddingRight - 6,
                     height: bounds.height - paddingTop - paddingBottom - 6,
-                    elementType: element.tagName.toLowerCase()
+                    elementType: element.tagName.toLowerCase(),
+                    keywords: (element.textContent + " " + element.getAttribute("class") + " " + element.getAttribute("name") + " " + element.getAttribute("id")).toLowerCase() 
                 };
                 
                 if (element.tagName === "A"

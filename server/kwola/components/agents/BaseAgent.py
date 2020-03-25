@@ -45,6 +45,12 @@ class BaseAgent:
             "other": 0.5
         }
 
+        self.actionProbabilityBoostKeywords = [
+            [],
+            ["email"],
+            ["pass"]
+        ]
+
         self.actionsSorted = sorted(self.actions.keys())
 
 
@@ -73,7 +79,7 @@ class BaseAgent:
         :return:
         """
 
-    def nextBestActions(self, stepNumber, images, envActionMaps, additionalFeatures):
+    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, recentActions):
         """
             Return the next best action predicted by the agent.
             :return:

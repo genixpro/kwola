@@ -284,7 +284,23 @@ class DeepLearningAgent(BaseAgent):
                 possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
                 possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
                 possibleActionWeights = [self.actionBaseWeights[actionIndex] for actionIndex in possibleActionIndexes]
-                actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(possibleActionWeights))
+
+                possibleActionBoosts = []
+                for actionIndex in possibleActionIndexes:
+                    boostKeywords = self.actionProbabilityBoostKeywords[actionIndex]
+
+                    boost = False
+                    for keyword in boostKeywords:
+                        if keyword in chosenActionMap.keywords:
+                            boost = True
+                            break
+
+                    if boost:
+                        possibleActionBoosts.append(2.0)
+                    else:
+                        possibleActionBoosts.append(1.0)
+
+                actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(numpy.array(possibleActionWeights) * numpy.array(possibleActionBoosts)))
 
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
