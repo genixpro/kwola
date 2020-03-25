@@ -206,7 +206,7 @@ class DeepLearningAgent(BaseAgent):
 
         return pixelActionMap
 
-    def getActionMapsForAction(self, action, actionMaps):
+    def getActionMapsIntersectingWithAction(self, action, actionMaps):
         selected = []
         for actionMap in actionMaps:
             if actionMap.left <= action.x <= actionMap.right and actionMap.top <= action.y <= actionMap.bottom:
@@ -248,7 +248,7 @@ class DeepLearningAgent(BaseAgent):
 
                 count = 0
                 for recentAction in sampleRecentActions:
-                    for recentActionMap in recentAction.actionMaps:
+                    for recentActionMap in self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable):
                         if map == recentActionMap:
                             count += 1
                             break
@@ -296,7 +296,7 @@ class DeepLearningAgent(BaseAgent):
                             break
 
                     if boost:
-                        possibleActionBoosts.append(2.0)
+                        possibleActionBoosts.append(1.5)
                     else:
                         possibleActionBoosts.append(1.0)
 
@@ -305,6 +305,8 @@ class DeepLearningAgent(BaseAgent):
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
                 action.predictedReward = None
+                action.wasRepeatOverride = False
+                action.actionMapsAvailable = sampleActionMaps
                 actions.append((sampleIndex, action))
 
         if len(imageBatch) > 0:
@@ -324,6 +326,7 @@ class DeepLearningAgent(BaseAgent):
 
             for sampleIndex, sampleEpsilon, sampleActionProbs, sampleRewardPredictions, sampleRecentActions, sampleActionMaps in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, totalRewardPredictions, recentActionsBatch, actionMapsBatch):
                 weighted = bool(random.random() < sampleEpsilon)
+                override = False
                 source = None
                 actionType = None
                 actionX = None
@@ -339,7 +342,7 @@ class DeepLearningAgent(BaseAgent):
                     samplePredictedReward = sampleRewardPredictions[actionType, actionY, actionX].data.item()
 
                     potentialAction = self.actions[self.actionsSorted[actionType]](actionX, actionY)
-                    potentialActionMaps = self.getActionMapsForAction(potentialAction, sampleActionMaps)
+                    potentialActionMaps = self.getActionMapsIntersectingWithAction(potentialAction, sampleActionMaps)
 
                     # If the network is predicting the same action as it did within the recent turns list, down to the exact pixels
                     # of the action maps, that usually implies its stuck and its action had no effect on the environment. Switch
@@ -347,7 +350,7 @@ class DeepLearningAgent(BaseAgent):
                     # time the algorithm discovers new code branches, e.g. new functionality so this helps ensure the algorithm
                     # stays exploring instead of getting stuck but can learn different behaviours with the same elements
                     for recentAction in sampleRecentActions:
-                        recentActionMaps = recentAction.actionMaps
+                        recentActionMaps = self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable)
 
                         if recentAction.type != potentialAction.type:
                             continue
@@ -365,6 +368,7 @@ class DeepLearningAgent(BaseAgent):
 
                         if allEqual:
                             weighted = True
+                            override = True
                             break
 
                 if weighted:
@@ -391,7 +395,8 @@ class DeepLearningAgent(BaseAgent):
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = source
                 action.predictedReward = samplePredictedReward
-                action.actionMaps = self.getActionMapsForAction(action, sampleActionMaps)
+                action.actionMapsAvailable = sampleActionMaps
+                action.wasRepeatOverride = override
                 actions.append((sampleIndex, action))
 
         sortedActions = sorted(actions, key=lambda row: row[0])
@@ -599,6 +604,7 @@ class DeepLearningAgent(BaseAgent):
                 lineSixTop = topMargin + 120
                 lineSevenTop = topMargin + 140
                 lineEightTop = topMargin + 160
+                lineNineTop = topMargin + 180
 
                 cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize,
                             fontColor, fontThickness, cv2.LINE_AA)
@@ -619,6 +625,8 @@ class DeepLearningAgent(BaseAgent):
                 cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop),
                             cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
                 cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop),
+                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Override: {str(trace.actionPerformed.wasRepeatOverride)}", (columnOneLeft, lineNineTop),
                             cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
 
                 cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop),
@@ -729,7 +737,7 @@ class DeepLearningAgent(BaseAgent):
                 rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
 
                 pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
-                pixelActionMap = self.createPixelActionMap(trace.actionMaps, imageHeight, imageWidth)
+                pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, imageHeight, imageWidth)
                 actionPixelCount = numpy.count_nonzero(pixelActionMap)
                 pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
                 pixelActionMapAxes.set_xticks([])

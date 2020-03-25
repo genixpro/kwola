@@ -94,6 +94,6 @@
   "training_trace_selection_maximum_weight": 5.0,
   "training_surplus_batches": 10,
   "training_learning_rate": 1e-4,
-  "training_gradient_exponential_moving_average_decay": 0.98,
+  "training_gradient_exponential_moving_average_decay": 0.97,
   "training_gradient_squared_exponential_moving_average_decay": 0.999
 }

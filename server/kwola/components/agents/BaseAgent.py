@@ -47,7 +47,7 @@ class BaseAgent:
 
         self.actionProbabilityBoostKeywords = [
             [],
-            ["email"],
+            ["email", "user"],
             ["pass"]
         ]
 

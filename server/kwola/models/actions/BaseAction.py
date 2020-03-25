@@ -21,6 +21,14 @@ class BaseAction(EmbeddedDocument):
 
     source = StringField()
 
+    # Deprecated
+    hadRepeatOverride = FloatField()
+
+    wasRepeatOverride = BooleanField()
+
+    actionMapsAvailable = EmbeddedDocumentListField(ActionMap)
+
+    # Deprecated
     actionMaps = EmbeddedDocumentListField(ActionMap)
 
     predictedReward = FloatField()

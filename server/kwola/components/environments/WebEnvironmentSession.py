@@ -235,12 +235,10 @@ class WebEnvironmentSession(BaseEnvironment):
                         || element.tagName === "SELECT")
                     data.canClick = true;
                 
-                if (element.tagName === "INPUT" && element.getAttribute("type") !== "text")
+                if (element.tagName === "INPUT" && !(element.getAttribute("type") === "text" || element.getAttribute("type") === "" || element.getAttribute("type") === null || element.getAttribute("type") === undefined ))
                     data.canClick = true;
                 
-                if (element.tagName === "INPUT"
-                        || element.tagName === "SELECT"
-                        || element.tagName === "TEXTAREA")
+                if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
                     data.canType = true;
                 
                 if (isFunction(element.onclick) 
