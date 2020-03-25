@@ -167,7 +167,7 @@ class DeepLearningAgent(BaseAgent):
             self.model = self.model.to(torch.device(f"cuda:{self.whichGpu}"))
         # self.model = self.model
 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
+        self.optimizer = optim.Adamax(self.model.parameters(), lr=1e-4, betas=(0.98, 0.999))
 
 
     def processImages(self, images):
@@ -603,7 +603,7 @@ class DeepLearningAgent(BaseAgent):
 
                 xCoords = numpy.array(range(len(presentRewards)))
 
-                rewardChartAxes.set_ylim(ymin=-2.0, ymax=10.0)
+                rewardChartAxes.set_ylim(ymin=-2.0, ymax=15.0)
 
                 rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
