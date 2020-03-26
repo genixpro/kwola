@@ -120,6 +120,8 @@ def runMainTrainingLoop(trainingSequence):
             trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=0)
             futures.append(trainingFuture)
 
+            time.sleep(3)
+
             trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=1)
             futures.append(trainingFuture)
 
