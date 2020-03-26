@@ -70,7 +70,7 @@
   "reward_screenshot_changed": 1e-2,
   "reward_url_changed": 1e-2,
   "testing_max_repeat_action_maps_without_new_branches": 3,
-  "testing_reset_agent_period": 100,
+  "testing_reset_agent_period": 1,
   "testing_print_every": 5,
   "testing_sequence_length": 100,
   "testing_sequences_in_parallel_per_training_step": 4,
