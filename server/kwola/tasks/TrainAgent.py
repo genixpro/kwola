@@ -7,9 +7,11 @@ from kwola.models.TrainingStepModel import TrainingStep
 from .RunTrainingStep import runTrainingStep
 from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
+import mongoengine
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait
 from kwola.components.ManagedTaskSubprocess import ManagedTaskSubprocess
 import time
+import multiprocessing
 import psutil
 import subprocess
 import traceback
@@ -132,6 +134,8 @@ def runMainTrainingLoop(trainingSequence):
 
 
 def trainAgent():
+    multiprocessing.set_start_method('spawn')
+
     trainingSequence = TrainingSequence()
 
     trainingSequence.startTime = datetime.now()
@@ -152,5 +156,6 @@ def trainAgentTask():
 
 
 if __name__ == "__main__":
+    mongoengine.connect('kwola')
     trainAgent()
 

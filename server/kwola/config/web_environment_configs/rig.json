@@ -1,5 +1,5 @@
 {
-  "parallel_sessions": 16,
+  "parallel_sessions": 12,
   "max_startup_workers": 8,
   "headless": true,
   "print_every_action": false,

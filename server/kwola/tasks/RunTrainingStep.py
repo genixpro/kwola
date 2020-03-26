@@ -9,8 +9,10 @@ from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.config.config import getKwolaUserDataDirectory
 from kwola.components.TaskProcess import TaskProcess
 import concurrent.futures
+import mongoengine
 import random
 import numpy
+import time
 import multiprocessing
 import multiprocessing.pool
 import gzip
@@ -34,6 +36,8 @@ def getCacheIdForExecutionTraceId(executionTraceId):
 def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchDirectory):
     agentConfiguration = config.getAgentConfiguration()
 
+    agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
+
     sampleCache = redis.Redis(db=3)
     cacheId = getCacheIdForExecutionTraceId(executionTraceId)
     cached = sampleCache.get(cacheId)
@@ -49,8 +53,6 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
 
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
 
-        agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
-
         batch = agent.prepareBatchForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
 
         sampleBatch = None
@@ -64,12 +66,20 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
             pickleBytes = pickle.dumps(traceBatch)
             compressedPickleBytes = gzip.compress(pickleBytes)
 
-            # Add small random number here to ensure there isn't a bunch of entries expiring in the cache at the same time
+            # Add random number here to ensure there isn't a bunch of entries expiring in the cache at the same time. We want to spread it out over the entire cache expiration period
             expiration = agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, agentConfiguration['training_execution_session_cache_expiration_max_additional_random_seconds'])
             sampleCache.set(cacheId, compressedPickleBytes, ex=expiration)
 
             if str(executionSession.executionTraces[traceIndex].id) == executionTraceId:
                 sampleBatch = traceBatch
+
+    # Add augmentation to the processed images. This is done at this stage
+    # so that we don't store the augmented version in the redis cache.
+    # Instead, we want the pure version in the redis cache and create a
+    # new augmentation every time we load it.
+    processedImage = sampleBatch['processedImages'][0]
+    augmentedImage = agent.augmentProcessedImageForTraining(processedImage)
+    sampleBatch['processedImages'][0] = augmentedImage
 
     fileDescriptor, fileName = tempfile.mkstemp(".bin", dir=batchDirectory)
 
@@ -83,67 +93,75 @@ def isNumpyArray(obj):
     return type(obj).__module__ == numpy.__name__
 
 
-def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, processPool, subProcessBatchResultQueue):
-    agentConfig = config.getAgentConfiguration()
+def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessBatchResultQueue):
+    try:
+        agentConfig = config.getAgentConfiguration()
 
-    agent = DeepLearningAgent(agentConfiguration=agentConfig, whichGpu=None)
+        traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
+        countWithLossValue = numpy.count_nonzero(traceWeights)
 
-    traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
-    countWithLossValue = numpy.count_nonzero(traceWeights)
-
-    if (countWithLossValue / len(executionTraces)) > 0.2:
-        traceWeights = numpy.minimum(agentConfig['training_trace_selection_maximum_weight'], traceWeights)
-        traceWeights = numpy.maximum(agentConfig['training_trace_selection_minimum_weight'], traceWeights)
-    else:
-        traceWeights = numpy.ones_like(traceWeights)
-
-    traceProbabilities = scipy.special.softmax(traceWeights)
-    traceIds = [trace.id for trace in executionTraces]
-
-    chosenExecutionTraceIds = numpy.random.choice(traceIds, [agentConfig['batch_size']], p=traceProbabilities)
-
-    futures = []
-    for traceId in chosenExecutionTraceIds:
-        trace = executionTraceIdMap[str(traceId)]
-
-        future = processPool.apply_async(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
-        futures.append(future)
-
-    cacheHits = []
-    samples = []
-    for future in futures:
-        batchFilename, cacheHit = future.result()
-        cacheHits.append(float(cacheHit))
-
-        with open(batchFilename, 'rb') as batchFile:
-            sampleBatch = pickle.load(batchFile)
-            samples.append(sampleBatch)
-
-        os.unlink(batchFilename)
-
-    batch = {}
-    for key in samples[0].keys():
-        if isNumpyArray(samples[0][key]):
-            batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
+        if (countWithLossValue / len(executionTraces)) > 0.2:
+            traceWeights = numpy.minimum(agentConfig['training_trace_selection_maximum_weight'], traceWeights)
+            traceWeights = numpy.maximum(agentConfig['training_trace_selection_minimum_weight'], traceWeights)
         else:
-            batch[key] = [sample[key][0] for sample in samples]
+            traceWeights = numpy.ones_like(traceWeights)
 
-    # Add augmentation to the processed images. This is done at this stage
-    # so that we don't store the augmented version in the redis cache.
-    # Instead, we want the pure version in the redis cache and create a
-    # new augmentation every time we load it.
-    for imageIndex in range(len(batch['processedImages'])):
-        processedImage = batch['processedImages'][imageIndex]
-        augmentedImage = agent.augmentProcessedImageForTraining(processedImage)
-        batch['processedImages'][imageIndex] = augmentedImage
+        if not cacheFullState:
+            # We bias the random selection of the algorithm towards whatever
+            # is at the one end of the list when we aren't in cache full state.
+            # This just gives a bit of bias towards the algorithm to select
+            # the same execution traces while the system is booting up
+            # and gets the GPU to full speed sooner without requiring the cache to be
+            # completely filled. This is helpful when coldstarting a training run, such
+            # as when doing R&D. it basically plays no role once you have a run going
+            # for any length of time since the batch cache will fill up within
+            # a single training step.
+            traceWeights = traceWeights + numpy.arange(0, agentConfig['training_trace_selection_cache_not_full_state_one_side_bias'], len(traceWeights))
 
-    cacheHitRate = numpy.mean(cacheHits)
+        traceProbabilities = scipy.special.softmax(traceWeights)
+        traceIds = [trace.id for trace in executionTraces]
 
-    resultFileDescriptor, resultFileName = tempfile.mkstemp()
-    with open(resultFileDescriptor, 'wb') as file:
-        pickle.dump((batch, cacheHitRate), file)
+        chosenExecutionTraceIds = numpy.random.choice(traceIds, [agentConfig['batch_size']], p=traceProbabilities)
 
-    subProcessBatchResultQueue.put(resultFileName)
+        futures = []
+        for traceId in chosenExecutionTraceIds:
+            trace = executionTraceIdMap[str(traceId)]
+
+            future = processPool.apply_async(prepareBatchesForExecutionTrace, (str(traceId), str(trace.executionSessionId), batchDirectory))
+            futures.append(future)
+
+        cacheHits = []
+        samples = []
+        for future in futures:
+            batchFilename, cacheHit = future.get()
+            cacheHits.append(float(cacheHit))
+
+            with open(batchFilename, 'rb') as batchFile:
+                sampleBatch = pickle.load(batchFile)
+                samples.append(sampleBatch)
+
+            os.unlink(batchFilename)
+
+        batch = {}
+        for key in samples[0].keys():
+            if isNumpyArray(samples[0][key]):
+                batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
+            else:
+                batch[key] = [sample[key][0] for sample in samples]
+
+        cacheHitRate = numpy.mean(cacheHits)
+
+        resultFileDescriptor, resultFileName = tempfile.mkstemp()
+        with open(resultFileDescriptor, 'wb') as file:
+            pickle.dump((batch, cacheHitRate), file)
+
+        subProcessBatchResultQueue.put(resultFileName)
+
+        return cacheHitRate
+    except Exception:
+        traceback.print_exc()
+        print("prepareAndLoadSingleBatchForSubprocess failed!", flush=True)
+        raise
 
 
 def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue):
@@ -196,20 +214,54 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
 
-        with multiprocessing.pool.Pool(processes=agentConfig['training_max_main_process_workers'], maxtasksperchild=1) as processPool:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
-                while True:
-                    message, data = subProcessCommandQueue.get()
-                    if message == "quit":
-                        break
-                    elif message == "batch":
-                        threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, processPool, subProcessBatchResultQueue)
-                    elif message == "update-loss":
-                        executionTraceId = data["executionTraceId"]
-                        sampleRewardLoss = data["sampleRewardLoss"]
-                        trace = executionTraceIdMap[executionTraceId]
-                        trace.lastTrainingRewardLoss = sampleRewardLoss
-                        trace.save()
+        processPool = multiprocessing.pool.Pool(processes=agentConfig['training_initial_main_process_workers'])
+
+        batchCount = 0
+        cacheFullState = True
+
+        cacheRateFutures = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
+            while True:
+                message, data = subProcessCommandQueue.get()
+                if message == "quit":
+                    break
+                elif message == "batch":
+                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessBatchResultQueue)
+                    cacheRateFutures.append(future)
+
+                    batchCount += 1
+
+                    # See if we need to refresh the process pool. This is done to make sure resources get let go and to be able to switch between the smaller and larger process pool
+                    # Depending on the cache hit rate
+                    if batchCount % agentConfig['training_reset_workers_every_n_batches'] == (agentConfig['training_reset_workers_every_n_batches'] - 1):
+                        cacheRates = [future.result() for future in cacheRateFutures[-agentConfig['training_cache_full_state_moving_average_length']:] if future.done()]
+
+                        # HACK! Wait for all tasks to get submitted to the existing process pool by the threads.
+                        # Meanwhile we hold this loop so that no new batches get submitted
+                        time.sleep(0.5)
+
+                        # If the cache is full, we shrink the process pool down to a smaller size.
+                        if numpy.mean(cacheRates) > agentConfig['training_cache_full_state_min_cache_hit_rate']:
+                            processPool.close()
+                            processPool = multiprocessing.pool.Pool(processes=agentConfig['training_cache_full_main_process_workers'])
+
+                            cacheFullState = True
+                        # Otherwise we have a full sized process pool so we can plow through all the results.
+                        else:
+                            processPool.close()
+                            processPool = multiprocessing.pool.Pool(processes=agentConfig['training_max_main_thread_workers'])
+
+                            cacheFullState = False
+
+                elif message == "update-loss":
+                    executionTraceId = data["executionTraceId"]
+                    sampleRewardLoss = data["sampleRewardLoss"]
+                    trace = executionTraceIdMap[executionTraceId]
+                    trace.lastTrainingRewardLoss = sampleRewardLoss
+                    trace.save()
+
+        processPool.terminate()
+
     except Exception:
         print(datetime.now(), f"Error occurred in the batch preparation sub-process. Exiting.", flush=True)
         traceback.print_exc()
@@ -268,6 +320,8 @@ def loadExecutionTrace(traceId):
 
 def runTrainingStep(trainingSequenceId):
     try:
+        multiprocessing.set_start_method('spawn')
+
         agentConfig = config.getAgentConfiguration()
 
         print(datetime.now(), "Starting Training Step", flush=True)
@@ -337,6 +391,11 @@ def runTrainingStep(trainingSequenceId):
                 batch, cacheHitRate = batchFutures.pop(0).result()
                 recentCacheHits.append(float(cacheHitRate))
 
+                ready = 0
+                for future in batchFutures:
+                    if future.done():
+                        ready += 1
+
                 if batchesPrepared <= totalBatchesNeeded:
                     # Request another session be prepared
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueue, subProcessBatchResultQueue))
@@ -365,7 +424,7 @@ def runTrainingStep(trainingSequenceId):
                     print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
                     printMovingAverageLosses(trainingStep)
                     if agentConfig['print_cache_hit_rate']:
-                        print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%")
+                        print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%", flush=True)
 
                 if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
                     trainingStep.save()
@@ -407,5 +466,6 @@ def runTrainingStepTask(trainingSequenceId):
 
 
 if __name__ == "__main__":
+    mongoengine.connect('kwola')
     task = TaskProcess(runTrainingStep)
     task.run()

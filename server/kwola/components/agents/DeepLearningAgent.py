@@ -67,7 +67,13 @@ class DeepLearningAgent(BaseAgent):
         self.agentConfiguration = agentConfiguration
         
         self.whichGpu = whichGpu
-        self.variableWrapperFunc = (lambda x:x.cuda()) if whichGpu is not None else (lambda x:x)
+
+        if self.whichGpu == "all":
+            self.variableWrapperFunc = lambda x: x.cuda()
+        elif self.whichGpu is None:
+            self.variableWrapperFunc = lambda x: x
+        else:
+            self.variableWrapperFunc = lambda x: x.cuda(device=f"cuda:{self.whichGpu}")
 
         self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
 
@@ -327,11 +333,16 @@ class DeepLearningAgent(BaseAgent):
 
             with torch.no_grad():
                 self.model.eval()
+
                 presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = self.model({
                     "image": imageTensor,
                     "additionalFeature": additionalFeatureTensor,
                     "pixelActionMaps": pixelActionMapTensor
                 })
+
+                presentRewardPredictions = presentRewardPredictions.cpu()
+                discountedFutureRewardPredictions = discountedFutureRewardPredictions.cpu()
+                actionProbabilities = actionProbabilities.cpu()
 
             totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 

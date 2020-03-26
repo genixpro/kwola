@@ -282,6 +282,8 @@ class WebEnvironmentSession(BaseEnvironment):
 
         self.pathTracer.recentPaths = set()
 
+        uiReactionWaitTime = 0.25
+
         success = True
 
         try:
@@ -301,12 +303,12 @@ class WebEnvironmentSession(BaseEnvironment):
                     if config.getWebEnvironmentConfiguration()['print_every_action']:
                         print(datetime.now(), "Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.click(on_element=element)
-                    actionChain.pause(0.5)
+                    actionChain.pause(uiReactionWaitTime)
                 elif action.times == 2:
                     if config.getWebEnvironmentConfiguration()['print_every_action']:
                         print(datetime.now(), "Double Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.double_click(on_element=element)
-                    actionChain.pause(0.5)
+                    actionChain.pause(uiReactionWaitTime)
 
                 actionChain.perform()
 
@@ -316,7 +318,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
-                actionChain.pause(0.5)
+                actionChain.pause(uiReactionWaitTime)
                 actionChain.perform()
 
             if isinstance(action, TypeAction):
@@ -325,9 +327,9 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
-                actionChain.pause(0.5)
+                actionChain.pause(uiReactionWaitTime)
                 actionChain.send_keys_to_element(element, action.text)
-                actionChain.pause(0.5)
+                actionChain.pause(uiReactionWaitTime)
                 actionChain.perform()
 
             if isinstance(action, ClearFieldAction):

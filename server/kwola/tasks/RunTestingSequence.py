@@ -7,6 +7,7 @@ from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.components.agents.RandomAgent import RandomAgent
 from kwola.components.TaskProcess import TaskProcess
+import mongoengine
 import random
 import pickle
 from datetime import datetime
@@ -78,6 +79,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
     returnValue = {}
 
     try:
+        multiprocessing.set_start_method('spawn')
+
         agentConfig = config.getAgentConfiguration()
 
         environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
@@ -139,6 +142,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                 pickle.dump((step, images, envActionMaps, additionalFeatures, recentActions), file)
 
             del images, envActionMaps, branchFeature, decayingExecutionTraceFeature, additionalFeatures
+
+            subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses[0]
 
             subProcessCommandQueue.put(inferenceBatchFileName)
             resultFileName = subProcessResultQueue.get()
@@ -251,6 +256,7 @@ def runTestingSequenceTask(testingSequenceId, shouldBeRandom=False):
 
 
 if __name__ == "__main__":
+    mongoengine.connect('kwola')
     task = TaskProcess(runTestingSequence)
     task.run()
 
