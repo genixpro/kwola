@@ -69,10 +69,11 @@ def runRandomInitialization(trainingSequence):
 
 
 
-def runTrainingSubprocess(trainingSequence):
+def runTrainingSubprocess(trainingSequence, gpuNumber):
     try:
         process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
-            "trainingSequenceId": str(trainingSequence.id)
+            "trainingSequenceId": str(trainingSequence.id),
+            "gpu": gpuNumber
         }, timeout=config.getAgentConfiguration()['training_step_timeout'])
 
         result = process.waitForProcessResult()
@@ -87,13 +88,14 @@ def runTrainingSubprocess(trainingSequence):
         print(datetime.now(), "Training task subprocess appears to have failed", flush=True)
 
 
-def runTestingSubprocess(trainingSequence):
+def runTestingSubprocess(trainingSequence, generateDebugVideo=False):
     testingSequence = TestingSequenceModel()
     testingSequence.save()
 
     process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingSequence"], {
         "testingSequenceId": str(testingSequence.id),
-        "shouldBeRandom": False
+        "shouldBeRandom": False,
+        "generateDebugVideo": generateDebugVideo
     }, timeout=config.getAgentConfiguration()['training_step_timeout'])
     result = process.waitForProcessResult()
 
@@ -112,14 +114,17 @@ def runMainTrainingLoop(trainingSequence):
     stepStartTime = datetime.now()
 
     while stepsCompleted < agentConfig['training_steps_needed']:
-        with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + 1)) as executor:
+        with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + 2)) as executor:
             futures = []
 
-            trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence)
+            trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=0)
             futures.append(trainingFuture)
 
-            for testingSequences in range(agentConfig['testing_sequences_per_training_step']):
-                futures.append(executor.submit(runTestingSubprocess, trainingSequence))
+            trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=1)
+            futures.append(trainingFuture)
+
+            for testingSequenceNumber in range(agentConfig['testing_sequences_per_training_step']):
+                futures.append(executor.submit(runTestingSubprocess, trainingSequence, generateDebugVideo=True if testingSequenceNumber == 0 else False))
                 time.sleep(3)
 
             wait(futures)

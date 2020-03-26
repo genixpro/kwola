@@ -73,7 +73,7 @@ def createDebugVideoSubProcess(branchFeatureSize, executionSessionId, name=""):
     del agent
 
 
-def runTestingSequence(testingSequenceId, shouldBeRandom=False):
+def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVideo=False):
     print(datetime.now(), "Starting New Testing Sequence", flush=True)
 
     returnValue = {}
@@ -224,7 +224,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
         testSequence.executionSessions = executionSessions
         testSequence.save()
 
-        if not shouldBeRandom:
+        if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
             debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
             debugVideoSubprocess1.start()

@@ -11,6 +11,8 @@ from kwola.components.TaskProcess import TaskProcess
 import concurrent.futures
 import mongoengine
 import random
+import torch
+import torch.distributed
 import numpy
 import time
 import multiprocessing
@@ -164,7 +166,7 @@ def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap,
         raise
 
 
-def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue):
+def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer=True):
     try:
         agentConfig = config.getAgentConfiguration()
 
@@ -202,17 +204,22 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                 executionTraceIdMap[str(trace.id)] = trace
 
         print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.", flush=True)
-        print(datetime.now(), "Starting creation of the reward normalizer.", flush=True)
 
-        trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), agentConfig['training_reward_normalizer_fit_population_size'])))
+        if createRewardNormalizer:
+            print(datetime.now(), "Starting creation of the reward normalizer.", flush=True)
 
-        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
-            pickle.dump(trainingRewardNormalizer, normalizerFile)
+            trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), agentConfig['training_reward_normalizer_fit_population_size'])))
+
+            with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
+                pickle.dump(trainingRewardNormalizer, normalizerFile)
+
+            del trainingRewardNormalizer
+            print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
+
 
         del testSequences, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
-
-        print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
+
 
         processPool = multiprocessing.pool.Pool(processes=agentConfig['training_initial_main_process_workers'])
 
@@ -318,7 +325,11 @@ def loadExecutionTrace(traceId):
     return pickle.dumps(trace)
 
 
-def runTrainingStep(trainingSequenceId):
+def runTrainingStep(trainingSequenceId, gpu=None):
+    if gpu is not None:
+        torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator",)
+        torch.cuda.set_device(gpu)
+
     try:
         multiprocessing.set_start_method('spawn')
 
@@ -349,7 +360,7 @@ def runTrainingStep(trainingSequenceId):
 
         environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
 
-        agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all")
+        agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all" if gpu is None else gpu)
         agent.initialize(environment.branchFeatureSize())
         agent.load()
 
@@ -365,7 +376,7 @@ def runTrainingStep(trainingSequenceId):
 
         subProcessCommandQueue = multiprocessing.Queue()
         subProcessBatchResultQueue = multiprocessing.Queue()
-        subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue))
+        subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, (gpu == 0 or gpu is None) ))
         subProcess.start()
 
     except Exception as e:
@@ -421,13 +432,15 @@ def runTrainingStep(trainingSequenceId):
                 trainingStep.numberOfIterationsCompleted += 1
 
                 if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
-                    print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
-                    printMovingAverageLosses(trainingStep)
-                    if agentConfig['print_cache_hit_rate']:
-                        print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%", flush=True)
+                    if gpu is None or gpu == 0:
+                        print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
+                        printMovingAverageLosses(trainingStep)
+                        if agentConfig['print_cache_hit_rate']:
+                            print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-agentConfig['print_cache_hit_rate_moving_average_length']:]):.0f}%", flush=True)
 
                 if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
-                    trainingStep.save()
+                    if gpu is None or gpu == 0:
+                        trainingStep.save()
 
         trainingStep.endTime = datetime.now()
         trainingStep.averageTimePerIteration = (trainingStep.endTime - trainingStep.startTime).total_seconds() / trainingStep.numberOfIterationsCompleted

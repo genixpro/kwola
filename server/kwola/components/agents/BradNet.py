@@ -21,11 +21,24 @@ class BradNet(nn.Module):
 
         self.whichGpu = whichGpu
 
+        if whichGpu == "all":
+            device_ids = [torch.device(f'cuda:{n}') for n in range(2)]
+            output_device = device_ids[0]
+        elif whichGpu is None:
+            device_ids = None
+            output_device = None
+        else:
+            device_ids = [torch.device(f'cuda:{whichGpu}')]
+            output_device = device_ids[0]
+
         self.stampProjection = nn.Linear(
             in_features=additionalFeatureSize,
             out_features=self.agentConfiguration['additional_features_stamp_edge_size'] * self.agentConfiguration['additional_features_stamp_edge_size']
         )
-        self.stampProjectionParallel = nn.DataParallel(module=self.stampProjection)
+
+        if whichGpu is not None:
+            self.stampProjection = self.stampProjection.cuda(device=device_ids[0])
+            self.stampProjectionParallel = nn.parallel.DistributedDataParallel(module=self.stampProjection, device_ids=device_ids, output_device=output_device)
 
         self.mainModel = nn.Sequential(
             nn.Conv2d(
@@ -85,7 +98,9 @@ class BradNet(nn.Module):
 
             torch.nn.Upsample(scale_factor=8)
         )
-        self.mainModelParallel = nn.DataParallel(module=self.mainModel)
+        if whichGpu is not None:
+            self.mainModel = self.mainModel.cuda(device=device_ids[0])
+            self.mainModelParallel = nn.parallel.DistributedDataParallel(module=self.mainModel, device_ids=device_ids, output_device=output_device)
 
         self.presentRewardConvolution = nn.Conv2d(
             in_channels=self.agentConfiguration['pixel_features'],
@@ -95,7 +110,10 @@ class BradNet(nn.Module):
             padding=0,
             bias=False
         )
-        self.presentRewardConvolutionParallel = nn.DataParallel(module=self.presentRewardConvolution)
+
+        if whichGpu is not None:
+            self.presentRewardConvolution = self.presentRewardConvolution.cuda(device=device_ids[0])
+            self.presentRewardConvolutionParallel = nn.parallel.DistributedDataParallel(module=self.presentRewardConvolution, device_ids=device_ids, output_device=output_device)
 
         self.discountedFutureRewardConvolution = nn.Conv2d(
             in_channels=self.agentConfiguration['pixel_features'],
@@ -105,7 +123,10 @@ class BradNet(nn.Module):
             padding=0,
             bias=False
         )
-        self.discountedFutureRewardConvolutionParallel = nn.DataParallel(module=self.discountedFutureRewardConvolution)
+
+        if whichGpu is not None:
+            self.discountedFutureRewardConvolution = self.discountedFutureRewardConvolution.cuda(device=device_ids[0])
+            self.discountedFutureRewardConvolutionParallel = nn.parallel.DistributedDataParallel(module=self.discountedFutureRewardConvolution, device_ids=device_ids, output_device=output_device)
 
         self.predictedExecutionTraceLinear = nn.Sequential(
             nn.Linear(
@@ -114,7 +135,10 @@ class BradNet(nn.Module):
             ),
             nn.ELU()
         )
-        self.predictedExecutionTraceLinearParallel = nn.DataParallel(module=self.predictedExecutionTraceLinear)
+
+        if whichGpu is not None:
+            self.predictedExecutionTraceLinear = self.predictedExecutionTraceLinear.cuda(device=device_ids[0])
+            self.predictedExecutionTraceLinearParallel = nn.parallel.DistributedDataParallel(module=self.predictedExecutionTraceLinear, device_ids=device_ids, output_device=output_device)
 
         self.predictedExecutionFeaturesLinear = nn.Sequential(
             nn.Linear(
@@ -123,7 +147,9 @@ class BradNet(nn.Module):
             ),
             nn.Sigmoid()
         )
-        self.predictedExecutionFeaturesLinearParallel = nn.DataParallel(module=self.predictedExecutionFeaturesLinear)
+        if whichGpu is not None:
+            self.predictedExecutionFeaturesLinear = self.predictedExecutionFeaturesLinear.cuda(device=device_ids[0])
+            self.predictedExecutionFeaturesLinearParallel = nn.parallel.DistributedDataParallel(module=self.predictedExecutionFeaturesLinear, device_ids=device_ids, output_device=output_device)
 
         self.predictedCursorLinear = nn.Sequential(
             nn.Linear(
@@ -132,7 +158,9 @@ class BradNet(nn.Module):
             ),
             nn.Sigmoid()
         )
-        self.predictedCursorLinearParallel = nn.DataParallel(module=self.predictedCursorLinear)
+        if whichGpu is not None:
+            self.predictedCursorLinear = self.predictedCursorLinear.cuda(device=device_ids[0])
+            self.predictedCursorLinearParallel = nn.parallel.DistributedDataParallel(module=self.predictedCursorLinear, device_ids=device_ids, output_device=output_device)
 
         self.actionSoftmax = nn.Softmax(dim=1)
 
@@ -140,21 +168,21 @@ class BradNet(nn.Module):
 
     @property
     def stampProjectionCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.stampProjectionParallel
         else:
             return self.stampProjection
 
     @property
     def mainModelCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.mainModelParallel
         else:
             return self.mainModel
 
     @property
     def presentRewardConvolutionCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.presentRewardConvolutionParallel
         else:
             return self.presentRewardConvolution
@@ -162,7 +190,7 @@ class BradNet(nn.Module):
 
     @property
     def discountedFutureRewardConvolutionCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.discountedFutureRewardConvolutionParallel
         else:
             return self.discountedFutureRewardConvolution
@@ -170,14 +198,14 @@ class BradNet(nn.Module):
 
     @property
     def predictedExecutionTraceLinearCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.predictedExecutionTraceLinearParallel
         else:
             return self.predictedExecutionTraceLinear
 
     @property
     def predictedExecutionFeaturesLinearCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.predictedExecutionFeaturesLinearParallel
         else:
             return self.predictedExecutionFeaturesLinear
@@ -185,7 +213,7 @@ class BradNet(nn.Module):
 
     @property
     def predictedCursorLinearCurrent(self):
-        if self.whichGpu == "all":
+        if self.whichGpu is not None:
             return self.predictedCursorLinearParallel
         else:
             return self.predictedCursorLinear
