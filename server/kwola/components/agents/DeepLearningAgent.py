@@ -162,16 +162,27 @@ class DeepLearningAgent(BaseAgent):
 
         :return:
         """
+        if self.whichGpu == "all":
+            device_ids = [torch.device(f'cuda:{n}') for n in range(2)]
+            output_device = device_ids[0]
+        elif self.whichGpu is None:
+            device_ids = None
+            output_device = None
+        else:
+            device_ids = [torch.device(f'cuda:{self.whichGpu}')]
+            output_device = device_ids[0]
 
-        self.model = BradNet(self.agentConfiguration, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors), whichGpu=self.whichGpu)
+        self.model = BradNet(self.agentConfiguration, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
 
         if self.whichGpu == "all":
             self.model = self.model.cuda()
+            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=device_ids, output_device=output_device)
         elif self.whichGpu is None:
             self.model = self.model.cpu()
+            self.modelParallel = self.model
         else:
-            self.model = self.model.to(torch.device(f"cuda:{self.whichGpu}"))
-        # self.model = self.model
+            self.model = self.model.cuda(device=device_ids[0])
+            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=device_ids, output_device=output_device)
 
         self.optimizer = optim.Adamax(self.model.parameters(),
                                       lr=self.agentConfiguration['training_learning_rate'],
@@ -334,15 +345,18 @@ class DeepLearningAgent(BaseAgent):
             with torch.no_grad():
                 self.model.eval()
 
-                presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = self.model({
+                outputs = self.modelParallel({
                     "image": imageTensor,
                     "additionalFeature": additionalFeatureTensor,
-                    "pixelActionMaps": pixelActionMapTensor
+                    "pixelActionMaps": pixelActionMapTensor,
+                    "outputStamp": False,
+                    "computeExtras": False,
+                    "computeActionProbabilities": True
                 })
 
-                presentRewardPredictions = presentRewardPredictions.cpu()
-                discountedFutureRewardPredictions = discountedFutureRewardPredictions.cpu()
-                actionProbabilities = actionProbabilities.cpu()
+                presentRewardPredictions = outputs['presentRewards'].cpu()
+                discountedFutureRewardPredictions = outputs['discountFutureRewards'].cpu()
+                actionProbabilities = outputs['actionProbabilities'].cpu()
 
             totalRewardPredictions = presentRewardPredictions + discountedFutureRewardPredictions
 
@@ -769,12 +783,16 @@ class DeepLearningAgent(BaseAgent):
 
                 with torch.no_grad():
                     self.model.eval()
-                    presentRewardPredictions, discountedFutureRewardPredictions, predictedTrace, predictedExecutionFeatures, predictedCursor, predictedPixelFeatures, stamp, actionProbabilities = \
-                        self.model({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
+                    outputs = \
+                        self.modelParallel({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
                                     "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(additionalFeature)),
-                                    "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap])))
+                                    "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap]))),
+                                    "outputStamp": True,
+                                    "computeExtras": False,
+                                    "computeActionProbabilities": False
                                     })
-                    totalRewardPredictions = numpy.array((presentRewardPredictions + discountedFutureRewardPredictions).data)
+                    totalRewardPredictions = numpy.array((outputs['presentRewards'] + outputs['discountFutureRewards']).data)
+                    stamp = outputs['stamp']
 
 
                 for actionIndex, action in enumerate(self.actionsSorted):
@@ -1093,37 +1111,39 @@ class DeepLearningAgent(BaseAgent):
             "cursors": numpy.array(batchCursors, dtype=numpy.uint8)
         }
 
-    def learnFromBatch(self, batch):
+    def learnFromBatch(self, batch, returnLosses=True):
         """
             Runs backprop on the neural network with the given batch.
 
             :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingSequence
             :return:
         """
-        presentRewardPredictions, discountedFutureRewardPredictions, predictedTraces, predictedExecutionFeatures, predictedCursors, predictedPixelFeatures, stamp, actionProbabilities = self.model({
+        rewardPixelMasks = self.variableWrapperFunc(torch.IntTensor(batch['rewardPixelMasks']))
+        pixelActionMaps = self.variableWrapperFunc(torch.IntTensor(batch['pixelActionMaps']))
+
+        outputs = self.modelParallel({
             "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['processedImages']))),
             "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
             "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(batch['pixelActionMaps'])),
             "action_type": batch['actionTypes'],
             "action_x": batch['actionXs'],
-            "action_y": batch['actionYs']
+            "action_y": batch['actionYs'],
+            "outputStamp": False,
+            "computeExtras": True,
+            "computeActionProbabilities": False
         })
+
+        presentRewardPredictions = outputs['presentRewards']
+        discountedFutureRewardPredictions = outputs['discountFutureRewards']
 
         totalRewardLosses = []
         presentRewardLosses = []
         targetHomogenizationLosses = []
         discountedFutureRewardLosses = []
 
-        for presentRewardImage, discountedFutureRewardImage, pixelFeatureImage, rewardPixelMask, presentReward, discountedFutureReward, actionType, actionX, actionY, pixelActionMap in zip(presentRewardPredictions, discountedFutureRewardPredictions, predictedPixelFeatures, batch['rewardPixelMasks'], batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes'], batch['actionXs'], batch['actionYs'], batch['pixelActionMaps']):
-            # if len(totalRewardLosses) == 0:
-            #     cv2.imshow('image', rewardPixelMask * 200)
-            #     cv2.waitKey(50)
+        for sampleIndex, presentRewardImage, discountedFutureRewardImage, rewardPixelMask, presentReward, discountedFutureReward, actionType, actionX, actionY, pixelActionMap in zip(range(len(presentRewardPredictions)), presentRewardPredictions, discountedFutureRewardPredictions, rewardPixelMasks, batch['presentRewards'], batch['discountedFutureRewards'], batch['actionTypes'], batch['actionXs'], batch['actionYs'], pixelActionMaps):
             width = presentRewardImage.shape[2]
             height = presentRewardImage.shape[1]
-
-            rewardPixelMask = self.variableWrapperFunc(torch.IntTensor(rewardPixelMask))
-            pixelActionMap = self.variableWrapperFunc(torch.IntTensor(pixelActionMap))
-            # actionType = self.variableWrapperFunc(torch.IntTensor(actionType))
 
             presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
             discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
@@ -1140,6 +1160,8 @@ class DeepLearningAgent(BaseAgent):
             discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
 
             if self.agentConfiguration['enable_homogenization_loss']:
+                pixelFeatureImage = outputs['pixelFeatureMap'][sampleIndex]
+
                 # Target Homogenization loss - basically, all of the pixels for the masked area should produce similar features to each other and different features
                 # from other pixels.
                 targetHomogenizationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).mean(axis=0)
@@ -1147,40 +1169,31 @@ class DeepLearningAgent(BaseAgent):
                 targetHomogenizationLoss = torch.abs((targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (width * height - countPixelMask)))
                 targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
 
-            # if len(totalRewardLosses) == 0:
-            #     showRewardImageDebug(numpy.array(presentRewardsMasked.cpu().data), 'present-reward-prediction-masked', vmin=-10, vmax=20)
-            #     showRewardImageDebug(numpy.array(discountedFutureRewardsMasked.cpu().data), 'future-reward-prediction-masked', vmin=-10, vmax=20)
-            #
-            #     showRewardImageDebug(numpy.array(torchBatchPresentRewards.cpu().data), 'present-reward-target', vmin=-10, vmax=20)
-            #     showRewardImageDebug(numpy.array(torchBatchDiscountedFutureRewards.cpu().data), 'future-reward-target', vmin=-10, vmax=20)
-            #
-            #     showRewardImageDebug(numpy.array(presentRewardLossMap.cpu().data), 'present-loss', vmin=-10, vmax=20)
-            #     showRewardImageDebug(numpy.array(discountedFutureRewardLossMap.cpu().data), "future-loss", vmin=-10, vmax=20)
-
-                # showRewardImageDebug(numpy.array(targetHomogenizationDifferenceMap.cpu().data), 'homogenization')
-                # showRewardImageDebug(numpy.array(targetDifferentiationDifferenceMap.cpu().data), 'differentiation')
-                # cv2.waitKey(50)
-
             sampleLoss = presentRewardLoss + discountedFutureRewardLoss
             totalRewardLosses.append(sampleLoss.unsqueeze(0))
 
             presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
             discountedFutureRewardLosses.append(discountedFutureRewardLoss.unsqueeze(0))
 
+        extraLosses = []
+
         if self.agentConfiguration['enable_trace_prediction_loss']:
-            tracePredictionLoss = (predictedTraces - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).abs().mean()
+            tracePredictionLoss = (outputs['predictedTraces'] - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).abs().mean()
+            extraLosses.append(tracePredictionLoss)
         else:
             tracePredictionLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
 
         if self.agentConfiguration['enable_execution_feature_prediction_loss']:
-            predictedExecutionFeaturesLoss = (predictedExecutionFeatures - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).abs().mean()
+            predictedExecutionFeaturesLoss = (outputs['predictedExecutionFeatures'] - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).abs().mean()
+            extraLosses.append(predictedExecutionFeaturesLoss)
         else:
             predictedExecutionFeaturesLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
 
         if self.agentConfiguration['enable_cursor_prediction_loss']:
-            predictedCursorLoss = (predictedCursors - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).abs().mean()
+            predictedCursorLoss = (outputs['predictedCursor'] - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).abs().mean()
+            extraLosses.append(predictedCursorLoss)
         else:
             predictedCursorLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
@@ -1190,82 +1203,91 @@ class DeepLearningAgent(BaseAgent):
 
         if self.agentConfiguration['enable_homogenization_loss']:
             targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
+            extraLosses.append(targetHomogenizationLoss)
         else:
             targetHomogenizationLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
 
-        totalLoss = totalRewardLoss + tracePredictionLoss + predictedExecutionFeaturesLoss + targetHomogenizationLoss + predictedCursorLoss
-
-        if len(self.trainingLosses['totalLoss']) > 2:
-            averageStart = max(0, min(len(self.trainingLosses['totalRewardLoss']) - 1, self.agentConfiguration['loss_balancing_moving_average_period']))
-
-            runningAverageRewardLoss = numpy.mean(self.trainingLosses['totalRewardLoss'][-averageStart:])
-            runningAverageTracePredictionLoss = numpy.mean(self.trainingLosses['tracePredictionLoss'][-averageStart:])
-            runningAverageExecutionFeaturesLoss = numpy.mean(self.trainingLosses['predictedExecutionFeaturesLoss'][-averageStart:])
-            runningAverageHomogenizationLoss = numpy.mean(self.trainingLosses['targetHomogenizationLoss'][-averageStart:])
-            runningAveragePredictedCursorLoss = numpy.mean(self.trainingLosses['predictedCursorLoss'][-averageStart:])
-
-            tracePredictionAdustment = (runningAverageRewardLoss / (runningAverageTracePredictionLoss + 1e-6)) * self.agentConfiguration['loss_ratio_trace_prediction']
-            executionFeaturesAdustment = (runningAverageRewardLoss / (runningAverageExecutionFeaturesLoss + 1e-6)) * self.agentConfiguration['loss_ratio_execution_features']
-            homogenizationAdustment = (runningAverageRewardLoss / (runningAverageHomogenizationLoss + 1e-6)) * self.agentConfiguration['loss_ratio_homogenization']
-            predictedCursorAdustment = (runningAverageRewardLoss / (runningAveragePredictedCursorLoss + 1e-6)) * self.agentConfiguration['loss_ratio_predicted_cursor']
+        if len(extraLosses) > 0:
+            totalLoss = totalRewardLoss + torch.sum(torch.cat(extraLosses))
         else:
-            tracePredictionAdustment = 1
-            executionFeaturesAdustment = 1
-            homogenizationAdustment = 1
-            predictedCursorAdustment = 1
+            totalLoss = totalRewardLoss
 
-        if not self.agentConfiguration['enable_trace_prediction_loss']:
-            tracePredictionAdustment = 1
+        self.optimizer.zero_grad()
+        totalRebalancedLoss = None
+        if not self.agentConfiguration['enable_loss_balancing']:
+            totalLoss.backward()
+        else:
+            if len(self.trainingLosses['totalLoss']) > 2:
+                averageStart = max(0, min(len(self.trainingLosses['totalRewardLoss']) - 1, self.agentConfiguration['loss_balancing_moving_average_period']))
 
-        if not self.agentConfiguration['enable_execution_feature_prediction_loss']:
-            executionFeaturesAdustment = 1
+                runningAverageRewardLoss = numpy.mean(self.trainingLosses['totalRewardLoss'][-averageStart:])
+                runningAverageTracePredictionLoss = numpy.mean(self.trainingLosses['tracePredictionLoss'][-averageStart:])
+                runningAverageExecutionFeaturesLoss = numpy.mean(self.trainingLosses['predictedExecutionFeaturesLoss'][-averageStart:])
+                runningAverageHomogenizationLoss = numpy.mean(self.trainingLosses['targetHomogenizationLoss'][-averageStart:])
+                runningAveragePredictedCursorLoss = numpy.mean(self.trainingLosses['predictedCursorLoss'][-averageStart:])
 
-        if not self.agentConfiguration['enable_cursor_prediction_loss']:
-            predictedCursorAdustment = 1
-
-        if not self.agentConfiguration['enable_homogenization_loss']:
-            homogenizationAdustment = 1
-
-        totalRebalancedLoss = totalRewardLoss + \
-                              tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor([tracePredictionAdustment])) + \
-                              predictedExecutionFeaturesLoss * self.variableWrapperFunc(torch.FloatTensor([executionFeaturesAdustment])) + \
-                              targetHomogenizationLoss * self.variableWrapperFunc(torch.FloatTensor([homogenizationAdustment])) + \
-                              predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor([predictedCursorAdustment]))
-
-        if numpy.count_nonzero(numpy.isnan(float(totalLoss.data.item()))) == 0:
-            self.optimizer.zero_grad()
-            if self.agentConfiguration['enable_loss_balancing']:
-                totalRebalancedLoss.backward()
+                tracePredictionAdustment = (runningAverageRewardLoss / (runningAverageTracePredictionLoss + 1e-6)) * self.agentConfiguration['loss_ratio_trace_prediction']
+                executionFeaturesAdustment = (runningAverageRewardLoss / (runningAverageExecutionFeaturesLoss + 1e-6)) * self.agentConfiguration['loss_ratio_execution_features']
+                homogenizationAdustment = (runningAverageRewardLoss / (runningAverageHomogenizationLoss + 1e-6)) * self.agentConfiguration['loss_ratio_homogenization']
+                predictedCursorAdustment = (runningAverageRewardLoss / (runningAveragePredictedCursorLoss + 1e-6)) * self.agentConfiguration['loss_ratio_predicted_cursor']
             else:
-                totalLoss.backward()
-            self.optimizer.step()
-        else:
-            print("ERROR! NaN detected in loss calculation. Skipping backward pass.", flush=True)
+                tracePredictionAdustment = 1
+                executionFeaturesAdustment = 1
+                homogenizationAdustment = 1
+                predictedCursorAdustment = 1
 
-        totalRewardLoss = float(totalRewardLoss.data.item())
-        presentRewardLoss = float(presentRewardLoss.data.item())
-        discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
-        tracePredictionLoss = float(tracePredictionLoss.data.item())
-        predictedExecutionFeaturesLoss = float(predictedExecutionFeaturesLoss.data.item())
-        targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
-        predictedCursorLoss = float(predictedCursorLoss.data.item())
-        totalLoss = float(totalLoss.data.item())
-        totalRebalancedLoss = float(totalRebalancedLoss.data.item())
-        batchReward = float(numpy.sum(batch['presentRewards']))
+            if not self.agentConfiguration['enable_trace_prediction_loss']:
+                tracePredictionAdustment = 1
 
-        self.trainingLosses["totalRewardLoss"].append(totalRewardLoss)
-        self.trainingLosses["presentRewardLoss"].append(presentRewardLoss)
-        self.trainingLosses["discountedFutureRewardLoss"].append(discountedFutureRewardLoss)
-        self.trainingLosses["tracePredictionLoss"].append(tracePredictionLoss)
-        self.trainingLosses["predictedExecutionFeaturesLoss"].append(predictedExecutionFeaturesLoss)
-        self.trainingLosses["targetHomogenizationLoss"].append(targetHomogenizationLoss)
-        self.trainingLosses["predictedCursorLoss"].append(predictedCursorLoss)
-        self.trainingLosses["totalLoss"].append(totalLoss)
-        self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
+            if not self.agentConfiguration['enable_execution_feature_prediction_loss']:
+                executionFeaturesAdustment = 1
 
-        sampleRewardLosses = [tensor.data.item() for tensor in totalRewardLosses]
+            if not self.agentConfiguration['enable_cursor_prediction_loss']:
+                predictedCursorAdustment = 1
 
-        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses
+            if not self.agentConfiguration['enable_homogenization_loss']:
+                homogenizationAdustment = 1
+
+            totalRebalancedLoss = totalRewardLoss + \
+                                  tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor([tracePredictionAdustment])) + \
+                                  predictedExecutionFeaturesLoss * self.variableWrapperFunc(torch.FloatTensor([executionFeaturesAdustment])) + \
+                                  targetHomogenizationLoss * self.variableWrapperFunc(torch.FloatTensor([homogenizationAdustment])) + \
+                                  predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor([predictedCursorAdustment]))
+
+            totalRebalancedLoss.backward()
+        self.optimizer.step()
+
+        if returnLosses:
+            if numpy.count_nonzero(numpy.isnan(float(totalLoss.data.item()))) != 0:
+                print("ERROR! NaN detected in loss calculation.", flush=True)
+
+            totalRewardLoss = float(totalRewardLoss.data.item())
+            presentRewardLoss = float(presentRewardLoss.data.item())
+            discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
+            tracePredictionLoss = float(tracePredictionLoss.data.item())
+            predictedExecutionFeaturesLoss = float(predictedExecutionFeaturesLoss.data.item())
+            targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
+            predictedCursorLoss = float(predictedCursorLoss.data.item())
+            totalLoss = float(totalLoss.data.item())
+            if self.agentConfiguration['enable_loss_balancing']:
+                totalRebalancedLoss = float(totalRebalancedLoss.data.item())
+            else:
+                totalRebalancedLoss = 0
+            batchReward = float(numpy.sum(batch['presentRewards']))
+
+            self.trainingLosses["totalRewardLoss"].append(totalRewardLoss)
+            self.trainingLosses["presentRewardLoss"].append(presentRewardLoss)
+            self.trainingLosses["discountedFutureRewardLoss"].append(discountedFutureRewardLoss)
+            self.trainingLosses["tracePredictionLoss"].append(tracePredictionLoss)
+            self.trainingLosses["predictedExecutionFeaturesLoss"].append(predictedExecutionFeaturesLoss)
+            self.trainingLosses["targetHomogenizationLoss"].append(targetHomogenizationLoss)
+            self.trainingLosses["predictedCursorLoss"].append(predictedCursorLoss)
+            self.trainingLosses["totalLoss"].append(totalLoss)
+            self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
+
+            sampleRewardLosses = [tensor.data.item() for tensor in totalRewardLosses]
+
+            return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses
 
 
 

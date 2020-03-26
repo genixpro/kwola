@@ -14,6 +14,8 @@ import time
 import multiprocessing
 import psutil
 import subprocess
+import os
+import os.path
 import traceback
 from datetime import datetime
 import atexit
@@ -115,12 +117,13 @@ def runMainTrainingLoop(trainingSequence):
 
     while stepsCompleted < agentConfig['training_steps_needed']:
         with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + 2)) as executor:
+            if os.path.exists("/tmp/kwola_distributed_coordinator"):
+                os.unlink("/tmp/kwola_distributed_coordinator")
+
             futures = []
 
             trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=0)
             futures.append(trainingFuture)
-
-            time.sleep(3)
 
             trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=1)
             futures.append(trainingFuture)
@@ -134,6 +137,8 @@ def runMainTrainingLoop(trainingSequence):
             print(datetime.now(), "Completed one parallel training & testing step! Hooray!", flush=True)
 
             stepsCompleted += 1
+
+            time.sleep(3)
 
         trainingSequence.trainingStepsCompleted += 1
         trainingSequence.averageTimePerStep = (datetime.now() - stepStartTime).total_seconds() / stepsCompleted

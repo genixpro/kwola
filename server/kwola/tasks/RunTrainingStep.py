@@ -245,7 +245,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
 
                         # HACK! Wait for all tasks to get submitted to the existing process pool by the threads.
                         # Meanwhile we hold this loop so that no new batches get submitted
-                        time.sleep(0.5)
+                        time.sleep(1.0)
 
                         # If the cache is full, we shrink the process pool down to a smaller size.
                         if numpy.mean(cacheRates) > agentConfig['training_cache_full_state_min_cache_hit_rate']:
@@ -327,8 +327,16 @@ def loadExecutionTrace(traceId):
 
 def runTrainingStep(trainingSequenceId, gpu=None):
     if gpu is not None:
-        torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator",)
+        for n in range(10):
+            try:
+                torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator",)
+                break
+            except RuntimeError:
+                time.sleep(1)
+                if n == 9:
+                    raise
         torch.cuda.set_device(gpu)
+        print(datetime.now(), "Cuda Ready on GPU", gpu, flush=True)
 
     try:
         multiprocessing.set_start_method('spawn')
@@ -412,23 +420,27 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueue, subProcessBatchResultQueue))
                     batchesPrepared += 1
 
-                totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, \
-                    executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
-                    totalLoss, totalRebalancedLoss, batchReward, \
-                    sampleRewardLosses = agent.learnFromBatch(batch)
+                if trainingStep.numberOfIterationsCompleted % 3 == 0:
+                    totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, \
+                        executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
+                        totalLoss, totalRebalancedLoss, batchReward, \
+                        sampleRewardLosses = agent.learnFromBatch(batch, returnLosses=True)
 
-                for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                    subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                    trainingStep.presentRewardLosses.append(presentRewardLoss)
+                    trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
+                    trainingStep.tracePredictionLosses.append(tracePredictionLoss)
+                    trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
+                    trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
+                    trainingStep.predictedCursorLosses.append(predictedCursorLoss)
+                    trainingStep.totalRewardLosses.append(totalRewardLoss)
+                    trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
+                    trainingStep.totalLosses.append(totalLoss)
 
-                trainingStep.presentRewardLosses.append(presentRewardLoss)
-                trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
-                trainingStep.tracePredictionLosses.append(tracePredictionLoss)
-                trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
-                trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
-                trainingStep.predictedCursorLosses.append(predictedCursorLoss)
-                trainingStep.totalRewardLosses.append(totalRewardLoss)
-                trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
-                trainingStep.totalLosses.append(totalLoss)
+                    for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
+                        subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                else:
+                    agent.learnFromBatch(batch, returnLosses=False)
+
                 trainingStep.numberOfIterationsCompleted += 1
 
                 if trainingStep.numberOfIterationsCompleted % agentConfig['print_loss_iterations'] == (agentConfig['print_loss_iterations']-1):
@@ -452,8 +464,9 @@ def runTrainingStep(trainingSequenceId, gpu=None):
 
         # Safe guard, don't save the model if any nan's were detected
         if numpy.count_nonzero(numpy.isnan(trainingStep.totalLosses)) == 0:
-            agent.save()
-            print(datetime.now(), "Agent saved!", flush=True)
+            if gpu is None or gpu == 0:
+                agent.save()
+                print(datetime.now(), "Agent saved!", flush=True)
         else:
             print(datetime.now(), "ERROR! A NaN was detected in this models output. Not saving model.", flush=True)
 
