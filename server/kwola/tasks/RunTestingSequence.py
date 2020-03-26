@@ -111,10 +111,15 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
 
         step = 0
 
-        subProcessCommandQueue = multiprocessing.Queue()
-        subProcessResultQueue = multiprocessing.Queue()
-        subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
-        subProcess.start()
+        subProcesses = []
+
+        for n in range(agentConfig['testing_subprocess_pool_size']):
+            subProcessCommandQueue = multiprocessing.Queue()
+            subProcessResultQueue = multiprocessing.Queue()
+            subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+            subProcess.start()
+
+            subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
 
         recentActions = [[] for n in range(environment.numberParallelSessions())]
 
@@ -162,7 +167,9 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                         errorHashes.add(hash)
                         uniqueErrors.append(error)
 
-            if stepsRemaining % agentConfig['testing_reset_agent_period'] == (agentConfig['testing_reset_agent_period'] - 1):
+            if agentConfig['testing_reset_agent_period'] == 1 or stepsRemaining % agentConfig['testing_reset_agent_period'] == (agentConfig['testing_reset_agent_period'] - 1):
+                subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses.pop(0)
+
                 subProcessCommandQueue.put("quit")
                 subProcess.terminate()
 
@@ -170,6 +177,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
                 subProcessResultQueue = multiprocessing.Queue()
                 subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
                 subProcess.start()
+
+                subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
 
             for sampleRecentActions, action, trace in zip(recentActions, actions, traces):
                 # Clear the recent actions list every time new branches of code get executed.
@@ -182,8 +191,9 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False):
             print("", end="", sep="", flush=True)
 
 
-        subProcessCommandQueue.put("quit")
-        subProcess.terminate()
+        for subProcessCommandQueue, subProcessResultQueue, subProcess in subProcesses:
+            subProcessCommandQueue.put("quit")
+            subProcess.terminate()
 
         print(datetime.now(), f"Creating movies for the execution sessions of this testing sequence.", flush=True)
         videoPaths = environment.createMovies()

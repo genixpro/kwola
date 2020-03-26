@@ -12,6 +12,7 @@ import concurrent.futures
 import random
 import numpy
 import multiprocessing
+import multiprocessing.pool
 import gzip
 from datetime import datetime
 import traceback
@@ -82,7 +83,7 @@ def isNumpyArray(obj):
     return type(obj).__module__ == numpy.__name__
 
 
-def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, processExecutor, subProcessBatchResultQueue):
+def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, processPool, subProcessBatchResultQueue):
     agentConfig = config.getAgentConfiguration()
 
     agent = DeepLearningAgent(agentConfiguration=agentConfig, whichGpu=None)
@@ -105,7 +106,7 @@ def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap,
     for traceId in chosenExecutionTraceIds:
         trace = executionTraceIdMap[str(traceId)]
 
-        future = processExecutor.submit(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
+        future = processPool.apply_async(prepareBatchesForExecutionTrace, str(traceId), trace.executionSessionId, batchDirectory)
         futures.append(future)
 
     cacheHits = []
@@ -195,14 +196,14 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
 
-        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_main_process_workers']) as processExecutor:
+        with multiprocessing.pool.Pool(processes=agentConfig['training_max_main_process_workers'], maxtasksperchild=1) as processPool:
             with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
                 while True:
                     message, data = subProcessCommandQueue.get()
                     if message == "quit":
                         break
                     elif message == "batch":
-                        threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, processExecutor, subProcessBatchResultQueue)
+                        threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, processPool, subProcessBatchResultQueue)
                     elif message == "update-loss":
                         executionTraceId = data["executionTraceId"]
                         sampleRewardLoss = data["sampleRewardLoss"]

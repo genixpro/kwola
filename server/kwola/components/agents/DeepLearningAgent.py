@@ -286,8 +286,8 @@ class DeepLearningAgent(BaseAgent):
                 chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
                 chosenActionMap = sampleActionMaps[chosenActionMapIndex]
 
-                actionX = random.randint(max(0, chosenActionMap.left), min(chosenActionMap.right - 1, width - 1))
-                actionY = random.randint(max(0, chosenActionMap.top), min(chosenActionMap.bottom - 1, height - 1))
+                actionX = random.randint(max(0, min(width - 1, chosenActionMap.left)), max(0, min(chosenActionMap.right - 1, width - 1)))
+                actionY = random.randint(max(0, min(height - 1, chosenActionMap.top)), max(0, min(chosenActionMap.bottom - 1, height - 1)))
 
                 possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
                 possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
@@ -308,7 +308,10 @@ class DeepLearningAgent(BaseAgent):
                     else:
                         possibleActionBoosts.append(1.0)
 
-                actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(numpy.array(possibleActionWeights) * numpy.array(possibleActionBoosts)))
+                try:
+                    actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(numpy.array(possibleActionWeights) * numpy.array(possibleActionBoosts)))
+                except ValueError:
+                    actionType = random.choice(range(len(self.actionsSorted)))
 
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
@@ -717,9 +720,8 @@ class DeepLearningAgent(BaseAgent):
 
             def addRightSideDebugCharts(plotImage, rawImage, trace):
                 chartTopMargin = 75
-                numColumns = 3
-                numRows = 3
-                boundaryImageShrinkRatio = 3
+                numColumns = 4
+                numRows = 4
 
                 mainColorMap = plt.get_cmap('inferno')
                 greyColorMap = plt.get_cmap('gray')
@@ -745,7 +747,7 @@ class DeepLearningAgent(BaseAgent):
                 rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
 
                 # pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, len(self.actionsSorted) + 3)
-                # pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, imageHeight, imageWidth)
+                pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, imageHeight, imageWidth)
                 # actionPixelCount = numpy.count_nonzero(pixelActionMap)
                 # pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
                 # pixelActionMapAxes.set_xticks([])
@@ -892,11 +894,13 @@ class DeepLearningAgent(BaseAgent):
 
     @staticmethod
     def createTrainingRewardNormalizer(execusionSessionIds):
+        agentConfig = config.getAgentConfiguration()
+
         rewardFutures = []
 
         rewardSequences = []
         longest = 0
-        with concurrent.futures.ProcessPoolExecutor(max_workers=32) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
             for sessionId in execusionSessionIds:
                 rewardFutures.append(executor.submit(DeepLearningAgent.computeTotalRewardsParallel, str(sessionId)))
 

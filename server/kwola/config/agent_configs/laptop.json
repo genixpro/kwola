@@ -75,6 +75,7 @@
   "testing_sequence_length": 10,
   "testing_sequences_in_parallel_per_training_step": 1,
   "testing_sequences_per_training_step": 1,
+  "testing_subprocess_pool_size": 1,
   "training_crop_height": 256,
   "training_crop_width": 256,
   "training_execution_session_cache_expiration_seconds": 600,
