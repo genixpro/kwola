@@ -80,11 +80,11 @@
   "training_crop_width": 256,
   "training_execution_session_cache_expiration_seconds": 600,
   "training_execution_session_cache_expiration_max_additional_random_seconds": 30,
-  "training_max_main_process_workers": 12,
-  "training_max_main_thread_workers": 12,
-  "training_cache_full_main_process_workers": 4,
-  "training_initial_main_process_workers": 8,
-  "training_cache_full_state_min_cache_hit_rate": 0.98,
+  "training_max_batch_prep_workers": 12,
+  "training_max_batch_prep_thread_workers": 32,
+  "training_cache_full_batch_prep_workers": 4,
+  "training_initial_batch_prep_workers": 8,
+  "training_cache_full_state_min_cache_hit_rate": 0.997,
   "training_cache_full_state_moving_average_length": 50,
   "training_reset_workers_every_n_batches": 100,
   "training_max_initialization_workers": 32,
@@ -102,5 +102,6 @@
   "training_surplus_batches": 10,
   "training_learning_rate": 1e-4,
   "training_gradient_exponential_moving_average_decay": 0.97,
-  "training_gradient_squared_exponential_moving_average_decay": 0.999
+  "training_gradient_squared_exponential_moving_average_decay": 0.999,
+  "training_batch_prep_subprocesses": 1
 }

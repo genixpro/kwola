@@ -63,7 +63,7 @@ class WebEnvironmentSession(BaseEnvironment):
         self.driver.get(targetURL)
 
         # HACK! give time for page to load before proceeding.
-        time.sleep(1)
+        time.sleep(2)
 
         # Inject bug detection script
         # self.driver.execute_script("""

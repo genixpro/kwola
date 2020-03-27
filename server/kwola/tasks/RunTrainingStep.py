@@ -95,7 +95,7 @@ def isNumpyArray(obj):
     return type(obj).__module__ == numpy.__name__
 
 
-def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessBatchResultQueue):
+def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue):
     try:
         agentConfig = config.getAgentConfiguration()
 
@@ -162,24 +162,30 @@ def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap,
         return cacheHitRate
     except Exception:
         traceback.print_exc()
-        print("prepareAndLoadSingleBatchForSubprocess failed!", flush=True)
-        raise
+        print("prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue", flush=True)
+        subProcessCommandQueue.put(("batch", {}))
 
-
-def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer=True):
+def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer=True, subprocessIndex=0):
     try:
         agentConfig = config.getAgentConfiguration()
 
         print(datetime.now(), "Starting initialization for batch preparation sub process.", flush=True)
 
-        testSequences = list(TestingSequenceModel.objects(status="completed").no_dereference().order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
+        testSequences = list(TestingSequenceModel.objects(status="completed")
+                             .no_dereference()
+                             .order_by('-startTime')
+                             .only('status', 'startTime', 'executionSessions')
+                             .limit(int(agentConfig['training_number_of_recent_testing_sequences_to_use']/agentConfig['training_batch_prep_subprocesses']))
+                             .skip(int(subprocessIndex * int(agentConfig['training_number_of_recent_testing_sequences_to_use']/agentConfig['training_batch_prep_subprocesses'])))
+                         )
+
         if len(testSequences) == 0:
             print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
             return
 
         # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
         executionSessionIds = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=int(agentConfig['training_max_initialization_workers']/agentConfig['training_batch_prep_subprocesses'])) as executor:
             executionSessionFutures = []
             for testSequence in testSequences:
                 for session in testSequence.executionSessions:
@@ -192,7 +198,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
 
         executionTraces = []
         executionTraceIdMap = {}
-        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=int(agentConfig['training_max_initialization_workers']/agentConfig['training_batch_prep_subprocesses'])) as executor:
             executionTraceFutures = []
             for session in executionSessions:
                 for trace in session.executionTraces:
@@ -221,53 +227,87 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
 
 
-        processPool = multiprocessing.pool.Pool(processes=agentConfig['training_initial_main_process_workers'])
+        processPool = multiprocessing.pool.Pool(processes=agentConfig['training_initial_batch_prep_workers'])
 
         batchCount = 0
         cacheFullState = True
 
+        lastProcessPool = None
+        lastProcessPoolFutures = []
+        currentProcessPoolFutures = []
+
+        needToResetPool = False
+        starved = False
+
         cacheRateFutures = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_batch_prep_thread_workers']) as threadExecutor:
             while True:
                 message, data = subProcessCommandQueue.get()
                 if message == "quit":
                     break
+                elif message == "starved":
+                    starved = True
+                    needToResetPool = True
+                elif message == "full":
+                    starved = False
+                    needToResetPool = True
                 elif message == "batch":
-                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessBatchResultQueue)
-                    cacheRateFutures.append(future)
-
-                    batchCount += 1
-
                     # See if we need to refresh the process pool. This is done to make sure resources get let go and to be able to switch between the smaller and larger process pool
                     # Depending on the cache hit rate
                     if batchCount % agentConfig['training_reset_workers_every_n_batches'] == (agentConfig['training_reset_workers_every_n_batches'] - 1):
-                        cacheRates = [future.result() for future in cacheRateFutures[-agentConfig['training_cache_full_state_moving_average_length']:] if future.done()]
+                        needToResetPool = True
 
-                        # HACK! Wait for all tasks to get submitted to the existing process pool by the threads.
-                        # Meanwhile we hold this loop so that no new batches get submitted
-                        time.sleep(1.0)
+                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue)
+                    cacheRateFutures.append(future)
+                    currentProcessPoolFutures.append(future)
 
-                        # If the cache is full, we shrink the process pool down to a smaller size.
-                        if numpy.mean(cacheRates) > agentConfig['training_cache_full_state_min_cache_hit_rate']:
-                            processPool.close()
-                            processPool = multiprocessing.pool.Pool(processes=agentConfig['training_cache_full_main_process_workers'])
-
-                            cacheFullState = True
-                        # Otherwise we have a full sized process pool so we can plow through all the results.
-                        else:
-                            processPool.close()
-                            processPool = multiprocessing.pool.Pool(processes=agentConfig['training_max_main_thread_workers'])
-
-                            cacheFullState = False
-
+                    batchCount += 1
                 elif message == "update-loss":
                     executionTraceId = data["executionTraceId"]
                     sampleRewardLoss = data["sampleRewardLoss"]
-                    trace = executionTraceIdMap[executionTraceId]
-                    trace.lastTrainingRewardLoss = sampleRewardLoss
-                    trace.save()
+                    if executionTraceId in executionTraceIdMap:
+                        trace = executionTraceIdMap[executionTraceId]
+                        trace.lastTrainingRewardLoss = sampleRewardLoss
+                        trace.save()
+
+                if needToResetPool and lastProcessPool is None:
+                    needToResetPool = False
+
+                    cacheRates = [future.result() for future in cacheRateFutures[-agentConfig['training_cache_full_state_moving_average_length']:] if future.done()]
+
+                    # If the cache is full and the main process isn't starved for batches, we shrink the process pool down to a smaller size.
+                    if numpy.mean(cacheRates) > agentConfig['training_cache_full_state_min_cache_hit_rate'] and not starved:
+                        lastProcessPool = processPool
+                        lastProcessPoolFutures = list(currentProcessPoolFutures)
+                        currentProcessPoolFutures = []
+
+                        processPool = multiprocessing.pool.Pool(processes=agentConfig['training_cache_full_batch_prep_workers'])
+
+                        cacheFullState = True
+                    # Otherwise we have a full sized process pool so we can plow through all the results.
+                    else:
+                        lastProcessPool = processPool
+                        lastProcessPoolFutures = list(currentProcessPoolFutures)
+                        currentProcessPoolFutures = []
+
+                        processPool = multiprocessing.pool.Pool(processes=agentConfig['training_max_batch_prep_workers'])
+
+                        cacheFullState = False
+
+                if lastProcessPool is not None:
+                    all = True
+                    for future in lastProcessPoolFutures:
+                        if not future.done():
+                            all = False
+                            break
+                    if all:
+                        lastProcessPool.terminate()
+                        lastProcessPool = None
+                        lastProcessPoolFutures = []
 
         processPool.terminate()
+        if lastProcessPool is not None:
+            lastProcessPool.terminate()
 
     except Exception:
         print(datetime.now(), f"Error occurred in the batch preparation sub-process. Exiting.", flush=True)
@@ -327,13 +367,13 @@ def loadExecutionTrace(traceId):
 
 def runTrainingStep(trainingSequenceId, gpu=None):
     if gpu is not None:
-        for n in range(10):
+        for subprocessIndex in range(10):
             try:
                 torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator",)
                 break
             except RuntimeError:
                 time.sleep(1)
-                if n == 9:
+                if subprocessIndex == 9:
                     raise
         torch.cuda.set_device(gpu)
         print(datetime.now(), "Cuda Ready on GPU", gpu, flush=True)
@@ -382,10 +422,19 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         # Force it to destroy now to save memory
         del environment
 
-        subProcessCommandQueue = multiprocessing.Queue()
-        subProcessBatchResultQueue = multiprocessing.Queue()
-        subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, (gpu == 0 or gpu is None) ))
-        subProcess.start()
+        subProcessCommandQueues = []
+        subProcessBatchResultQueues = []
+        subProcesses = []
+
+        for subprocessIndex in range(agentConfig['training_batch_prep_subprocesses']):
+            subProcessCommandQueue = multiprocessing.Queue()
+            subProcessBatchResultQueue = multiprocessing.Queue()
+            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, bool(subprocessIndex==0 and (gpu == 0 or gpu is None)), subprocessIndex))
+            subProcess.start()
+
+            subProcessCommandQueues.append(subProcessCommandQueue)
+            subProcessBatchResultQueues.append(subProcessBatchResultQueue)
+            subProcesses.append(subProcess)
 
     except Exception as e:
         print(datetime.now(), f"Error occurred during initiation of training!", flush=True)
@@ -399,11 +448,13 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         batchFutures = []
 
         recentCacheHits = []
+        starved = False
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_main_thread_workers']) as threadExecutor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_batch_prep_thread_workers'] * agentConfig['training_batch_prep_subprocesses']) as threadExecutor:
             # First we chuck some batch requests into the queue.
             for n in range(agentConfig['training_precompute_batches_count']):
-                batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueue, subProcessBatchResultQueue))
+                subProcessIndex = (batchesPrepared % agentConfig['training_batch_prep_subprocesses'])
+                batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
                 batchesPrepared += 1
 
             while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
@@ -415,9 +466,21 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     if future.done():
                         ready += 1
 
+                if ready < (agentConfig['training_precompute_batches_count'] / 2):
+                    if not starved:
+                        for subProcessCommandQueue in subProcessCommandQueues:
+                            subProcessCommandQueue.put(("starved", {}))
+                        starved = True
+                else:
+                    if starved:
+                        for subProcessCommandQueue in subProcessCommandQueues:
+                            subProcessCommandQueue.put(("full", {}))
+                        starved = False
+
                 if batchesPrepared <= totalBatchesNeeded:
                     # Request another session be prepared
-                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueue, subProcessBatchResultQueue))
+                    subProcessIndex = (batchesPrepared % agentConfig['training_batch_prep_subprocesses'])
+                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
                     batchesPrepared += 1
 
                 if trainingStep.numberOfIterationsCompleted % 3 == 0:
@@ -437,7 +500,8 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     trainingStep.totalLosses.append(totalLoss)
 
                     for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                        subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                        for subProcessCommandQueue in subProcessCommandQueues:
+                            subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
                 else:
                     agent.learnFromBatch(batch, returnLosses=False)
 
@@ -460,7 +524,8 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         trainingStep.status = "completed"
         trainingStep.save()
 
-        subProcessCommandQueue.put(("quit", {}))
+        for subProcessCommandQueue in subProcessCommandQueues:
+            subProcessCommandQueue.put(("quit", {}))
 
         # Safe guard, don't save the model if any nan's were detected
         if numpy.count_nonzero(numpy.isnan(trainingStep.totalLosses)) == 0:
