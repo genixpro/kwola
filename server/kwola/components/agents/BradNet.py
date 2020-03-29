@@ -82,7 +82,7 @@ class BradNet(nn.Module):
                 padding=self.agentConfiguration['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
             nn.Conv2d(
                 in_channels=self.agentConfiguration['layer_5_num_kernels'],
                 out_channels=1,
@@ -103,7 +103,7 @@ class BradNet(nn.Module):
                 padding=self.agentConfiguration['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
             nn.Conv2d(
                 in_channels=self.agentConfiguration['layer_5_num_kernels'],
                 out_channels=numActions,
@@ -124,7 +124,7 @@ class BradNet(nn.Module):
                 padding=self.agentConfiguration['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
             nn.Conv2d(
                 in_channels=self.agentConfiguration['layer_5_num_kernels'],
                 out_channels=numActions,
@@ -145,13 +145,13 @@ class BradNet(nn.Module):
                 padding=self.agentConfiguration['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
             nn.Conv2d(
                 in_channels=self.agentConfiguration['layer_5_num_kernels'],
                 out_channels=numActions,
-                kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
-                stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
-                padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
+                kernel_size=self.agentConfiguration['actor_convolution_kernel_size'],
+                stride=self.agentConfiguration['actor_convolution_stride'],
+                padding=self.agentConfiguration['actor_convolution_padding'],
                 bias=False
             )
         )
@@ -166,13 +166,13 @@ class BradNet(nn.Module):
                 padding=self.agentConfiguration['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
             nn.Conv2d(
                 in_channels=self.agentConfiguration['layer_5_num_kernels'],
                 out_channels=numActions,
-                kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
-                stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
-                padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
+                kernel_size=self.agentConfiguration['advantage_convolution_kernel_size'],
+                stride=self.agentConfiguration['advantage_convolution_stride'],
+                padding=self.agentConfiguration['advantage_convolution_padding'],
                 bias=False
             )
         )
@@ -239,7 +239,8 @@ class BradNet(nn.Module):
         if data["computeActionProbabilities"]:
             actorLogProbs = self.actorConvolution(pixelFeatureMap)
 
-            actorActionProbs = torch.exp(actorLogProbs) * data['pixelActionMaps'] / torch.sum((torch.exp(actorLogProbs) * data['pixelActionMaps']).reshape(shape=[-1, width * height * self.numActions]), dim=1)
+            actorProbExp = torch.exp(actorLogProbs) * data['pixelActionMaps']
+            actorActionProbs = actorProbExp / torch.sum(actorProbExp.reshape(shape=[-1, width * height * self.numActions]), dim=1).unsqueeze(1).unsqueeze(1).unsqueeze(1)
             actorActionProbs = actorActionProbs.reshape([-1, self.numActions, height, width])
 
             outputDict["actionProbabilities"] = actorActionProbs
@@ -247,10 +248,9 @@ class BradNet(nn.Module):
         if data['computeStateValues']:
             stateValueMap = self.stateValueConvolution(pixelFeatureMap)
 
-            for actionIndex in range(self.numActions):
-                stateValueMap = stateValueMap * data['pixelActionMaps'][:, actionIndex]
+            stateValueMap = stateValueMap * torch.min(torch.ones_like(stateValueMap, dtype=torch.float32), torch.sum(data['pixelActionMaps'], dim=1, dtype=torch.float32))
             
-            flatStateValueMap = stateValueMap.reshape([-1, width * height * self.numActions])
+            flatStateValueMap = stateValueMap.reshape([-1, width * height])
 
             averageStateValues = torch.sum(flatStateValueMap, dim=1) / (torch.sum(flatStateValueMap != 0, dim=1))
 

@@ -61,7 +61,7 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
         batch = agent.prepareBatchForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
 
         sampleBatch = None
-        for traceIndex in range(len(executionSession.executionTraces)):
+        for traceIndex in range(len(executionSession.executionTraces) - 1):
             traceBatch = {}
             for key, value in batch.items():
                 traceBatch[key] = value[traceIndex:traceIndex+1]
@@ -101,6 +101,9 @@ def isNumpyArray(obj):
 def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue):
     try:
         agentConfig = config.getAgentConfiguration()
+
+        for trace in executionTraces:
+            trace.lastTrainingRewardLoss = 1
 
         traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
         countWithLossValue = numpy.count_nonzero(traceWeights)
@@ -204,7 +207,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         with concurrent.futures.ProcessPoolExecutor(max_workers=int(agentConfig['training_max_initialization_workers']/agentConfig['training_batch_prep_subprocesses'])) as executor:
             executionTraceFutures = []
             for session in executionSessions:
-                for trace in session.executionTraces:
+                for trace in session.executionTraces[:-1]:
                     executionTraceFutures.append(executor.submit(loadExecutionTrace, trace['_ref'].id))
 
             for traceFuture in executionTraceFutures:
@@ -417,7 +420,7 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         trainingStep.totalRebalancedLosses = []
         trainingStep.save()
 
-        environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
+        environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration(), sessionLimit=1)
 
         agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all" if gpu is None else gpu)
         agent.initialize(environment.branchFeatureSize())
@@ -522,6 +525,10 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                             subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
                 else:
                     agent.learnFromBatch(batch, returnLosses=False)
+
+                if trainingStep.numberOfIterationsCompleted % agentConfig['training_update_target_network_every'] == (agentConfig['training_update_target_network_every'] - 1):
+                    print(datetime.now(), "Updating the target network weights to the current primary network weights.", flush=True)
+                    agent.updateTargetNetwork()
 
                 trainingStep.numberOfIterationsCompleted += 1
 

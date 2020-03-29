@@ -85,6 +85,7 @@
   "training_max_batch_prep_thread_workers": 32,
   "training_cache_full_batch_prep_workers": 4,
   "training_initial_batch_prep_workers": 8,
+  "training_update_target_network_every": 250,
   "training_cache_full_state_min_cache_hit_rate": 0.997,
   "training_cache_full_state_moving_average_length": 50,
   "training_reset_workers_every_n_batches": 100,

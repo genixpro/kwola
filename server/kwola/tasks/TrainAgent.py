@@ -113,7 +113,7 @@ def runMainTrainingLoop(trainingSequence):
     agentConfig = config.getAgentConfiguration()
 
     # Load and save the agent to make sure all training subprocesses are synced
-    environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
+    environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration(), sessionLimit=1)
     agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu=None)
     agent.initialize(environment.branchFeatureSize())
     agent.load()
