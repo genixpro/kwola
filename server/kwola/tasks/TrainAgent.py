@@ -4,6 +4,7 @@ from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.TestingSequenceModel import TestingSequenceModel
 from kwola.models.TrainingSequenceModel import TrainingSequence
 from kwola.models.TrainingStepModel import TrainingStep
+from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from .RunTrainingStep import runTrainingStep
 from .RunTestingSequence import runTestingSequence
 from concurrent.futures import ThreadPoolExecutor
@@ -110,6 +111,14 @@ def runTestingSubprocess(trainingSequence, generateDebugVideo=False):
 
 def runMainTrainingLoop(trainingSequence):
     agentConfig = config.getAgentConfiguration()
+
+    # Load and save the agent to make sure all training subprocesses are synced
+    environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
+    agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu=None)
+    agent.initialize(environment.branchFeatureSize())
+    agent.load()
+    agent.save()
+    del environment, agent
 
     stepsCompleted = 0
 

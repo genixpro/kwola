@@ -60,22 +60,11 @@ class BradNet(nn.Module):
 
             nn.Conv2d(
                 in_channels=self.agentConfiguration['layer_3_num_kernels'],
-                out_channels=self.agentConfiguration['layer_4_num_kernels'],
+                out_channels=self.agentConfiguration['pixel_features'],
                 kernel_size=self.agentConfiguration['layer_4_kernel_size'],
                 stride=self.agentConfiguration['layer_4_stride'],
                 dilation=self.agentConfiguration['layer_4_dilation'],
                 padding=self.agentConfiguration['layer_4_padding']
-            ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_4_num_kernels']),
-
-            nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_4_num_kernels'],
-                out_channels=self.agentConfiguration['pixel_features'],
-                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
-                stride=self.agentConfiguration['layer_5_stride'],
-                dilation=self.agentConfiguration['layer_5_dilation'],
-                padding=self.agentConfiguration['layer_5_padding']
             ),
             nn.ELU(),
             nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
@@ -83,22 +72,109 @@ class BradNet(nn.Module):
             torch.nn.Upsample(scale_factor=8)
         )
 
-        self.presentRewardConvolution = nn.Conv2d(
-            in_channels=self.agentConfiguration['pixel_features'],
-            out_channels=numActions,
-            kernel_size=self.agentConfiguration['present_reward_convolution_kernel_size'],
-            stride=1,
-            padding=0,
-            bias=False
+        self.stateValueConvolution = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['pixel_features'],
+                out_channels=self.agentConfiguration['layer_5_num_kernels'],
+                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
+                stride=self.agentConfiguration['layer_5_stride'],
+                dilation=self.agentConfiguration['layer_5_dilation'],
+                padding=self.agentConfiguration['layer_5_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                out_channels=1,
+                kernel_size=self.agentConfiguration['state_value_convolution_kernel_size'],
+                stride=self.agentConfiguration['state_value_convolution_stride'],
+                padding=self.agentConfiguration['state_value_convolution_padding'],
+                bias=False
+            )
         )
 
-        self.discountedFutureRewardConvolution = nn.Conv2d(
-            in_channels=self.agentConfiguration['pixel_features'],
-            out_channels=numActions,
-            kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
-            stride=1,
-            padding=0,
-            bias=False
+        self.presentRewardConvolution = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['pixel_features'],
+                out_channels=self.agentConfiguration['layer_5_num_kernels'],
+                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
+                stride=self.agentConfiguration['layer_5_stride'],
+                dilation=self.agentConfiguration['layer_5_dilation'],
+                padding=self.agentConfiguration['layer_5_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                out_channels=numActions,
+                kernel_size=self.agentConfiguration['present_reward_convolution_kernel_size'],
+                stride=self.agentConfiguration['present_reward_convolution_stride'],
+                padding=self.agentConfiguration['present_reward_convolution_padding'],
+                bias=False
+            )
+        )
+
+        self.discountedFutureRewardConvolution = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['pixel_features'],
+                out_channels=self.agentConfiguration['layer_5_num_kernels'],
+                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
+                stride=self.agentConfiguration['layer_5_stride'],
+                dilation=self.agentConfiguration['layer_5_dilation'],
+                padding=self.agentConfiguration['layer_5_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                out_channels=numActions,
+                kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
+                stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
+                padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
+                bias=False
+            )
+        )
+
+        self.actorConvolution = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['pixel_features'],
+                out_channels=self.agentConfiguration['layer_5_num_kernels'],
+                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
+                stride=self.agentConfiguration['layer_5_stride'],
+                dilation=self.agentConfiguration['layer_5_dilation'],
+                padding=self.agentConfiguration['layer_5_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                out_channels=numActions,
+                kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
+                stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
+                padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
+                bias=False
+            )
+        )
+
+        self.advantageConvolution = nn.Sequential(
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['pixel_features'],
+                out_channels=self.agentConfiguration['layer_5_num_kernels'],
+                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
+                stride=self.agentConfiguration['layer_5_stride'],
+                dilation=self.agentConfiguration['layer_5_dilation'],
+                padding=self.agentConfiguration['layer_5_padding']
+            ),
+            nn.ELU(),
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
+            nn.Conv2d(
+                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                out_channels=numActions,
+                kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
+                stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
+                padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
+                bias=False
+            )
         )
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
@@ -146,20 +222,43 @@ class BradNet(nn.Module):
 
         pixelFeatureMap = self.mainModel(merged)
 
-        presentRewards = self.presentRewardConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
-        discountFutureRewards = self.discountedFutureRewardConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
-        totalReward = (presentRewards + discountFutureRewards)
+        outputDict = {}
 
-        outputDict = {
-            "presentRewards": presentRewards,
-            "discountFutureRewards": discountFutureRewards
-        }
+        if data['computeRewards']:
+            presentRewards = self.presentRewardConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+            discountFutureRewards = self.discountedFutureRewardConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+
+            totalReward = (presentRewards + discountFutureRewards)
+
+            outputDict['presentRewards'] = presentRewards
+            outputDict['discountFutureRewards'] = discountFutureRewards
 
         if data["outputStamp"]:
             outputDict["stamp"] = stamp.detach()
 
         if data["computeActionProbabilities"]:
-            outputDict["actionProbabilities"] = self.actionSoftmax(totalReward.reshape([-1, self.numActions * height * width ])).reshape([-1, self.numActions, height, width]).detach()
+            actorLogProbs = self.actorConvolution(pixelFeatureMap)
+
+            actorActionProbs = torch.exp(actorLogProbs) * data['pixelActionMaps'] / torch.sum((torch.exp(actorLogProbs) * data['pixelActionMaps']).reshape(shape=[-1, width * height * self.numActions]), dim=1)
+            actorActionProbs = actorActionProbs.reshape([-1, self.numActions, height, width])
+
+            outputDict["actionProbabilities"] = actorActionProbs
+
+        if data['computeStateValues']:
+            stateValueMap = self.stateValueConvolution(pixelFeatureMap)
+
+            for actionIndex in range(self.numActions):
+                stateValueMap = stateValueMap * data['pixelActionMaps'][:, actionIndex]
+            
+            flatStateValueMap = stateValueMap.reshape([-1, width * height * self.numActions])
+
+            averageStateValues = torch.sum(flatStateValueMap, dim=1) / (torch.sum(flatStateValueMap != 0, dim=1))
+
+            outputDict['stateValues'] = averageStateValues
+
+        if data['computeAdvantageValues']:
+            advantageValues = self.advantageConvolution(pixelFeatureMap)
+            outputDict['advantage'] = advantageValues
 
         if data['computeExtras']:
             if 'action_type' in data:

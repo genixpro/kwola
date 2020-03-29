@@ -26,10 +26,7 @@ from multiprocessing import Pool
 from kwola.config import config
 
 def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
-    if shouldBeRandom:
-        agent = RandomAgent()
-    else:
-        agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
+    agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
 
     agent.initialize(branchFeatureSize)
     agent.load()
@@ -48,7 +45,7 @@ def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessComma
 
         os.unlink(inferenceBatchFileName)
 
-        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures, lastActions)
+        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures, lastActions, shouldBeRandom=shouldBeRandom)
 
         resultFileDescriptor, resultFileName = tempfile.mkstemp()
         with open(resultFileDescriptor, 'wb') as file:
@@ -210,9 +207,13 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVid
                 with open(os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
                     cloneFile.write(origFile.read())
 
+        totalRewards = []
         for session in executionSessions:
             print(datetime.now(), f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
             session.save()
+            totalRewards.append(session.totalReward)
+
+        print(datetime.now(), f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
 
         testSequence.bugsFound = len(uniqueErrors)
         testSequence.errors = uniqueErrors

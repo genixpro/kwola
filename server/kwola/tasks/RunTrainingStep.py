@@ -50,8 +50,11 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
     else:
         cacheHit = False
 
-        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
-            trainingRewardNormalizer = pickle.load(normalizerFile)
+        if agentConfiguration['enable_reward_normalization']:
+            with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
+                trainingRewardNormalizer = pickle.load(normalizerFile)
+        else:
+            trainingRewardNormalizer = None
 
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
 
@@ -334,6 +337,11 @@ def printMovingAverageLosses(trainingStep):
     averageTotalRewardLoss = numpy.mean(trainingStep.totalRewardLosses[-averageStart:])
     averagePresentRewardLoss = numpy.mean(trainingStep.presentRewardLosses[-averageStart:])
     averageDiscountedFutureRewardLoss = numpy.mean(trainingStep.discountedFutureRewardLosses[-averageStart:])
+
+    averageStateValueLoss = numpy.mean(trainingStep.stateValueLosses[-averageStart:])
+    averageAdvantageLoss = numpy.mean(trainingStep.advantageLosses[-averageStart:])
+    averageActionProbabilityLoss = numpy.mean(trainingStep.actionProbabilityLosses[-averageStart:])
+
     averageTracePredictionLoss = numpy.mean(trainingStep.tracePredictionLosses[-averageStart:])
     averageExecutionFeatureLoss = numpy.mean(trainingStep.executionFeaturesLosses[-averageStart:])
     averageTargetHomogenizationLoss = numpy.mean(trainingStep.targetHomogenizationLosses[-averageStart:])
@@ -344,6 +352,9 @@ def printMovingAverageLosses(trainingStep):
     print(datetime.now(), "Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
     print(datetime.now(), "Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
     print(datetime.now(), "Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
+    print(datetime.now(), "Moving Average State Value Loss:", averageStateValueLoss, flush=True)
+    print(datetime.now(), "Moving Average Advantage Loss:", averageAdvantageLoss, flush=True)
+    print(datetime.now(), "Moving Average Action Probability Loss:", averageActionProbabilityLoss, flush=True)
     print(datetime.now(), "Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
     print(datetime.now(), "Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
     print(datetime.now(), "Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
@@ -429,7 +440,10 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         for subprocessIndex in range(agentConfig['training_batch_prep_subprocesses']):
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessBatchResultQueue = multiprocessing.Queue()
-            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, bool(subprocessIndex==0 and (gpu == 0 or gpu is None)), subprocessIndex))
+
+            createRewardNormalizer = agentConfig['enable_reward_normalization'] and bool(subprocessIndex==0 and (gpu == 0 or gpu is None))
+
+            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer, subprocessIndex))
             subProcess.start()
 
             subProcessCommandQueues.append(subProcessCommandQueue)
@@ -484,13 +498,17 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     batchesPrepared += 1
 
                 if trainingStep.numberOfIterationsCompleted % 3 == 0:
-                    totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, tracePredictionLoss, \
+                    totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
+                        stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
                         executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
                         totalLoss, totalRebalancedLoss, batchReward, \
                         sampleRewardLosses = agent.learnFromBatch(batch, returnLosses=True)
 
                     trainingStep.presentRewardLosses.append(presentRewardLoss)
                     trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
+                    trainingStep.stateValueLosses.append(stateValueLoss)
+                    trainingStep.advantageLosses.append(advantageLoss)
+                    trainingStep.actionProbabilityLosses.append(actionProbabilityLoss)
                     trainingStep.tracePredictionLosses.append(tracePredictionLoss)
                     trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
                     trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)

@@ -40,6 +40,12 @@ class TrainingStep(Document):
 
     totalRebalancedLosses = ListField(FloatField())
 
+    stateValueLosses = ListField(FloatField())
+
+    advantageLosses = ListField(FloatField())
+
+    actionProbabilityLosses = ListField(FloatField())
+
 
 
 

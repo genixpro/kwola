@@ -282,7 +282,7 @@ class WebEnvironmentSession(BaseEnvironment):
 
         self.pathTracer.recentPaths = set()
 
-        uiReactionWaitTime = 0.25
+        uiReactionWaitTime = 0.50
 
         success = True
 
