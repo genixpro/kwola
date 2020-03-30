@@ -651,7 +651,7 @@ class DeepLearningAgent(BaseAgent):
                 image[targetCircleCoordsRadius5] = [255, 0, 0]
 
             def addCropViewToImage(image, trace):
-                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth, imageHeight)
+                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace.actionPerformed.x, trace.actionPerformed.y, imageWidth, imageHeight)
 
                 cropRectangle = skimage.draw.rectangle_perimeter((int(topSize + cropTop), int(leftSize + cropLeft)), (int(topSize + cropBottom), int(leftSize + cropRight)))
                 image[cropRectangle] = [255, 0, 0]
@@ -989,26 +989,28 @@ class DeepLearningAgent(BaseAgent):
         return additionalFeature
 
 
-    def calculateTrainingCropPosition(self, trace, imageWidth, imageHeight, nextStepCrop=False):
+    def calculateTrainingCropPosition(self, centerX, centerY, imageWidth, imageHeight, nextStepCrop=False):
         cropWidth = self.agentConfiguration['training_crop_width']
         cropHeight = self.agentConfiguration['training_crop_height']
         if nextStepCrop:
             cropWidth = self.agentConfiguration['training_next_step_crop_width']
             cropHeight = self.agentConfiguration['training_next_step_crop_height']
 
-        cropLeft = trace.actionPerformed.x - cropWidth / 2
-        cropTop = trace.actionPerformed.y - cropHeight / 2
+        cropLeft = centerX - cropWidth / 2
+        cropTop = centerY - cropHeight / 2
 
         cropLeft = max(0, cropLeft)
         cropLeft = min(imageWidth - cropWidth, cropLeft)
+        cropLeft = int(cropLeft)
 
         cropTop = max(0, cropTop)
         cropTop = min(imageHeight - cropHeight, cropTop)
+        cropTop = int(cropTop)
 
-        cropRight = cropLeft + cropWidth
-        cropBottom = cropTop + cropHeight
+        cropRight = int(cropLeft + cropWidth)
+        cropBottom = int(cropTop + cropHeight)
 
-        return (int(cropLeft), int(cropTop), int(cropRight), int(cropBottom))
+        return (cropLeft, cropTop, cropRight, cropBottom)
 
 
     @staticmethod
@@ -1153,8 +1155,6 @@ class DeepLearningAgent(BaseAgent):
 
             batchTraceIds.append(str(trace.id))
 
-            cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace, imageWidth=width, imageHeight=height)
-
             branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
             decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
             additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
@@ -1163,21 +1163,21 @@ class DeepLearningAgent(BaseAgent):
             nextDecayingExecutionTraceFeature = numpy.array(nextTrace.startDecayingExecutionTrace)
             nextAdditionalFeature = numpy.concatenate([nextBranchFeature, nextDecayingExecutionTraceFeature], axis=0)
 
-            batchProcessedImages.append(processedImage[:, cropTop:cropBottom, cropLeft:cropRight])
+            batchProcessedImages.append(processedImage)
             batchAdditionalFeatures.append(additionalFeature)
 
             batchNextStateProcessedImages.append(nextProcessedImage) # We don't crop the next state, otherwise we couldn't get an accurate estimate of the best possible future value
             batchNextStateAdditionalFeatures.append(nextAdditionalFeature)
 
             pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
-            batchPixelActionMaps.append(pixelActionMap[:, cropTop:cropBottom, cropLeft:cropRight])
+            batchPixelActionMaps.append(pixelActionMap)
 
             nextPixelActionMap = self.createPixelActionMap(nextTrace.actionMaps, height, width)
             batchNextStatePixelActionMaps.append(nextPixelActionMap)
 
             batchActionTypes.append(trace.actionPerformed.type)
-            batchActionXs.append(trace.actionPerformed.x - cropLeft)
-            batchActionYs.append(trace.actionPerformed.y - cropTop)
+            batchActionXs.append(trace.actionPerformed.x)
+            batchActionYs.append(trace.actionPerformed.y)
 
             cursorVector = [0] * len(self.cursors)
             if trace.cursor in self.cursors:
@@ -1209,7 +1209,7 @@ class DeepLearningAgent(BaseAgent):
 
             rewardPixelMask = self.createRewardPixelMask(processedImage, trace.actionPerformed.x, trace.actionPerformed.y)
 
-            batchRewardPixelMasks.append(rewardPixelMask[cropTop:cropBottom, cropLeft:cropRight])
+            batchRewardPixelMasks.append(rewardPixelMask)
 
             batchExecutionFeatures.append(executionFeatures)
 
@@ -1252,6 +1252,9 @@ class DeepLearningAgent(BaseAgent):
         discountRate = self.variableWrapperFunc(torch.FloatTensor, [self.agentConfiguration['reward_discount_rate']])
         actionProbRewardSquareEdgeHalfSize = self.variableWrapperFunc(torch.IntTensor, [int(self.agentConfiguration['training_action_prob_reward_square_size']/2)])
         zeroTensor = self.variableWrapperFunc(torch.IntTensor, [0])
+        oneTensor = self.variableWrapperFunc(torch.IntTensor, [1])
+        oneTensorLong = self.variableWrapperFunc(torch.LongTensor, [1])
+        oneTensorFloat = self.variableWrapperFunc(torch.FloatTensor, [1])
         widthTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[3]])
         heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
         presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
@@ -1312,7 +1315,7 @@ class DeepLearningAgent(BaseAgent):
             nextStatePresentRewardPredictions = nextStateOutputs['presentRewards']
             nextStateDiscountedFutureRewardPredictions = nextStateOutputs['discountFutureRewards']
 
-        totalRewardLosses = []
+        totalSampleLosses = []
         stateValueLosses = []
         advantageLosses = []
         actionProbabilityLosses = []
@@ -1356,9 +1359,11 @@ class DeepLearningAgent(BaseAgent):
             actionProbabilityTargetImage[bestActionType, bestTop:bestBottom, bestLeft:bestRight] = 1
             actionProbabilityTargetImage[bestActionType] *= pixelActionMap[bestActionType]
             countActionProbabilityTargetPixels = actionProbabilityTargetImage[bestActionType].sum()
-            actionProbabilityTargetImage[bestActionType] /= countActionProbabilityTargetPixels
+            # The max here is just for safety, if any weird bugs happen we don't want any NaN values or division by zero
+            actionProbabilityTargetImage[bestActionType] /= torch.max(oneTensorFloat, countActionProbabilityTargetPixels)
 
-            countPixelMask = (rewardPixelMask.sum())
+            # The max here is just for safety, if any weird bugs happen we don't want any NaN values or division by zero
+            countPixelMask = torch.max(oneTensorLong, rewardPixelMask.sum())
 
             presentRewardLossMap = (torchBatchPresentRewards - presentRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
             discountedFutureRewardLossMap = (torchBatchDiscountedFutureRewards - discountedFutureRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
@@ -1388,7 +1393,7 @@ class DeepLearningAgent(BaseAgent):
             stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2)
             stateValueLosses.append(stateValueLoss)
 
-            totalRewardLosses.append(presentRewardLoss + discountedFutureRewardLoss + advantageLoss + actionProbabilityLoss)
+            totalSampleLosses.append(presentRewardLoss + discountedFutureRewardLoss + advantageLoss + actionProbabilityLoss)
 
         extraLosses = []
 
@@ -1478,7 +1483,7 @@ class DeepLearningAgent(BaseAgent):
         if numpy.count_nonzero(numpy.isnan(float(totalLoss.data.item()))) == 0:
             self.optimizer.step()
         else:
-            print(datetime.now(), "ERROR! NaN detected in loss calculation. Skipping optimization step.", flush=True)
+            print(datetime.now(), "ERROR! NaN detected in loss calculation. Skipping optimization step.")
             print(datetime.now(), "presentRewardLoss", float(presentRewardLoss.data.item()))
             print(datetime.now(), "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
             print(datetime.now(), "stateValueLoss", float(stateValueLoss.data.item()))
@@ -1487,7 +1492,7 @@ class DeepLearningAgent(BaseAgent):
             print(datetime.now(), "tracePredictionLoss", float(tracePredictionLoss.data.item()))
             print(datetime.now(), "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
             print(datetime.now(), "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
-            print(datetime.now(), "predictedCursorLoss", float(predictedCursorLoss.data.item()))
+            print(datetime.now(), "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
 
             return
 
@@ -1521,9 +1526,9 @@ class DeepLearningAgent(BaseAgent):
         self.trainingLosses["totalLoss"].append(totalLoss)
         self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
 
-        sampleRewardLosses = [tensor.data.item() for tensor in totalRewardLosses]
+        sampleLosses = [tensor.data.item() for tensor in totalSampleLosses]
 
-        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses
+        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleLosses
 
 
 

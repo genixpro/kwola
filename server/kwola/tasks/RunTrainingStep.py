@@ -78,6 +78,46 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
             if str(executionSession.executionTraces[traceIndex].id) == executionTraceId:
                 sampleBatch = traceBatch
 
+    imageWidth = sampleBatch['processedImages'].shape[3]
+    imageHeight = sampleBatch['processedImages'].shape[2]
+
+    # Calculate the crop positions for the main training image
+    if agentConfiguration['training_enable_image_cropping']:
+        randomXDisplacement = random.randint(-agentConfiguration['training_crop_center_random_x_displacement'], agentConfiguration['training_crop_center_random_x_displacement'])
+        randomYDisplacement = random.randint(-agentConfiguration['training_crop_center_random_y_displacement'], agentConfiguration['training_crop_center_random_y_displacement'])
+
+        cropLeft, cropTop, cropRight, cropBottom = agent.calculateTrainingCropPosition(sampleBatch['actionXs'][0] + randomXDisplacement, sampleBatch['actionYs'][0] + randomYDisplacement, imageWidth, imageHeight)
+    else:
+        cropLeft = 0
+        cropRight = imageWidth
+        cropTop = 0
+        cropBottom = imageHeight
+
+    # Calculate the crop positions for the next state image
+    if agentConfiguration['training_enable_next_state_image_cropping']:
+        nextStateCropCenterX = random.randint(10, imageWidth - 10)
+        nextStateCropCenterY = random.randint(10, imageHeight - 10)
+
+        nextStateCropLeft, nextStateCropTop, nextStateCropRight, nextStateCropBottom = agent.calculateTrainingCropPosition(nextStateCropCenterX, nextStateCropCenterY, imageWidth, imageHeight, nextStepCrop=True)
+    else:
+        nextStateCropLeft = 0
+        nextStateCropRight = imageWidth
+        nextStateCropTop = 0
+        nextStateCropBottom = imageHeight
+
+    # Crop all the input images and update the action x & action y
+    # This is done at this step because the cropping is random
+    # and thus you don't want to store the randomly cropped version
+    # in the redis cache
+    sampleBatch['processedImages'] = sampleBatch['processedImages'][:, :, cropTop:cropBottom, cropLeft:cropRight]
+    sampleBatch['pixelActionMaps'] = sampleBatch['pixelActionMaps'][:, :, cropTop:cropBottom, cropLeft:cropRight]
+    sampleBatch['rewardPixelMasks'] = sampleBatch['rewardPixelMasks'][:, cropTop:cropBottom, cropLeft:cropRight]
+    sampleBatch['actionXs'] = sampleBatch['actionXs'] - cropLeft
+    sampleBatch['actionYs'] = sampleBatch['actionYs'] - cropTop
+
+    sampleBatch['nextProcessedImages'] = sampleBatch['nextProcessedImages'][:, :, nextStateCropTop:nextStateCropBottom, nextStateCropLeft:nextStateCropRight]
+    sampleBatch['nextPixelActionMaps'] = sampleBatch['nextPixelActionMaps'][:, :, nextStateCropTop:nextStateCropBottom, nextStateCropLeft:nextStateCropRight]
+
     # Add augmentation to the processed images. This is done at this stage
     # so that we don't store the augmented version in the redis cache.
     # Instead, we want the pure version in the redis cache and create a
@@ -488,11 +528,13 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                         for subProcessCommandQueue in subProcessCommandQueues:
                             subProcessCommandQueue.put(("starved", {}))
                         starved = True
+                        print(datetime.now(), "GPU pipeline is starved for batches. Switching to starved state.")
                 else:
                     if starved:
                         for subProcessCommandQueue in subProcessCommandQueues:
                             subProcessCommandQueue.put(("full", {}))
                         starved = False
+                        print(datetime.now(), "GPU pipeline is full of batches. Switching to full state")
 
                 if batchesPrepared <= totalBatchesNeeded:
                     # Request another session be prepared
@@ -500,8 +542,7 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
                     batchesPrepared += 1
 
-                with torch.autograd.detect_anomaly():
-                    result = agent.learnFromBatch(batch)
+                result = agent.learnFromBatch(batch)
 
                 if result is not None:
                     totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
