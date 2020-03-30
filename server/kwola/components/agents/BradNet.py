@@ -232,6 +232,8 @@ class BradNet(nn.Module):
 
             outputDict['presentRewards'] = presentRewards
             outputDict['discountFutureRewards'] = discountFutureRewards
+        else:
+            totalReward = None
 
         if data["outputStamp"]:
             outputDict["stamp"] = stamp.detach()
@@ -248,11 +250,16 @@ class BradNet(nn.Module):
         if data['computeStateValues']:
             stateValueMap = self.stateValueConvolution(pixelFeatureMap)
 
-            stateValueMap = stateValueMap * torch.min(torch.ones_like(stateValueMap, dtype=torch.float32), torch.sum(data['pixelActionMaps'], dim=1, dtype=torch.float32))
-            
-            flatStateValueMap = stateValueMap.reshape([-1, width * height])
+            combinedPixelActionMask = torch.min(torch.ones_like(stateValueMap, dtype=torch.float32), torch.sum(data['pixelActionMaps'], dim=1, dtype=torch.float32))
+            stateValueMap = stateValueMap * combinedPixelActionMask
 
-            averageStateValues = torch.sum(flatStateValueMap, dim=1) / (torch.sum(flatStateValueMap != 0, dim=1))
+            flatStateValueMap = stateValueMap.reshape([-1, width * height])
+            flatCombinedPixelActionMask = combinedPixelActionMask.reshape([-1, width * height])
+
+            totalStateValues = torch.sum(flatStateValueMap, dim=1)
+            pixelsWithValue = torch.sum(flatCombinedPixelActionMask != 0, dim=1)
+
+            averageStateValues = totalStateValues / (torch.max(torch.ones_like(pixelsWithValue), pixelsWithValue))
 
             outputDict['stateValues'] = averageStateValues
 

@@ -343,16 +343,16 @@ class WebEnvironmentSession(BaseEnvironment):
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
             if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
-                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
             if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
-                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
             if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
-                print(f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
 
