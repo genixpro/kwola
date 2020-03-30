@@ -21,7 +21,7 @@
   "enable_reward_normalization": false,
   "future_execution_trace_decay_rate": 0.70,
   "iterations_between_db_saves": 25,
-  "iterations_per_training_step": 4000,
+  "iterations_per_training_step": 3500,
   "layer_1_dilation": 1,
   "layer_1_kernel_size": 5,
   "layer_1_num_kernels": 64,
@@ -119,5 +119,6 @@
   "training_learning_rate": 1e-4,
   "training_gradient_exponential_moving_average_decay": 0.97,
   "training_gradient_squared_exponential_moving_average_decay": 0.999,
-  "training_batch_prep_subprocesses": 2
+  "training_batch_prep_subprocesses": 2,
+  "training_action_prob_reward_square_size": 6
 }

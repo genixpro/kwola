@@ -500,12 +500,15 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
                     batchesPrepared += 1
 
-                if trainingStep.numberOfIterationsCompleted % 3 == 0:
+                with torch.autograd.detect_anomaly():
+                    result = agent.learnFromBatch(batch)
+
+                if result is not None:
                     totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
                         stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
                         executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
                         totalLoss, totalRebalancedLoss, batchReward, \
-                        sampleRewardLosses = agent.learnFromBatch(batch, returnLosses=True)
+                        sampleRewardLosses = result
 
                     trainingStep.presentRewardLosses.append(presentRewardLoss)
                     trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
@@ -523,8 +526,6 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
                         for subProcessCommandQueue in subProcessCommandQueues:
                             subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
-                else:
-                    agent.learnFromBatch(batch, returnLosses=False)
 
                 if trainingStep.numberOfIterationsCompleted % agentConfig['training_update_target_network_every'] == (agentConfig['training_update_target_network_every'] - 1):
                     print(datetime.now(), "Updating the target network weights to the current primary network weights.", flush=True)

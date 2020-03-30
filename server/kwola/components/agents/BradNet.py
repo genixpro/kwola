@@ -257,7 +257,7 @@ class BradNet(nn.Module):
             outputDict['stateValues'] = averageStateValues
 
         if data['computeAdvantageValues']:
-            advantageValues = self.advantageConvolution(pixelFeatureMap)
+            advantageValues = self.advantageConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
             outputDict['advantage'] = advantageValues
 
         if data['computeExtras']:

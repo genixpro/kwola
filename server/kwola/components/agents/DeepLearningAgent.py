@@ -69,11 +69,11 @@ class DeepLearningAgent(BaseAgent):
         self.whichGpu = whichGpu
 
         if self.whichGpu == "all":
-            self.variableWrapperFunc = lambda x: x.cuda()
+            self.variableWrapperFunc = lambda t, x: t(x).cuda()
         elif self.whichGpu is None:
-            self.variableWrapperFunc = lambda x: x
+            self.variableWrapperFunc = lambda t, x: t(x)
         else:
-            self.variableWrapperFunc = lambda x: x.cuda(device=f"cuda:{self.whichGpu}")
+            self.variableWrapperFunc = lambda t, x: t(x).cuda(device=f"cuda:{self.whichGpu}")
 
         self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
 
@@ -357,9 +357,9 @@ class DeepLearningAgent(BaseAgent):
                 actions.append((sampleIndex, action))
 
         if len(imageBatch) > 0:
-            imageTensor = self.variableWrapperFunc(torch.FloatTensor(numpy.array(imageBatch)))
-            additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor(numpy.array(additionalFeatureVectorBatch)))
-            pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor(pixelActionMapsBatch))
+            imageTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(imageBatch))
+            additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(additionalFeatureVectorBatch))
+            pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor, pixelActionMapsBatch)
 
             with torch.no_grad():
                 self.model.eval()
@@ -373,10 +373,11 @@ class DeepLearningAgent(BaseAgent):
                     "computeRewards": False,
                     "computeActionProbabilities": True,
                     "computeStateValues": False,
-                    "computeAdvantageValues": False
+                    "computeAdvantageValues": True
                 })
 
                 actionProbabilities = outputs['actionProbabilities'].cpu()
+                # actionProbabilities = outputs['advantage'].cpu()
 
             for sampleIndex, sampleEpsilon, sampleActionProbs, sampleRecentActions, sampleActionMaps in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, recentActionsBatch, actionMapsBatch):
                 weighted = bool(random.random() < sampleEpsilon)
@@ -431,6 +432,7 @@ class DeepLearningAgent(BaseAgent):
                     try:
                         actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
                     except ValueError:
+                        print(datetime.now(), "Error in weighted random choice! Probabilities do not all add up to 1.", flush=True)
                         # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
                         # So instead we just pick an action randomly with no probabilities.
                         actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width))
@@ -817,7 +819,7 @@ class DeepLearningAgent(BaseAgent):
 
                 rewardPixelMaskAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 currentFig += 1
-                rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
+                rewardPixelMask = self.createRewardPixelMask(processedImage, trace.actionPerformed.x, trace.actionPerformed.y)
                 rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
                 rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"), interpolation="bilinear")
                 rewardPixelMaskAxes.set_xticks([])
@@ -838,9 +840,9 @@ class DeepLearningAgent(BaseAgent):
                 with torch.no_grad():
                     self.model.eval()
                     outputs = \
-                        self.modelParallel({"image": self.variableWrapperFunc(torch.FloatTensor(numpy.array([processedImage]))),
-                                    "additionalFeature": self.variableWrapperFunc(torch.FloatTensor([additionalFeature])),
-                                    "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor(numpy.array([pixelActionMap]))),
+                        self.modelParallel({"image": self.variableWrapperFunc(torch.FloatTensor, numpy.array([processedImage])),
+                                    "additionalFeature": self.variableWrapperFunc(torch.FloatTensor, [additionalFeature]),
+                                    "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor, numpy.array([pixelActionMap])),
                                     "outputStamp": True,
                                     "computeExtras": False,
                                     "computeRewards": True,
@@ -878,32 +880,33 @@ class DeepLearningAgent(BaseAgent):
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
+                    minValue = numpy.min(numpy.array(totalRewardPredictions[0][actionIndex]))
 
                     rewardPredictionAxes[actionIndex].set_xticks([])
                     rewardPredictionAxes[actionIndex].set_yticks([])
 
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (3,3), numpy.max)
 
-                    im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap,
-                                                                  vmin=-2.00, vmax=10.00, interpolation="nearest")
-                    rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
+                    im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
+                    rewardPredictionAxes[actionIndex].set_title(f"{action} {minValue:.2f}-{maxValue:.2f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(advantagePredictions[0][actionIndex]))
+                    minValue = numpy.min(numpy.array(advantagePredictions[0][actionIndex]))
 
                     advantagePredictionAxes[actionIndex].set_xticks([])
                     advantagePredictionAxes[actionIndex].set_yticks([])
 
                     advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (3, 3), numpy.max)
 
-                    im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap,
-                                                                     vmin=-6.00, vmax=6.00, interpolation="nearest")
-                    advantagePredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
+                    im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
+                    advantagePredictionAxes[actionIndex].set_title(f"{action} {minValue:.2f}-{maxValue:.2f}")
                     mainFigure.colorbar(im, ax=advantagePredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(actionProbabilities[0][actionIndex]))
+                    minValue = numpy.min(numpy.array(actionProbabilities[0][actionIndex]))
 
                     actionProbabilityPredictionAxes[actionIndex].set_xticks([])
                     actionProbabilityPredictionAxes[actionIndex].set_yticks([])
@@ -911,7 +914,7 @@ class DeepLearningAgent(BaseAgent):
                     actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (3, 3), numpy.max)
 
                     im = actionProbabilityPredictionAxes[actionIndex].imshow(actionProbabilityPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
-                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
+                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {minValue:.3f}-{maxValue:.3f}")
                     mainFigure.colorbar(im, ax=actionProbabilityPredictionAxes[actionIndex], orientation='vertical')
 
                 stampAxes.set_xticks([])
@@ -922,9 +925,9 @@ class DeepLearningAgent(BaseAgent):
 
                 stateValueAxes.set_xticks([])
                 stateValueAxes.set_yticks([])
-                stampIm = stateValueAxes.imshow([[stateValue]], cmap=mainColorMap, interpolation="nearest", vmin=-2.0, vmax=10.0)
-                mainFigure.colorbar(stampIm, ax=stateValueAxes, orientation='vertical')
-                stateValueAxes.set_title("State Value")
+                stateValueIm = stateValueAxes.imshow([[stateValue]], cmap=mainColorMap, interpolation="nearest", vmin=-2.0, vmax=15.0)
+                mainFigure.colorbar(stateValueIm, ax=stateValueAxes, orientation='vertical')
+                stateValueAxes.set_title(f"State Value {stateValue:.3f}")
 
                 # ax.grid()
                 mainFigure.tight_layout()
@@ -969,11 +972,11 @@ class DeepLearningAgent(BaseAgent):
             print(datetime.now(), "Failed to create debug image!", flush=True)
 
 
-    def createRewardPixelMask(self, processedImage, trace):
+    def createRewardPixelMask(self, processedImage, x, y):
         # We use flood-segmentation on the original image to select which pixels we will update reward values for.
         # This works great on UIs because the elements always have big areas of solid-color which respond in the same
         # way.
-        rewardPixelMask = skimage.segmentation.flood(processedImage[0], (int(trace.actionPerformed.y), int(trace.actionPerformed.x)))
+        rewardPixelMask = skimage.segmentation.flood(numpy.array(processedImage[0], dtype=numpy.float32), (int(y), int(x)))
 
         return rewardPixelMask
 
@@ -1204,7 +1207,7 @@ class DeepLearningAgent(BaseAgent):
             # batchDiscountedFutureRewards.append(discountedFutureReward)
             batchPresentRewards.append(presentReward)
 
-            rewardPixelMask = self.createRewardPixelMask(processedImage, trace)
+            rewardPixelMask = self.createRewardPixelMask(processedImage, trace.actionPerformed.x, trace.actionPerformed.y)
 
             batchRewardPixelMasks.append(rewardPixelMask[cropTop:cropBottom, cropLeft:cropRight])
 
@@ -1236,21 +1239,45 @@ class DeepLearningAgent(BaseAgent):
             "cursors": numpy.array(batchCursors, dtype=numpy.uint8)
         }
 
-    def learnFromBatch(self, batch, returnLosses=True):
+    def learnFromBatch(self, batch):
         """
             Runs backprop on the neural network with the given batch.
 
             :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingSequence
             :return:
         """
-        rewardPixelMasks = self.variableWrapperFunc(torch.IntTensor(batch['rewardPixelMasks']))
-        pixelActionMaps = self.variableWrapperFunc(torch.IntTensor(batch['pixelActionMaps']))
-        nextStatePixelActionMaps = self.variableWrapperFunc(torch.IntTensor(batch['nextPixelActionMaps']))
-        discountRate = self.variableWrapperFunc(torch.FloatTensor([self.agentConfiguration['reward_discount_rate']]))
+        rewardPixelMasks = self.variableWrapperFunc(torch.IntTensor, batch['rewardPixelMasks'])
+        pixelActionMaps = self.variableWrapperFunc(torch.IntTensor, batch['pixelActionMaps'])
+        nextStatePixelActionMaps = self.variableWrapperFunc(torch.IntTensor, batch['nextPixelActionMaps'])
+        discountRate = self.variableWrapperFunc(torch.FloatTensor, [self.agentConfiguration['reward_discount_rate']])
+        actionProbRewardSquareEdgeHalfSize = self.variableWrapperFunc(torch.IntTensor, [int(self.agentConfiguration['training_action_prob_reward_square_size']/2)])
+        zeroTensor = self.variableWrapperFunc(torch.IntTensor, [0])
+        widthTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[3]])
+        heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
+        presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
+        processedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['processedImages']))
+        additionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['additionalFeatures'])
+        nextProcessedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextProcessedImages']))
+        nextAdditionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextAdditionalFeatures']))
+
+        if self.agentConfiguration['enable_trace_prediction_loss']:
+            executionTracesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['executionTraces'])
+        else:
+            executionTracesTensor = None
+
+        if self.agentConfiguration['enable_execution_feature_prediction_loss']:
+            executionFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['executionFeatures'])
+        else:
+            executionFeaturesTensor = None
+
+        if self.agentConfiguration['enable_cursor_prediction_loss']:
+            cursorsTensor = self.variableWrapperFunc(torch.FloatTensor, batch['cursors'])
+        else:
+            cursorsTensor = None
 
         currentStateOutputs = self.modelParallel({
-            "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['processedImages']))),
-            "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['additionalFeatures'])),
+            "image": processedImagesTensor,
+            "additionalFeature": additionalFeaturesTensor,
             "pixelActionMaps": pixelActionMaps,
             "action_type": batch['actionTypes'],
             "action_x": batch['actionXs'],
@@ -1271,8 +1298,8 @@ class DeepLearningAgent(BaseAgent):
 
         with torch.no_grad():
             nextStateOutputs = self.targetNetwork({
-                "image": self.variableWrapperFunc(torch.FloatTensor(numpy.array(batch['nextProcessedImages']))),
-                "additionalFeature": self.variableWrapperFunc(torch.FloatTensor(batch['nextAdditionalFeatures'])),
+                "image": nextProcessedImagesTensor,
+                "additionalFeature": nextAdditionalFeaturesTensor,
                 "pixelActionMaps": nextStatePixelActionMaps,
                 "outputStamp": False,
                 "computeExtras": False,
@@ -1295,19 +1322,14 @@ class DeepLearningAgent(BaseAgent):
 
         zippedValues = zip(range(len(presentRewardPredictions)), presentRewardPredictions, discountedFutureRewardPredictions,
                            nextStatePresentRewardPredictions, nextStateDiscountedFutureRewardPredictions,
-                           rewardPixelMasks, batch['presentRewards'], stateValuePredictions, advantagePredictions,
+                           rewardPixelMasks, presentRewardsTensor, stateValuePredictions, advantagePredictions,
                            batch['actionTypes'], batch['actionXs'], batch['actionYs'],
-                           pixelActionMaps, actionProbabilityPredictions)
+                           pixelActionMaps, actionProbabilityPredictions, batch['processedImages'])
 
         for sampleIndex, presentRewardImage, discountedFutureRewardImage,\
             nextStatePresentRewardImage, nextStateDiscountedFutureRewardImage,\
             rewardPixelMask, presentReward, stateValuePrediction, advantageImage,\
-            actionType, actionX, actionY, pixelActionMap, actionProbabilityImage in zippedValues:
-
-            width = presentRewardImage.shape[2]
-            height = presentRewardImage.shape[1]
-            
-            presentReward = self.variableWrapperFunc(torch.FloatTensor([presentReward]))
+            actionType, actionX, actionY, pixelActionMap, actionProbabilityImage, processedImage in zippedValues:
             
             presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
             discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
@@ -1326,21 +1348,27 @@ class DeepLearningAgent(BaseAgent):
             targetAdvantageImage = torch.ones_like(advantageImage[self.actionsSorted.index(actionType)]) * targetAdvantage * rewardPixelMask
 
             bestActionX, bestActionY, bestActionType = self.getActionInfoTensorsFromRewardMap(advantageImage.detach())
-            
             actionProbabilityTargetImage = torch.zeros_like(actionProbabilityImage)
-            actionProbabilityTargetImage[bestActionType, bestActionY, bestActionX] = 1
+            bestLeft = torch.max(bestActionX - actionProbRewardSquareEdgeHalfSize, zeroTensor)
+            bestRight = torch.min(bestActionX + actionProbRewardSquareEdgeHalfSize, widthTensor-1)
+            bestTop = torch.max(bestActionY - actionProbRewardSquareEdgeHalfSize, zeroTensor)
+            bestBottom = torch.min(bestActionY + actionProbRewardSquareEdgeHalfSize, heightTensor-1)
+            actionProbabilityTargetImage[bestActionType, bestTop:bestBottom, bestLeft:bestRight] = 1
+            actionProbabilityTargetImage[bestActionType] *= pixelActionMap[bestActionType]
+            countActionProbabilityTargetPixels = actionProbabilityTargetImage[bestActionType].sum()
+            actionProbabilityTargetImage[bestActionType] /= countActionProbabilityTargetPixels
 
             countPixelMask = (rewardPixelMask.sum())
 
             presentRewardLossMap = (torchBatchPresentRewards - presentRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
             discountedFutureRewardLossMap = (torchBatchDiscountedFutureRewards - discountedFutureRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
             advantageLossMap = (targetAdvantageImage - advantageMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
-            actionProbabilityLossMap = (actionProbabilityTargetImage - actionProbabilityPredictions)
+            actionProbabilityLossMap = (actionProbabilityTargetImage - actionProbabilityImage) * pixelActionMap
 
             presentRewardLoss = presentRewardLossMap.pow(2).sum() / countPixelMask
             discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
             advantageLoss = advantageLossMap.pow(2).sum() / countPixelMask
-            actionProbabilityLoss = actionProbabilityLossMap.abs().sum() / countPixelMask
+            actionProbabilityLoss = actionProbabilityLossMap.abs().sum()
 
             if self.agentConfiguration['enable_homogenization_loss']:
                 pixelFeatureImage = currentStateOutputs['pixelFeatureMap'][sampleIndex]
@@ -1349,7 +1377,7 @@ class DeepLearningAgent(BaseAgent):
                 # from other pixels.
                 targetHomogenizationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).mean(axis=0)
                 targetDifferentiationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * (1.0 - rewardPixelMask)).pow(2).mean(axis=0)
-                targetHomogenizationLoss = torch.abs((targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (width * height - countPixelMask)))
+                targetHomogenizationLoss = torch.abs((targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (widthTensor * heightTensor - countPixelMask)))
                 targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
 
             presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
@@ -1357,7 +1385,7 @@ class DeepLearningAgent(BaseAgent):
             advantageLosses.append(advantageLoss.unsqueeze(0))
             actionProbabilityLosses.append(actionProbabilityLoss.unsqueeze(0))
 
-            stateValueLoss = (stateValuePrediction - (presentReward + discountedFutureReward.detach())).pow(2)
+            stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2)
             stateValueLosses.append(stateValueLoss)
 
             totalRewardLosses.append(presentRewardLoss + discountedFutureRewardLoss + advantageLoss + actionProbabilityLoss)
@@ -1365,24 +1393,24 @@ class DeepLearningAgent(BaseAgent):
         extraLosses = []
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
-            tracePredictionLoss = (currentStateOutputs['predictedTraces'] - self.variableWrapperFunc(torch.FloatTensor(batch['executionTraces']))).abs().mean()
+            tracePredictionLoss = (currentStateOutputs['predictedTraces'] - executionTracesTensor).abs().mean()
             extraLosses.append(tracePredictionLoss)
         else:
-            tracePredictionLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
+            tracePredictionLoss = zeroTensor
 
 
         if self.agentConfiguration['enable_execution_feature_prediction_loss']:
-            predictedExecutionFeaturesLoss = (currentStateOutputs['predictedExecutionFeatures'] - self.variableWrapperFunc(torch.FloatTensor(batch['executionFeatures']))).abs().mean()
+            predictedExecutionFeaturesLoss = (currentStateOutputs['predictedExecutionFeatures'] - executionFeaturesTensor).abs().mean()
             extraLosses.append(predictedExecutionFeaturesLoss)
         else:
-            predictedExecutionFeaturesLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
+            predictedExecutionFeaturesLoss = zeroTensor
 
 
         if self.agentConfiguration['enable_cursor_prediction_loss']:
-            predictedCursorLoss = (currentStateOutputs['predictedCursor'] - self.variableWrapperFunc(torch.FloatTensor(batch['cursors']))).abs().mean()
+            predictedCursorLoss = (currentStateOutputs['predictedCursor'] - cursorsTensor).abs().mean()
             extraLosses.append(predictedCursorLoss)
         else:
-            predictedCursorLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
+            predictedCursorLoss = zeroTensor
 
         presentRewardLoss = torch.mean(torch.cat(presentRewardLosses))
         discountedFutureRewardLoss = torch.mean(torch.cat(discountedFutureRewardLosses))
@@ -1395,7 +1423,7 @@ class DeepLearningAgent(BaseAgent):
             targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
             extraLosses.append(targetHomogenizationLoss)
         else:
-            targetHomogenizationLoss = self.variableWrapperFunc(torch.FloatTensor([0]))
+            targetHomogenizationLoss = zeroTensor
 
         if len(extraLosses) > 0:
             totalLoss = totalRewardLoss + torch.sum(torch.cat(extraLosses))
@@ -1439,51 +1467,63 @@ class DeepLearningAgent(BaseAgent):
                 homogenizationAdustment = 1
 
             totalRebalancedLoss = totalRewardLoss + \
-                                  tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor([tracePredictionAdustment])) + \
-                                  predictedExecutionFeaturesLoss * self.variableWrapperFunc(torch.FloatTensor([executionFeaturesAdustment])) + \
-                                  targetHomogenizationLoss * self.variableWrapperFunc(torch.FloatTensor([homogenizationAdustment])) + \
-                                  predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor([predictedCursorAdustment]))
+                                  tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor, [tracePredictionAdustment]) + \
+                                  predictedExecutionFeaturesLoss * self.variableWrapperFunc(torch.FloatTensor, [executionFeaturesAdustment]) + \
+                                  targetHomogenizationLoss * self.variableWrapperFunc(torch.FloatTensor, [homogenizationAdustment]) + \
+                                  predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor, [predictedCursorAdustment])
 
             totalRebalancedLoss.backward()
-        self.optimizer.step()
 
-        if returnLosses:
-            if numpy.count_nonzero(numpy.isnan(float(totalLoss.data.item()))) != 0:
-                print("ERROR! NaN detected in loss calculation.", flush=True)
+        # Put a check in so that we don't do the optimizer step if there are NaNs in the loss
+        if numpy.count_nonzero(numpy.isnan(float(totalLoss.data.item()))) == 0:
+            self.optimizer.step()
+        else:
+            print(datetime.now(), "ERROR! NaN detected in loss calculation. Skipping optimization step.", flush=True)
+            print(datetime.now(), "presentRewardLoss", float(presentRewardLoss.data.item()))
+            print(datetime.now(), "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
+            print(datetime.now(), "stateValueLoss", float(stateValueLoss.data.item()))
+            print(datetime.now(), "advantageLoss", float(advantageLoss.data.item()))
+            print(datetime.now(), "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
+            print(datetime.now(), "tracePredictionLoss", float(tracePredictionLoss.data.item()))
+            print(datetime.now(), "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
+            print(datetime.now(), "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
+            print(datetime.now(), "predictedCursorLoss", float(predictedCursorLoss.data.item()))
 
-            totalRewardLoss = float(totalRewardLoss.data.item())
-            presentRewardLoss = float(presentRewardLoss.data.item())
-            discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
-            stateValueLoss = float(stateValueLoss.data.item())
-            advantageLoss = float(advantageLoss.data.item())
-            actionProbabilityLoss = float(actionProbabilityLoss.data.item())
-            tracePredictionLoss = float(tracePredictionLoss.data.item())
-            predictedExecutionFeaturesLoss = float(predictedExecutionFeaturesLoss.data.item())
-            targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
-            predictedCursorLoss = float(predictedCursorLoss.data.item())
-            totalLoss = float(totalLoss.data.item())
-            if self.agentConfiguration['enable_loss_balancing']:
-                totalRebalancedLoss = float(totalRebalancedLoss.data.item())
-            else:
-                totalRebalancedLoss = 0
-            batchReward = float(numpy.sum(batch['presentRewards']))
+            return
 
-            self.trainingLosses["totalRewardLoss"].append(totalRewardLoss)
-            self.trainingLosses["presentRewardLoss"].append(presentRewardLoss)
-            self.trainingLosses["discountedFutureRewardLoss"].append(discountedFutureRewardLoss)
-            self.trainingLosses["stateValueLoss"].append(stateValueLoss)
-            self.trainingLosses["advantageLoss"].append(advantageLoss)
-            self.trainingLosses["actionProbabilityLoss"].append(actionProbabilityLoss)
-            self.trainingLosses["tracePredictionLoss"].append(tracePredictionLoss)
-            self.trainingLosses["predictedExecutionFeaturesLoss"].append(predictedExecutionFeaturesLoss)
-            self.trainingLosses["targetHomogenizationLoss"].append(targetHomogenizationLoss)
-            self.trainingLosses["predictedCursorLoss"].append(predictedCursorLoss)
-            self.trainingLosses["totalLoss"].append(totalLoss)
-            self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
+        totalRewardLoss = float(totalRewardLoss.data.item())
+        presentRewardLoss = float(presentRewardLoss.data.item())
+        discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
+        stateValueLoss = float(stateValueLoss.data.item())
+        advantageLoss = float(advantageLoss.data.item())
+        actionProbabilityLoss = float(actionProbabilityLoss.data.item())
+        tracePredictionLoss = float(tracePredictionLoss.data.item())
+        predictedExecutionFeaturesLoss = float(predictedExecutionFeaturesLoss.data.item())
+        targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
+        predictedCursorLoss = float(predictedCursorLoss.data.item())
+        totalLoss = float(totalLoss.data.item())
+        if self.agentConfiguration['enable_loss_balancing']:
+            totalRebalancedLoss = float(totalRebalancedLoss.data.item())
+        else:
+            totalRebalancedLoss = 0
+        batchReward = float(numpy.sum(batch['presentRewards']))
 
-            sampleRewardLosses = [tensor.data.item() for tensor in totalRewardLosses]
+        self.trainingLosses["totalRewardLoss"].append(totalRewardLoss)
+        self.trainingLosses["presentRewardLoss"].append(presentRewardLoss)
+        self.trainingLosses["discountedFutureRewardLoss"].append(discountedFutureRewardLoss)
+        self.trainingLosses["stateValueLoss"].append(stateValueLoss)
+        self.trainingLosses["advantageLoss"].append(advantageLoss)
+        self.trainingLosses["actionProbabilityLoss"].append(actionProbabilityLoss)
+        self.trainingLosses["tracePredictionLoss"].append(tracePredictionLoss)
+        self.trainingLosses["predictedExecutionFeaturesLoss"].append(predictedExecutionFeaturesLoss)
+        self.trainingLosses["targetHomogenizationLoss"].append(targetHomogenizationLoss)
+        self.trainingLosses["predictedCursorLoss"].append(predictedCursorLoss)
+        self.trainingLosses["totalLoss"].append(totalLoss)
+        self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
 
-            return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses
+        sampleRewardLosses = [tensor.data.item() for tensor in totalRewardLosses]
+
+        return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleRewardLosses
 
 
 
