@@ -242,7 +242,9 @@ class BradNet(nn.Module):
             actorLogProbs = self.actorConvolution(pixelFeatureMap)
 
             actorProbExp = torch.exp(actorLogProbs) * data['pixelActionMaps']
-            actorActionProbs = actorProbExp / torch.sum(actorProbExp.reshape(shape=[-1, width * height * self.numActions]), dim=1).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+            actorProbSums = torch.sum(actorProbExp.reshape(shape=[-1, width * height * self.numActions]), dim=1).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+            actorProbSums = torch.max(torch.ones_like(actorProbSums) * 1e-4, actorProbSums)
+            actorActionProbs = actorProbExp / actorProbSums
             actorActionProbs = actorActionProbs.reshape([-1, self.numActions, height, width])
 
             outputDict["actionProbabilities"] = actorActionProbs

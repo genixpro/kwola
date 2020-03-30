@@ -126,5 +126,5 @@
   "training_trace_selection_cache_not_full_state_one_side_bias": 0.5,
   "training_trace_selection_maximum_weight": 3.0,
   "training_trace_selection_minimum_weight": 0.1,
-  "training_update_target_network_every": 10000
+  "training_update_target_network_every": 250
 }
