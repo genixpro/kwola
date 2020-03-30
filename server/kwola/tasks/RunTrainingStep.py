@@ -58,15 +58,13 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
 
         executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
 
-        batch = agent.prepareBatchForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
+        batches = agent.prepareBatchesForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
 
         sampleBatch = None
-        for traceIndex in range(len(executionSession.executionTraces) - 1):
-            traceBatch = {}
-            for key, value in batch.items():
-                traceBatch[key] = value[traceIndex:traceIndex+1]
+        for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
+            traceId = traceBatch['traceIds'][0]
 
-            cacheId = getCacheIdForExecutionTraceId(str(executionSession.executionTraces[traceIndex].id))
+            cacheId = getCacheIdForExecutionTraceId(traceId)
 
             pickleBytes = pickle.dumps(traceBatch)
             compressedPickleBytes = gzip.compress(pickleBytes)
@@ -75,7 +73,7 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
             expiration = agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, agentConfiguration['training_execution_session_cache_expiration_max_additional_random_seconds'])
             sampleCache.set(cacheId, compressedPickleBytes, ex=expiration)
 
-            if str(executionSession.executionTraces[traceIndex].id) == executionTraceId:
+            if traceId == executionTraceId:
                 sampleBatch = traceBatch
 
     imageWidth = sampleBatch['processedImages'].shape[3]
@@ -523,7 +521,7 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     if future.done():
                         ready += 1
 
-                if ready < (agentConfig['training_precompute_batches_count'] / 2):
+                if ready < (agentConfig['training_precompute_batches_count'] / 4):
                     if not starved:
                         for subProcessCommandQueue in subProcessCommandQueues:
                             subProcessCommandQueue.put(("starved", {}))
