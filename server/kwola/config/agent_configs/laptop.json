@@ -50,6 +50,7 @@
   "loss_ratio_homogenization": 1.00,
   "loss_ratio_predicted_cursor": 1.00,
   "loss_ratio_trace_prediction": 1.00,
+  "loss_state_value_weight": 0.1,
   "pixel_features": 16,
   "present_reward_convolution_kernel_size": 1,
   "present_reward_convolution_padding": 1,

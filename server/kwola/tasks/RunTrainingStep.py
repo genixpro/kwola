@@ -325,6 +325,8 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                         lastProcessPoolFutures = list(currentProcessPoolFutures)
                         currentProcessPoolFutures = []
 
+                        print(datetime.now(), f"Resetting batch-prep process pool. New workers: {agentConfig['training_cache_full_batch_prep_workers']}")
+
                         processPool = multiprocessing.pool.Pool(processes=agentConfig['training_cache_full_batch_prep_workers'])
 
                         cacheFullState = True
@@ -333,6 +335,8 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                         lastProcessPool = processPool
                         lastProcessPoolFutures = list(currentProcessPoolFutures)
                         currentProcessPoolFutures = []
+
+                        print(datetime.now(), f"Resetting batch-prep process pool. New workers: {agentConfig['training_max_batch_prep_workers']}")
 
                         processPool = multiprocessing.pool.Pool(processes=agentConfig['training_max_batch_prep_workers'])
 

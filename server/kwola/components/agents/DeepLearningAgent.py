@@ -844,7 +844,10 @@ class DeepLearningAgent(BaseAgent):
 
                 rewardPixelMaskAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 currentFig += 1
-                rewardPixelMask = self.createRewardPixelMask(processedImage, trace.actionPerformed.x, trace.actionPerformed.y)
+                rewardPixelMask = self.createRewardPixelMask(processedImage,
+                                                             int(trace.actionPerformed.x * self.agentConfiguration['model_image_downscale_ratio']),
+                                                             int(trace.actionPerformed.y * self.agentConfiguration['model_image_downscale_ratio'])
+                                                             )
                 rewardPixelCount = numpy.count_nonzero(rewardPixelMask)
                 rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"), interpolation="bilinear")
                 rewardPixelMaskAxes.set_xticks([])
@@ -853,7 +856,7 @@ class DeepLearningAgent(BaseAgent):
 
                 # pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 # currentFig += 1
-                pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, imageHeight, imageWidth)
+                pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, processedImage.shape[1],  processedImage.shape[2])
                 # actionPixelCount = numpy.count_nonzero(pixelActionMap)
                 # pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
                 # pixelActionMapAxes.set_xticks([])
@@ -1239,6 +1242,7 @@ class DeepLearningAgent(BaseAgent):
         oneTensor = self.variableWrapperFunc(torch.IntTensor, [1])
         oneTensorLong = self.variableWrapperFunc(torch.LongTensor, [1])
         oneTensorFloat = self.variableWrapperFunc(torch.FloatTensor, [1])
+        stateValueLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.agentConfiguration['loss_state_value_weight']])
         widthTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[3]])
         heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
         presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
@@ -1378,7 +1382,7 @@ class DeepLearningAgent(BaseAgent):
             advantageLosses.append(advantageLoss.unsqueeze(0))
             actionProbabilityLosses.append(actionProbabilityLoss.unsqueeze(0))
 
-            stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2)
+            stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2) * stateValueLossWeightFloat
             stateValueLosses.append(stateValueLoss)
 
             totalSampleLosses.append(presentRewardLoss + discountedFutureRewardLoss + advantageLoss + actionProbabilityLoss)
