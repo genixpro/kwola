@@ -19,14 +19,18 @@ class BradNet(nn.Module):
 
         self.agentConfiguration['additional_features_stamp_edge_size'] = agentConfiguration['additional_features_stamp_edge_size']
 
+        self.stampSize = self.agentConfiguration['additional_features_stamp_edge_size'] * \
+                         self.agentConfiguration['additional_features_stamp_edge_size'] * \
+                         self.agentConfiguration['additional_features_stamp_depth_size']
+
         self.stampProjection = nn.Linear(
             in_features=additionalFeatureSize,
-            out_features=self.agentConfiguration['additional_features_stamp_edge_size'] * self.agentConfiguration['additional_features_stamp_edge_size']
+            out_features=self.stampSize
         )
 
         self.mainModel = nn.Sequential(
             nn.Conv2d(
-                in_channels=2,
+                in_channels=1,
                 out_channels=self.agentConfiguration['layer_1_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_1_kernel_size'], 
                 stride=self.agentConfiguration['layer_1_stride'], 
@@ -67,14 +71,12 @@ class BradNet(nn.Module):
                 padding=self.agentConfiguration['layer_4_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features']),
-
-            torch.nn.Upsample(scale_factor=8)
+            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features'])
         )
 
         self.stateValueConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'],
+                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                 out_channels=self.agentConfiguration['layer_5_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_5_kernel_size'],
                 stride=self.agentConfiguration['layer_5_stride'],
@@ -90,12 +92,13 @@ class BradNet(nn.Module):
                 stride=self.agentConfiguration['state_value_convolution_stride'],
                 padding=self.agentConfiguration['state_value_convolution_padding'],
                 bias=False
-            )
+            ),
+            torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
         )
 
         self.presentRewardConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'],
+                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                 out_channels=self.agentConfiguration['layer_5_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_5_kernel_size'],
                 stride=self.agentConfiguration['layer_5_stride'],
@@ -111,12 +114,13 @@ class BradNet(nn.Module):
                 stride=self.agentConfiguration['present_reward_convolution_stride'],
                 padding=self.agentConfiguration['present_reward_convolution_padding'],
                 bias=False
-            )
+            ),
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.discountedFutureRewardConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'],
+                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                 out_channels=self.agentConfiguration['layer_5_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_5_kernel_size'],
                 stride=self.agentConfiguration['layer_5_stride'],
@@ -132,12 +136,13 @@ class BradNet(nn.Module):
                 stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
                 padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
                 bias=False
-            )
+            ),
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.actorConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'],
+                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                 out_channels=self.agentConfiguration['layer_5_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_5_kernel_size'],
                 stride=self.agentConfiguration['layer_5_stride'],
@@ -153,12 +158,13 @@ class BradNet(nn.Module):
                 stride=self.agentConfiguration['actor_convolution_stride'],
                 padding=self.agentConfiguration['actor_convolution_padding'],
                 bias=False
-            )
+            ),
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.advantageConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'],
+                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                 out_channels=self.agentConfiguration['layer_5_num_kernels'],
                 kernel_size=self.agentConfiguration['layer_5_kernel_size'],
                 stride=self.agentConfiguration['layer_5_stride'],
@@ -174,13 +180,18 @@ class BradNet(nn.Module):
                 stride=self.agentConfiguration['advantage_convolution_stride'],
                 padding=self.agentConfiguration['advantage_convolution_padding'],
                 bias=False
-            )
+            ),
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+        )
+
+        self.pixelFeatureMapUpsampler = nn.Sequential(
+            torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
         )
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
             self.predictedExecutionTraceLinear = nn.Sequential(
                 nn.Linear(
-                    in_features=self.agentConfiguration['pixel_features'],
+                    in_features=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                     out_features=executionTracePredictorSize
                 ),
                 nn.ELU()
@@ -189,7 +200,7 @@ class BradNet(nn.Module):
         if self.agentConfiguration['enable_execution_feature_prediction_loss']:
             self.predictedExecutionFeaturesLinear = nn.Sequential(
                 nn.Linear(
-                    in_features=self.agentConfiguration['pixel_features'],
+                    in_features=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                     out_features=executionFeaturePredictorSize
                 ),
                 nn.Sigmoid()
@@ -198,7 +209,7 @@ class BradNet(nn.Module):
         if self.agentConfiguration['enable_cursor_prediction_loss']:
             self.predictedCursorLinear = nn.Sequential(
                 nn.Linear(
-                    in_features=self.agentConfiguration['pixel_features'],
+                    in_features=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
                     out_features=cursorCount
                 ),
                 nn.Sigmoid()
@@ -212,21 +223,24 @@ class BradNet(nn.Module):
         width = data['image'].shape[3]
         height = data['image'].shape[2]
 
-        stamp = self.stampProjection(data['additionalFeature']).reshape([-1, self.agentConfiguration['additional_features_stamp_edge_size'], self.agentConfiguration['additional_features_stamp_edge_size']])
+        pixelFeatureMap = self.mainModel(data['image'])
 
-        stampTiler = stamp.repeat([1, int(height / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(width / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])
-        stampLayer = stampTiler[:, :height, :width].reshape([-1, 1, height, width])
+        # Append the stamp layer along side the pixel-by-pixel features
+        stamp = self.stampProjection(data['additionalFeature']).reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'],
+                                                                         self.agentConfiguration['additional_features_stamp_edge_size'],
+                                                                         self.agentConfiguration['additional_features_stamp_edge_size']])
+        featureMapHeight = pixelFeatureMap.shape[2]
+        featureMapWidth = pixelFeatureMap.shape[3]
+        stampTiler = stamp.repeat([1, 1, int(featureMapHeight / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(featureMapWidth / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])
+        stampLayer = stampTiler[:, :, :featureMapHeight, :featureMapWidth].reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'], featureMapHeight, featureMapWidth])
 
-        # Append the stamp layer along side the main image brightness layer
-        merged = torch.cat([stampLayer, data['image']], dim=1)
-
-        pixelFeatureMap = self.mainModel(merged)
+        mergedPixelFeatureMap = torch.cat([stampLayer, pixelFeatureMap], dim=1)
 
         outputDict = {}
 
         if data['computeRewards']:
-            presentRewards = self.presentRewardConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
-            discountFutureRewards = self.discountedFutureRewardConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+            presentRewards = self.presentRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+            discountFutureRewards = self.discountedFutureRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
 
             totalReward = (presentRewards + discountFutureRewards)
 
@@ -239,7 +253,7 @@ class BradNet(nn.Module):
             outputDict["stamp"] = stamp.detach()
 
         if data["computeActionProbabilities"]:
-            actorLogProbs = self.actorConvolution(pixelFeatureMap)
+            actorLogProbs = self.actorConvolution(mergedPixelFeatureMap)
 
             actorProbExp = torch.exp(actorLogProbs) * data['pixelActionMaps']
             actorProbSums = torch.sum(actorProbExp.reshape(shape=[-1, width * height * self.numActions]), dim=1).unsqueeze(1).unsqueeze(1).unsqueeze(1)
@@ -250,7 +264,7 @@ class BradNet(nn.Module):
             outputDict["actionProbabilities"] = actorActionProbs
 
         if data['computeStateValues']:
-            stateValueMap = self.stateValueConvolution(pixelFeatureMap)
+            stateValueMap = self.stateValueConvolution(mergedPixelFeatureMap)
 
             combinedPixelActionMask = torch.min(torch.ones_like(stateValueMap, dtype=torch.float32), torch.sum(data['pixelActionMaps'], dim=1, dtype=torch.float32))
             stateValueMap = stateValueMap * combinedPixelActionMask
@@ -266,7 +280,7 @@ class BradNet(nn.Module):
             outputDict['stateValues'] = averageStateValues
 
         if data['computeAdvantageValues']:
-            advantageValues = self.advantageConvolution(pixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+            advantageValues = self.advantageConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
             outputDict['advantage'] = advantageValues
 
         if data['computeExtras']:
@@ -290,7 +304,7 @@ class BradNet(nn.Module):
 
             forwardFeaturesForAuxillaryLosses = []
             for sampleIndex, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
-                featuresForAuxillaryLosses = pixelFeatureMap[sampleIndex, :, action_y, action_x].unsqueeze(0)
+                featuresForAuxillaryLosses = mergedPixelFeatureMap[sampleIndex, :, int(action_y/8), int(action_x/8)].unsqueeze(0)
                 forwardFeaturesForAuxillaryLosses.append(featuresForAuxillaryLosses)
 
             joinedFeatures = torch.cat(forwardFeaturesForAuxillaryLosses, dim=0)
@@ -302,7 +316,7 @@ class BradNet(nn.Module):
             if self.agentConfiguration['enable_cursor_prediction_loss']:
                 outputDict['predictedCursor'] = self.predictedCursorLinear(joinedFeatures)
             if self.agentConfiguration['enable_homogenization_loss']:
-                outputDict['pixelFeatureMap'] = pixelFeatureMap
+                outputDict['pixelFeatureMap'] = self.pixelFeatureMapUpsampler(mergedPixelFeatureMap)
 
         return outputDict
 

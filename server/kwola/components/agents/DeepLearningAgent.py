@@ -246,7 +246,10 @@ class DeepLearningAgent(BaseAgent):
                 actionTypes.append(self.actionsSorted.index("clear"))
 
             for actionTypeIndex in actionTypes:
-                pixelActionMap[actionTypeIndex, int(element['top']):int(element['bottom']), int(element['left']):int(element['right'])] = 1
+                pixelActionMap[actionTypeIndex, int(element['top'] * self.agentConfiguration['model_image_downscale_ratio'])
+                                                :int(element['bottom'] * self.agentConfiguration['model_image_downscale_ratio']),
+                                                int(element['left'] * self.agentConfiguration['model_image_downscale_ratio'])
+                                                :int(element['right'] * self.agentConfiguration['model_image_downscale_ratio'])] = 1
 
         return pixelActionMap
 
@@ -322,8 +325,10 @@ class DeepLearningAgent(BaseAgent):
                 chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
                 chosenActionMap = sampleActionMaps[chosenActionMapIndex]
 
-                actionX = random.randint(max(0, min(width - 1, chosenActionMap.left)), max(0, min(chosenActionMap.right - 1, width - 1)))
-                actionY = random.randint(max(0, min(height - 1, chosenActionMap.top)), max(0, min(chosenActionMap.bottom - 1, height - 1)))
+                actionX = random.randint(max(0, int(min(width - 1, chosenActionMap.left * self.agentConfiguration['model_image_downscale_ratio']))),
+                                         max(0, int(min(chosenActionMap.right * self.agentConfiguration['model_image_downscale_ratio'] - 1, width - 1))))
+                actionY = random.randint(max(0, int(min(height - 1, chosenActionMap.top * self.agentConfiguration['model_image_downscale_ratio']))),
+                                         max(0, int(min(chosenActionMap.bottom * self.agentConfiguration['model_image_downscale_ratio'] - 1, height - 1))))
 
                 possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
                 possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
@@ -349,7 +354,10 @@ class DeepLearningAgent(BaseAgent):
                 except ValueError:
                     actionType = random.choice(range(len(self.actionsSorted)))
 
-                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
+                action = self.actions[self.actionsSorted[actionType]](
+                            int(actionX / self.agentConfiguration['model_image_downscale_ratio']),
+                            int(actionY / self.agentConfiguration['model_image_downscale_ratio'])
+                )
                 action.source = "random"
                 action.predictedReward = None
                 action.wasRepeatOverride = False
@@ -397,7 +405,7 @@ class DeepLearningAgent(BaseAgent):
                     
                     samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
 
-                    potentialAction = self.actions[self.actionsSorted[actionType]](actionX, actionY)
+                    potentialAction = self.actions[self.actionsSorted[actionType]](int(actionX / self.agentConfiguration['model_image_downscale_ratio']), int(actionY / self.agentConfiguration['model_image_downscale_ratio']))
                     potentialActionMaps = self.getActionMapsIntersectingWithAction(potentialAction, sampleActionMaps)
 
                     # If the network is predicting the same action as it did within the recent turns list, down to the exact pixels
@@ -449,7 +457,7 @@ class DeepLearningAgent(BaseAgent):
                     source = "weighted_random"
                     samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
 
-                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
+                action = self.actions[self.actionsSorted[actionType]](int(actionX / self.agentConfiguration['model_image_downscale_ratio']), int(actionY / self.agentConfiguration['model_image_downscale_ratio']))
                 action.source = source
                 action.predictedReward = samplePredictedReward
                 action.actionMapsAvailable = sampleActionMaps
@@ -880,41 +888,38 @@ class DeepLearningAgent(BaseAgent):
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
-                    minValue = numpy.min(numpy.array(totalRewardPredictions[0][actionIndex]))
 
                     rewardPredictionAxes[actionIndex].set_xticks([])
                     rewardPredictionAxes[actionIndex].set_yticks([])
 
-                    rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (3,3), numpy.max)
+                    rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (4, 4), numpy.max)
 
-                    im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
-                    rewardPredictionAxes[actionIndex].set_title(f"{action} {minValue:.2f}-{maxValue:.2f}")
+                    im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=-2, vmax=20)
+                    rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f}")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(advantagePredictions[0][actionIndex]))
-                    minValue = numpy.min(numpy.array(advantagePredictions[0][actionIndex]))
 
                     advantagePredictionAxes[actionIndex].set_xticks([])
                     advantagePredictionAxes[actionIndex].set_yticks([])
 
-                    advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (3, 3), numpy.max)
+                    advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (4, 4), numpy.max)
 
-                    im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
-                    advantagePredictionAxes[actionIndex].set_title(f"{action} {minValue:.2f}-{maxValue:.2f}")
+                    im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=-3, vmax=5)
+                    advantagePredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f}")
                     mainFigure.colorbar(im, ax=advantagePredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(actionProbabilities[0][actionIndex]))
-                    minValue = numpy.min(numpy.array(actionProbabilities[0][actionIndex]))
 
                     actionProbabilityPredictionAxes[actionIndex].set_xticks([])
                     actionProbabilityPredictionAxes[actionIndex].set_yticks([])
 
-                    actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (3, 3), numpy.max)
+                    actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (4, 4), numpy.max)
 
                     im = actionProbabilityPredictionAxes[actionIndex].imshow(actionProbabilityPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
-                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {minValue:.3f}-{maxValue:.3f}")
+                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
                     mainFigure.colorbar(im, ax=actionProbabilityPredictionAxes[actionIndex], orientation='vertical')
 
                 stampAxes.set_xticks([])
@@ -925,7 +930,7 @@ class DeepLearningAgent(BaseAgent):
 
                 stateValueAxes.set_xticks([])
                 stateValueAxes.set_yticks([])
-                stateValueIm = stateValueAxes.imshow([[stateValue]], cmap=mainColorMap, interpolation="nearest", vmin=-2.0, vmax=15.0)
+                stateValueIm = stateValueAxes.imshow([[stateValue]], cmap=mainColorMap, interpolation="nearest", vmin=-2.0, vmax=20.0)
                 mainFigure.colorbar(stateValueIm, ax=stateValueAxes, orientation='vertical')
                 stateValueAxes.set_title(f"State Value {stateValue:.3f}")
 
@@ -1166,7 +1171,10 @@ class DeepLearningAgent(BaseAgent):
                 trace.hadLogOutput,
             ]
 
-            rewardPixelMask = self.createRewardPixelMask(processedImage, trace.actionPerformed.x, trace.actionPerformed.y)
+            rewardPixelMask = self.createRewardPixelMask(processedImage,
+                                                         int(trace.actionPerformed.x * self.agentConfiguration['model_image_downscale_ratio']),
+                                                         int(trace.actionPerformed.y * self.agentConfiguration['model_image_downscale_ratio'])
+                                                         )
 
             # We down-sample some of the data points in the batch to be more compact.
             # We don't need a high precision for most of this data, so its better to be compact and save the ram
@@ -1182,8 +1190,8 @@ class DeepLearningAgent(BaseAgent):
                 "nextPixelActionMaps": numpy.array([nextPixelActionMap], dtype=numpy.uint8),
 
                 "actionTypes": [trace.actionPerformed.type],
-                "actionXs": numpy.array([trace.actionPerformed.x], dtype=numpy.int16),
-                "actionYs": numpy.array([trace.actionPerformed.y], dtype=numpy.int16),
+                "actionXs": numpy.array([int(trace.actionPerformed.x * self.agentConfiguration['model_image_downscale_ratio'])], dtype=numpy.int16),
+                "actionYs": numpy.array([int(trace.actionPerformed.y * self.agentConfiguration['model_image_downscale_ratio'])], dtype=numpy.int16),
                 "executionTraces": numpy.array([executionTrace], dtype=numpy.int8),
 
                 "presentRewards": numpy.array([presentReward], dtype=numpy.float32),
@@ -1486,10 +1494,21 @@ class DeepLearningAgent(BaseAgent):
 
 
 def processRawImageParallel(rawImage):
-    # shrunk = skimage.transform.resize(image, [int(width / 2), int(height / 2)])
+    width = rawImage.shape[1]
+    height = rawImage.shape[0]
+
+    grey = skimage.color.rgb2gray(rawImage[:, :, :3])
+
+    shrunkWidth = int(width * config.getAgentConfiguration()['model_image_downscale_ratio'])
+    shrunkHeight = int(height * config.getAgentConfiguration()['model_image_downscale_ratio'])
+
+    shrunkWidth += 8 - (shrunkWidth % 8)
+    shrunkHeight += 8 - (shrunkHeight % 8)
+
+    shrunk = skimage.transform.resize(grey, (shrunkHeight, shrunkWidth), anti_aliasing=True)
 
     # Convert to grey-scale image
-    processedImage = numpy.array([skimage.color.rgb2gray(rawImage[:, :, :3])])
+    processedImage = numpy.array([shrunk])
 
     # Round the float values down to 0. This minimizes some the error introduced by the video codecs
     processedImage = numpy.around(processedImage, decimals=2)

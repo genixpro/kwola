@@ -355,6 +355,11 @@ class WebEnvironmentSession(BaseEnvironment):
                 print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
+        except AttributeError as e:
+            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+
+            success = False
 
         executionTrace.didActionSucceed = success
 

@@ -504,6 +504,7 @@ def runTrainingStep(trainingSequenceId, gpu=None):
 
         recentCacheHits = []
         starved = False
+        lastStarveStateAdjustment = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=agentConfig['training_max_batch_prep_thread_workers'] * agentConfig['training_batch_prep_subprocesses']) as threadExecutor:
             # First we chuck some batch requests into the queue.
@@ -521,18 +522,21 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                     if future.done():
                         ready += 1
 
-                if ready < (agentConfig['training_precompute_batches_count'] / 4):
-                    if not starved:
-                        for subProcessCommandQueue in subProcessCommandQueues:
-                            subProcessCommandQueue.put(("starved", {}))
-                        starved = True
-                        print(datetime.now(), "GPU pipeline is starved for batches. Switching to starved state.")
-                else:
-                    if starved:
-                        for subProcessCommandQueue in subProcessCommandQueues:
-                            subProcessCommandQueue.put(("full", {}))
-                        starved = False
-                        print(datetime.now(), "GPU pipeline is full of batches. Switching to full state")
+                if trainingStep.numberOfIterationsCompleted > (lastStarveStateAdjustment + agentConfig['training_min_batches_between_starve_state_adjustments']):
+                    if ready < (agentConfig['training_precompute_batches_count'] / 4):
+                        if not starved:
+                            for subProcessCommandQueue in subProcessCommandQueues:
+                                subProcessCommandQueue.put(("starved", {}))
+                            starved = True
+                            print(datetime.now(), "GPU pipeline is starved for batches. Switching to starved state.", flush=True)
+                            lastStarveStateAdjustment = trainingStep.numberOfIterationsCompleted
+                    else:
+                        if starved:
+                            for subProcessCommandQueue in subProcessCommandQueues:
+                                subProcessCommandQueue.put(("full", {}))
+                            starved = False
+                            print(datetime.now(), "GPU pipeline is full of batches. Switching to full state", flush=True)
+                            lastStarveStateAdjustment = trainingStep.numberOfIterationsCompleted
 
                 if batchesPrepared <= totalBatchesNeeded:
                     # Request another session be prepared
