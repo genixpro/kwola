@@ -219,8 +219,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                              .no_dereference()
                              .order_by('-startTime')
                              .only('status', 'startTime', 'executionSessions')
-                             .limit(int(agentConfig['training_number_of_recent_testing_sequences_to_use']/agentConfig['training_batch_prep_subprocesses']))
-                             .skip(int(subprocessIndex * int(agentConfig['training_number_of_recent_testing_sequences_to_use']/agentConfig['training_batch_prep_subprocesses'])))
+                             .limit(int(agentConfig['training_number_of_recent_testing_sequences_to_use']))
                          )
 
         if len(testSequences) == 0:
@@ -231,10 +230,11 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         executionSessionIds = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=int(agentConfig['training_max_initialization_workers']/agentConfig['training_batch_prep_subprocesses'])) as executor:
             executionSessionFutures = []
-            for testSequence in testSequences:
-                for session in testSequence.executionSessions:
-                    executionSessionIds.append(str(session['_ref'].id))
-                    executionSessionFutures.append(executor.submit(loadExecutionSession, session['_ref'].id))
+            for testSequenceIndex, testSequence in enumerate(testSequences):
+                if testSequenceIndex % agentConfig['training_batch_prep_subprocesses'] == subprocessIndex:
+                    for session in testSequence.executionSessions:
+                        executionSessionIds.append(str(session['_ref'].id))
+                        executionSessionFutures.append(executor.submit(loadExecutionSession, session['_ref'].id))
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
@@ -325,7 +325,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                         lastProcessPoolFutures = list(currentProcessPoolFutures)
                         currentProcessPoolFutures = []
 
-                        print(datetime.now(), f"Resetting batch-prep process pool. New workers: {agentConfig['training_cache_full_batch_prep_workers']}")
+                        print(datetime.now(), f"Resetting batch prep process pool. Cache full state. New workers: {agentConfig['training_cache_full_batch_prep_workers']}")
 
                         processPool = multiprocessing.pool.Pool(processes=agentConfig['training_cache_full_batch_prep_workers'])
 
@@ -336,7 +336,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                         lastProcessPoolFutures = list(currentProcessPoolFutures)
                         currentProcessPoolFutures = []
 
-                        print(datetime.now(), f"Resetting batch-prep process pool. New workers: {agentConfig['training_max_batch_prep_workers']}")
+                        print(datetime.now(), f"Resetting batch prep process pool. Cache starved state. New workers: {agentConfig['training_max_batch_prep_workers']}")
 
                         processPool = multiprocessing.pool.Pool(processes=agentConfig['training_max_batch_prep_workers'])
 
@@ -518,7 +518,13 @@ def runTrainingStep(trainingSequenceId, gpu=None):
                 batchesPrepared += 1
 
             while trainingStep.numberOfIterationsCompleted < agentConfig['iterations_per_training_step']:
-                batch, cacheHitRate = batchFutures.pop(0).result()
+                chosenBatchIndex = 0
+                for futureIndex, future in enumerate(batchFutures):
+                    if future.done():
+                        chosenBatchIndex = futureIndex
+                        break
+
+                batch, cacheHitRate = batchFutures.pop(chosenBatchIndex).result()
                 recentCacheHits.append(float(cacheHitRate))
 
                 ready = 0

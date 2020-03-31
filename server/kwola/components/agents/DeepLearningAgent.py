@@ -282,6 +282,8 @@ class DeepLearningAgent(BaseAgent):
         actionMapsBatch = []
         recentActionsCountsBatch = []
 
+        modelDownscale = self.agentConfiguration['model_image_downscale_ratio']
+
         for sampleIndex, image, additionalFeatureVector, sampleActionMaps, sampleRecentActions in zip(range(len(processedImages)), processedImages, additionalFeatures, envActionMaps, recentActions):
             randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
             weightedRandomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
@@ -290,7 +292,7 @@ class DeepLearningAgent(BaseAgent):
             filteredSampleActionRecentActionCounts = []
             for map in sampleActionMaps:
                 # Check to see if the map is out of the screen
-                if map.top > height or map.bottom < 0 or map.left > width or map.right < 0:
+                if (map.top * modelDownscale) > height or (map.bottom * modelDownscale) < 0 or (map.left * modelDownscale) > width or (map.right * modelDownscale) < 0:
                     # skip this action map, don't add it to the filtered list
                     continue
 
@@ -325,8 +327,8 @@ class DeepLearningAgent(BaseAgent):
                 actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap)
 
                 action = self.actions[self.actionsSorted[actionType]](
-                            int(actionX / self.agentConfiguration['model_image_downscale_ratio']),
-                            int(actionY / self.agentConfiguration['model_image_downscale_ratio'])
+                            int(actionX / modelDownscale),
+                            int(actionY / modelDownscale)
                 )
                 action.source = "random"
                 action.predictedReward = None
@@ -613,7 +615,7 @@ class DeepLearningAgent(BaseAgent):
         mpl.use('Agg')
         mpl.rcParams['figure.max_open_warning'] = 1000
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             futures = []
             for trace, rawImage in zip(executionSession.executionTraces, rawImages):
                 future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
@@ -894,6 +896,9 @@ class DeepLearningAgent(BaseAgent):
                     actionY = actionProbabilities[0][actionIndex].max(axis=1).argmax(axis=0)
                     actionX = actionProbabilities[0][actionIndex, actionY].argmax(axis=0)
 
+                    actionX = int(actionX / self.agentConfiguration["model_image_downscale_ratio"])
+                    actionY = int(actionY / self.agentConfiguration["model_image_downscale_ratio"])
+
                     targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + actionY),
                                                                               int(leftSize + actionX), 10,
                                                                               shape=[int(imageWidth + extraWidth),
@@ -916,7 +921,7 @@ class DeepLearningAgent(BaseAgent):
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (4, 4), numpy.max)
 
                     im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=-2, vmax=20)
-                    rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f}")
+                    rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f} reward")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
@@ -928,7 +933,7 @@ class DeepLearningAgent(BaseAgent):
                     advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (4, 4), numpy.max)
 
                     im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=-3, vmax=5)
-                    advantagePredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f}")
+                    advantagePredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f} advantage")
                     mainFigure.colorbar(im, ax=advantagePredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
@@ -940,7 +945,7 @@ class DeepLearningAgent(BaseAgent):
                     actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (4, 4), numpy.max)
 
                     im = actionProbabilityPredictionAxes[actionIndex].imshow(actionProbabilityPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
-                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f}")
+                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f} prob")
                     mainFigure.colorbar(im, ax=actionProbabilityPredictionAxes[actionIndex], orientation='vertical')
 
                 stampAxes.set_xticks([])

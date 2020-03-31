@@ -238,6 +238,8 @@ class WebEnvironmentSession(BaseEnvironment):
                 
                 if (element.tagName === "INPUT" && !(element.getAttribute("type") === "text" 
                                                      || element.getAttribute("type") === "" 
+                                                     || element.getAttribute("type") === "password"
+                                                     || element.getAttribute("type") === "email"
                                                      || element.getAttribute("type") === null 
                                                      || element.getAttribute("type") === undefined 
                                                      || !element.getAttribute("type")
