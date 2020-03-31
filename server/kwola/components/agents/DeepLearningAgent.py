@@ -1205,7 +1205,7 @@ class DeepLearningAgent(BaseAgent):
                 "processedImages": numpy.array([processedImage], dtype=numpy.float16),
                 "additionalFeatures": numpy.array([additionalFeature], dtype=numpy.float16),
                 "pixelActionMaps": numpy.array([pixelActionMap], dtype=numpy.uint8),
-                "stepNumbers": numpy.array([trace.frameNumber - 1], dtype=numpy.uint32),
+                "stepNumbers": numpy.array([trace.frameNumber - 1], dtype=numpy.int32),
 
                 "nextProcessedImages": numpy.array([nextProcessedImage], dtype=numpy.float16),
                 "nextAdditionalFeatures": numpy.array([nextAdditionalFeature], dtype=numpy.float16),

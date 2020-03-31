@@ -232,7 +232,7 @@ class BradNet(nn.Module):
         pixelFeatureMap = self.mainModel(data['image'])
 
         # Concatenate the step number with the rest of the additional features
-        additionalFeaturesWithStep = torch.cat([torch.log10(data['stepNumber']).reshape([-1, 1]), self.stampProjection(data['additionalFeature'])], dim=1)
+        additionalFeaturesWithStep = torch.cat([torch.log10(data['stepNumber'] + torch.ones_like(data['stepNumber'])).reshape([-1, 1]), self.stampProjection(data['additionalFeature'])], dim=1)
 
         # Append the stamp layer along side the pixel-by-pixel features
         stamp = additionalFeaturesWithStep.reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'],
