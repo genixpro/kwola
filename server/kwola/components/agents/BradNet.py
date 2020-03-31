@@ -23,9 +23,15 @@ class BradNet(nn.Module):
                          self.agentConfiguration['additional_features_stamp_edge_size'] * \
                          self.agentConfiguration['additional_features_stamp_depth_size']
 
-        self.stampProjection = nn.Linear(
-            in_features=additionalFeatureSize,
-            out_features=self.stampSize
+        self.timeEncodingSize = 1
+
+        self.stampProjection = nn.Sequential(
+            nn.Linear(
+                in_features=additionalFeatureSize,
+                out_features=self.stampSize - self.timeEncodingSize
+            ),
+            nn.ELU(),
+            nn.BatchNorm1d(num_features=self.stampSize - self.timeEncodingSize)
         )
 
         self.mainModel = nn.Sequential(
@@ -225,10 +231,14 @@ class BradNet(nn.Module):
 
         pixelFeatureMap = self.mainModel(data['image'])
 
+        # Concatenate the step number with the rest of the additional features
+        additionalFeaturesWithStep = torch.cat([torch.log10(data['stepNumber']).reshape([-1, 1]), self.stampProjection(data['additionalFeature'])], dim=1)
+
         # Append the stamp layer along side the pixel-by-pixel features
-        stamp = self.stampProjection(data['additionalFeature']).reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'],
-                                                                         self.agentConfiguration['additional_features_stamp_edge_size'],
-                                                                         self.agentConfiguration['additional_features_stamp_edge_size']])
+        stamp = additionalFeaturesWithStep.reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'],
+                                                    self.agentConfiguration['additional_features_stamp_edge_size'],
+                                                    self.agentConfiguration['additional_features_stamp_edge_size']])
+
         featureMapHeight = pixelFeatureMap.shape[2]
         featureMapWidth = pixelFeatureMap.shape[3]
         stampTiler = stamp.repeat([1, 1, int(featureMapHeight / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(featureMapWidth / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])

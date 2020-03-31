@@ -215,7 +215,7 @@ class DeepLearningAgent(BaseAgent):
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for image in images:
-                convertedImageFuture = executor.submit(processRawImageParallel, image)
+                convertedImageFuture = executor.submit(DeepLearningAgent.processRawImageParallel, image)
                 convertedImageFutures.append(convertedImageFuture)
 
         convertedProcessedImages = [
@@ -280,6 +280,7 @@ class DeepLearningAgent(BaseAgent):
         epsilonsPerSample = []
         recentActionsBatch = []
         actionMapsBatch = []
+        recentActionsCountsBatch = []
 
         for sampleIndex, image, additionalFeatureVector, sampleActionMaps, sampleRecentActions in zip(range(len(processedImages)), processedImages, additionalFeatures, envActionMaps, recentActions):
             randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.agentConfiguration['testing_sequence_length']))
@@ -319,40 +320,9 @@ class DeepLearningAgent(BaseAgent):
                 pixelActionMapsBatch.append(pixelActionMap)
                 recentActionsBatch.append(sampleRecentActions)
                 epsilonsPerSample.append(weightedRandomActionProbability)
+                recentActionsCountsBatch.append(sampleActionRecentActionCounts)
             else:
-                actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, 0.5) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)
-
-                chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
-                chosenActionMap = sampleActionMaps[chosenActionMapIndex]
-
-                actionX = random.randint(max(0, int(min(width - 1, chosenActionMap.left * self.agentConfiguration['model_image_downscale_ratio']))),
-                                         max(0, int(min(chosenActionMap.right * self.agentConfiguration['model_image_downscale_ratio'] - 1, width - 1))))
-                actionY = random.randint(max(0, int(min(height - 1, chosenActionMap.top * self.agentConfiguration['model_image_downscale_ratio']))),
-                                         max(0, int(min(chosenActionMap.bottom * self.agentConfiguration['model_image_downscale_ratio'] - 1, height - 1))))
-
-                possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
-                possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
-                possibleActionWeights = [self.actionBaseWeights[actionIndex] for actionIndex in possibleActionIndexes]
-
-                possibleActionBoosts = []
-                for actionIndex in possibleActionIndexes:
-                    boostKeywords = self.actionProbabilityBoostKeywords[actionIndex]
-
-                    boost = False
-                    for keyword in boostKeywords:
-                        if keyword in chosenActionMap.keywords:
-                            boost = True
-                            break
-
-                    if boost:
-                        possibleActionBoosts.append(1.5)
-                    else:
-                        possibleActionBoosts.append(1.0)
-
-                try:
-                    actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(numpy.array(possibleActionWeights) * numpy.array(possibleActionBoosts)))
-                except ValueError:
-                    actionType = random.choice(range(len(self.actionsSorted)))
+                actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap)
 
                 action = self.actions[self.actionsSorted[actionType]](
                             int(actionX / self.agentConfiguration['model_image_downscale_ratio']),
@@ -368,6 +338,7 @@ class DeepLearningAgent(BaseAgent):
             imageTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(imageBatch))
             additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(additionalFeatureVectorBatch))
             pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor, pixelActionMapsBatch)
+            stepNumberTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array([stepNumber] * len(imageBatch)))
 
             with torch.no_grad():
                 self.model.eval()
@@ -376,6 +347,7 @@ class DeepLearningAgent(BaseAgent):
                     "image": imageTensor,
                     "additionalFeature": additionalFeatureTensor,
                     "pixelActionMaps": pixelActionMapTensor,
+                    "stepNumber": stepNumberTensor,
                     "outputStamp": False,
                     "computeExtras": False,
                     "computeRewards": False,
@@ -387,7 +359,7 @@ class DeepLearningAgent(BaseAgent):
                 actionProbabilities = outputs['actionProbabilities'].cpu()
                 # actionProbabilities = outputs['advantage'].cpu()
 
-            for sampleIndex, sampleEpsilon, sampleActionProbs, sampleRecentActions, sampleActionMaps in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, recentActionsBatch, actionMapsBatch):
+            for sampleIndex, sampleEpsilon, sampleActionProbs, sampleRecentActions, sampleActionMaps, sampleActionRecentActionCounts, samplePixelActionMap in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, recentActionsBatch, actionMapsBatch, recentActionsCountsBatch, pixelActionMapsBatch):
                 weighted = bool(random.random() < sampleEpsilon)
                 override = False
                 source = None
@@ -398,7 +370,7 @@ class DeepLearningAgent(BaseAgent):
                 if not weighted:
                     source = "prediction"
 
-                    actionX, actionY, actionType  = self.getActionInfoTensorsFromRewardMap(sampleActionProbs)
+                    actionX, actionY, actionType = self.getActionInfoTensorsFromRewardMap(sampleActionProbs)
                     actionX = actionX.data.item()
                     actionY = actionY.data.item()
                     actionType = actionType.data.item()
@@ -437,25 +409,30 @@ class DeepLearningAgent(BaseAgent):
 
                 if weighted:
                     reshaped = numpy.array(sampleActionProbs.data).reshape([len(self.actionsSorted) * height * width])
+                    reshapedSum = numpy.sum(reshaped)
+                    if reshapedSum > 0:
+                        reshaped = reshaped / reshapedSum
+
                     try:
                         actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
+
+                        newProbs = numpy.zeros([len(self.actionsSorted) * height * width])
+                        newProbs[actionIndex] = 1
+
+                        newProbs = newProbs.reshape([len(self.actionsSorted), height * width])
+                        actionType = newProbs.max(axis=1).argmax(axis=0)
+                        newProbs = newProbs.reshape([len(self.actionsSorted), height, width])
+                        actionY = newProbs[actionType].max(axis=1).argmax(axis=0)
+                        actionX = newProbs[actionType, actionY].argmax(axis=0)
+
+                        source = "weighted_random"
+                        samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
                     except ValueError:
-                        print(datetime.now(), "Error in weighted random choice! Probabilities do not all add up to 1.", flush=True)
+                        print(datetime.now(), "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
                         # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
-                        # So instead we just pick an action randomly with no probabilities.
-                        actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width))
-
-                    newProbs = numpy.zeros([len(self.actionsSorted) * height * width])
-                    newProbs[actionIndex] = 1
-
-                    newProbs = newProbs.reshape([len(self.actionsSorted), height * width])
-                    actionType = newProbs.max(axis=1).argmax(axis=0)
-                    newProbs = newProbs.reshape([len(self.actionsSorted), height, width])
-                    actionY = newProbs[actionType].max(axis=1).argmax(axis=0)
-                    actionX = newProbs[actionType, actionY].argmax(axis=0)
-
-                    source = "weighted_random"
-                    samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
+                        # So instead we just pick an action randomly.
+                        actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, samplePixelActionMap)
+                        source = "random"
 
                 action = self.actions[self.actionsSorted[actionType]](int(actionX / self.agentConfiguration['model_image_downscale_ratio']), int(actionY / self.agentConfiguration['model_image_downscale_ratio']))
                 action.source = source
@@ -467,6 +444,46 @@ class DeepLearningAgent(BaseAgent):
         sortedActions = sorted(actions, key=lambda row: row[0])
 
         return [action[1] for action in sortedActions]
+
+    def getRandomAction(self, sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap):
+        width = pixelActionMap.shape[2]
+        height = pixelActionMap.shape[1]
+
+        actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, 0.5) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)
+
+        chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
+        chosenActionMap = sampleActionMaps[chosenActionMapIndex]
+
+        actionX = random.randint(max(0, int(min(width - 1, chosenActionMap.left * self.agentConfiguration['model_image_downscale_ratio']))),
+                                 max(0, int(min(chosenActionMap.right * self.agentConfiguration['model_image_downscale_ratio'] - 1, width - 1))))
+        actionY = random.randint(max(0, int(min(height - 1, chosenActionMap.top * self.agentConfiguration['model_image_downscale_ratio']))),
+                                 max(0, int(min(chosenActionMap.bottom * self.agentConfiguration['model_image_downscale_ratio'] - 1, height - 1))))
+
+        possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
+        possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+        possibleActionWeights = [self.actionBaseWeights[actionIndex] for actionIndex in possibleActionIndexes]
+
+        possibleActionBoosts = []
+        for actionIndex in possibleActionIndexes:
+            boostKeywords = self.actionProbabilityBoostKeywords[actionIndex]
+
+            boost = False
+            for keyword in boostKeywords:
+                if keyword in chosenActionMap.keywords:
+                    boost = True
+                    break
+
+            if boost:
+                possibleActionBoosts.append(1.5)
+            else:
+                possibleActionBoosts.append(1.0)
+
+        try:
+            actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(numpy.array(possibleActionWeights) * numpy.array(possibleActionBoosts)))
+        except ValueError:
+            actionType = random.choice(range(len(self.actionsSorted)))
+
+        return actionX, actionY, actionType
 
     @staticmethod
     def computePresentRewards(executionSession):
@@ -823,7 +840,7 @@ class DeepLearningAgent(BaseAgent):
                 stateValueAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 currentFig += 1
 
-                processedImage = processRawImageParallel(rawImage)
+                processedImage = DeepLearningAgent.processRawImageParallel(rawImage)
 
                 rewardPixelMaskAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 currentFig += 1
@@ -851,6 +868,7 @@ class DeepLearningAgent(BaseAgent):
                         self.modelParallel({"image": self.variableWrapperFunc(torch.FloatTensor, numpy.array([processedImage])),
                                     "additionalFeature": self.variableWrapperFunc(torch.FloatTensor, [additionalFeature]),
                                     "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor, numpy.array([pixelActionMap])),
+                                    "stepNumber": self.variableWrapperFunc(torch.FloatTensor, numpy.array([trace.frameNumber - 1])),
                                     "outputStamp": True,
                                     "computeExtras": False,
                                     "computeRewards": True,
@@ -924,7 +942,10 @@ class DeepLearningAgent(BaseAgent):
 
                 stampAxes.set_xticks([])
                 stampAxes.set_yticks([])
-                stampIm = stampAxes.imshow(stamp.data[0], cmap=greyColorMap, interpolation="nearest", vmin=-20.0, vmax=20.0)
+                stampImageWidth = self.agentConfiguration['additional_features_stamp_edge_size'] * self.agentConfiguration['additional_features_stamp_edge_size']
+                stampImageHeight = self.agentConfiguration['additional_features_stamp_depth_size']
+
+                stampIm = stampAxes.imshow(numpy.array(stamp.data[0]).reshape([stampImageWidth, stampImageHeight]), cmap=greyColorMap, interpolation="nearest", vmin=-20.0, vmax=20.0)
                 mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
                 stampAxes.set_title("Memory Stamp")
 
@@ -1099,7 +1120,7 @@ class DeepLearningAgent(BaseAgent):
 
         videoPath = config.getKwolaUserDataDirectory("videos")
         for rawImage in DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')):
-            processedImage = processRawImageParallel(rawImage)
+            processedImage = DeepLearningAgent.processRawImageParallel(rawImage)
             processedImages.append(processedImage)
 
         # First compute the present reward at each time step
@@ -1184,10 +1205,12 @@ class DeepLearningAgent(BaseAgent):
                 "processedImages": numpy.array([processedImage], dtype=numpy.float16),
                 "additionalFeatures": numpy.array([additionalFeature], dtype=numpy.float16),
                 "pixelActionMaps": numpy.array([pixelActionMap], dtype=numpy.uint8),
+                "stepNumbers": numpy.array([trace.frameNumber - 1], dtype=numpy.uint32),
 
                 "nextProcessedImages": numpy.array([nextProcessedImage], dtype=numpy.float16),
                 "nextAdditionalFeatures": numpy.array([nextAdditionalFeature], dtype=numpy.float16),
                 "nextPixelActionMaps": numpy.array([nextPixelActionMap], dtype=numpy.uint8),
+                "nextStepNumbers": numpy.array([nextTrace.frameNumber], dtype=numpy.uint8),
 
                 "actionTypes": [trace.actionPerformed.type],
                 "actionXs": numpy.array([int(trace.actionPerformed.x * self.agentConfiguration['model_image_downscale_ratio'])], dtype=numpy.int16),
@@ -1221,8 +1244,10 @@ class DeepLearningAgent(BaseAgent):
         presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
         processedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['processedImages']))
         additionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['additionalFeatures'])
+        stepNumberTensor = self.variableWrapperFunc(torch.FloatTensor, batch['stepNumbers'])
         nextProcessedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextProcessedImages']))
         nextAdditionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextAdditionalFeatures']))
+        nextStepNumbers = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextStepNumbers']))
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
             executionTracesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['executionTraces'])
@@ -1243,6 +1268,7 @@ class DeepLearningAgent(BaseAgent):
             "image": processedImagesTensor,
             "additionalFeature": additionalFeaturesTensor,
             "pixelActionMaps": pixelActionMaps,
+            "stepNumber": stepNumberTensor,
             "action_type": batch['actionTypes'],
             "action_x": batch['actionXs'],
             "action_y": batch['actionYs'],
@@ -1265,6 +1291,7 @@ class DeepLearningAgent(BaseAgent):
                 "image": nextProcessedImagesTensor,
                 "additionalFeature": nextAdditionalFeaturesTensor,
                 "pixelActionMaps": nextStatePixelActionMaps,
+                "stepNumber": nextStepNumbers,
                 "outputStamp": False,
                 "computeExtras": False,
                 "computeActionProbabilities": False,
@@ -1492,25 +1519,25 @@ class DeepLearningAgent(BaseAgent):
         return totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleLosses
 
 
+    @staticmethod
+    def processRawImageParallel(rawImage):
+        width = rawImage.shape[1]
+        height = rawImage.shape[0]
 
-def processRawImageParallel(rawImage):
-    width = rawImage.shape[1]
-    height = rawImage.shape[0]
+        grey = skimage.color.rgb2gray(rawImage[:, :, :3])
 
-    grey = skimage.color.rgb2gray(rawImage[:, :, :3])
+        shrunkWidth = int(width * config.getAgentConfiguration()['model_image_downscale_ratio'])
+        shrunkHeight = int(height * config.getAgentConfiguration()['model_image_downscale_ratio'])
 
-    shrunkWidth = int(width * config.getAgentConfiguration()['model_image_downscale_ratio'])
-    shrunkHeight = int(height * config.getAgentConfiguration()['model_image_downscale_ratio'])
+        shrunkWidth += 8 - (shrunkWidth % 8)
+        shrunkHeight += 8 - (shrunkHeight % 8)
 
-    shrunkWidth += 8 - (shrunkWidth % 8)
-    shrunkHeight += 8 - (shrunkHeight % 8)
+        shrunk = skimage.transform.resize(grey, (shrunkHeight, shrunkWidth), anti_aliasing=True)
 
-    shrunk = skimage.transform.resize(grey, (shrunkHeight, shrunkWidth), anti_aliasing=True)
+        # Convert to grey-scale image
+        processedImage = numpy.array([shrunk])
 
-    # Convert to grey-scale image
-    processedImage = numpy.array([shrunk])
+        # Round the float values down to 0. This minimizes some the error introduced by the video codecs
+        processedImage = numpy.around(processedImage, decimals=2)
 
-    # Round the float values down to 0. This minimizes some the error introduced by the video codecs
-    processedImage = numpy.around(processedImage, decimals=2)
-
-    return processedImage
+        return processedImage
