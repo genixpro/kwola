@@ -203,9 +203,10 @@ def loadAllTestingSteps(config):
     testingSteps = []
 
     for fileName in os.listdir(testStepsDir):
-        stepId = fileName.replace(".json.gz", "")
+        if ".lock" not in fileName:
+            stepId = fileName.replace(".json.gz", "")
 
-        testingSteps.append(TestingStep.loadFromDisk(stepId, config))
+            testingSteps.append(TestingStep.loadFromDisk(stepId, config))
 
     return testingSteps
 
@@ -614,8 +615,9 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         trainingStep.status = "completed"
         trainingStep.saveToDisk(config)
 
-        for subProcessCommandQueue in subProcessCommandQueues:
+        for subProcess, subProcessCommandQueue in zip(subProcesses, subProcessCommandQueues):
             subProcessCommandQueue.put(("quit", {}))
+            subProcess.join()
 
         # Safe guard, don't save the model if any nan's were detected
         if numpy.count_nonzero(numpy.isnan(trainingStep.totalLosses)) == 0:

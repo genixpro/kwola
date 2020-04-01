@@ -6,6 +6,7 @@ import os.path
 from kwola.models.id import CustomIDField
 import json
 import gzip
+from .lockedfile import LockedFile
 
 class ExecutionSession(Document):
     id = CustomIDField()
@@ -24,8 +25,8 @@ class ExecutionSession(Document):
 
     def saveToDisk(self, config):
         fileName = os.path.join(config.getKwolaUserDataDirectory("execution_sessions"), str(self.id) + ".json.gz")
-        with gzip.open(fileName, 'wt') as f:
-            f.write(json.dumps(json.loads(self.to_json()), indent=4))
+        with LockedFile(fileName, 'wb') as f:
+            f.write(gzip.compress(bytes(json.dumps(json.loads(self.to_json()), indent=4), "utf8")))
 
 
     @staticmethod
@@ -33,5 +34,6 @@ class ExecutionSession(Document):
         fileName = os.path.join(config.getKwolaUserDataDirectory("execution_sessions"), str(id) + ".json.gz")
         if not os.path.exists(fileName):
             return None
-        with gzip.open(fileName, 'rt') as f:
-            return ExecutionSession.from_json(f.read())
+        with LockedFile(fileName, 'rb') as f:
+            return ExecutionSession.from_json(str(gzip.decompress(f.read()), "utf8"))
+

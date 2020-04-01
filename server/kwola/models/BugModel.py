@@ -6,7 +6,7 @@ import os.path
 from kwola.models.id import CustomIDField
 import json
 import gzip
-
+from .lockedfile import LockedFile
 
 
 class BugModel(Document):
@@ -22,12 +22,13 @@ class BugModel(Document):
 
     def saveToDisk(self, config):
         fileName = os.path.join(config.getKwolaUserDataDirectory("bugs"), str(self.id) + ".json.gz")
-        with gzip.open(fileName, 'wt') as f:
-            f.write(json.dumps(json.loads(self.to_json()), indent=4))
+        with LockedFile(fileName, 'wb') as f:
+            f.write(gzip.compress(bytes(json.dumps(json.loads(self.to_json()), indent=4), "utf8")))
 
 
     @staticmethod
     def loadFromDisk(id, config):
         fileName = os.path.join(config.getKwolaUserDataDirectory("bugs"), str(id) + ".json.gz")
-        with gzip.open(fileName, 'rt') as f:
-            return BugModel.from_json(f.read())
+        with LockedFile(fileName, 'rb') as f:
+            return BugModel.from_json(str(gzip.decompress(f.read()), "utf8"))
+

@@ -192,7 +192,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         for subProcessCommandQueue, subProcessResultQueue, subProcess in subProcesses:
             subProcessCommandQueue.put("quit")
-            subProcess.terminate()
+            subProcess.join()
 
         print(datetime.now(), f"Creating movies for the execution sessions of this testing sequence.", flush=True)
         videoPaths = environment.createMovies()
