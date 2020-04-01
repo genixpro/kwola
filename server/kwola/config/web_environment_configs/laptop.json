@@ -1,7 +1,0 @@
-{
-  "parallel_sessions": 1,
-  "max_startup_workers": 1,
-  "headless": true,
-  "print_every_action": true,
-  "print_every_action_failure": true
-}

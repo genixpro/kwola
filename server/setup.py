@@ -40,6 +40,7 @@ setup(
     package_data={
         'kwola': [
             'tests/data/*.json',
+            'config/prebuilt_configs/*.json'
         ]
     },
     install_requires=requires,
@@ -48,6 +49,7 @@ setup(
             'main = kwola:main',
         ],
         'console_scripts': [
+            'kwola= kwola.bin.main:main',
             'kwola_clear_db = kwola.bin.clear_db:main',
             'kwola_train_agent = kwola.bin.train_agent:main',
             'kwola_run_test_sequence = kwola.bin.run_test_sequence:main'

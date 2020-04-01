@@ -3,6 +3,7 @@ from kwola.models.TestingStepModel import TestingStep
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from kwola.components.TaskProcess import TaskProcess
+from kwola.config.config import Configuration
 import pickle
 from datetime import datetime
 import time
@@ -11,11 +12,12 @@ import traceback
 import tempfile
 import os
 import multiprocessing
-from kwola.config import config
 
 
-def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
-    agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
+def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
+    config = Configuration(configDir)
+
+    agent = DeepLearningAgent(config, whichGpu=None)
 
     agent.initialize(branchFeatureSize)
     agent.load()
@@ -43,14 +45,16 @@ def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessComma
         subProcessResultQueue.put(resultFileName)
 
 
-def createDebugVideoSubProcess(branchFeatureSize, executionSessionId, name=""):
-    agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
+def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId, name=""):
+    config = Configuration(configDir)
+
+    agent = DeepLearningAgent(config, whichGpu=None)
     agent.initialize(branchFeatureSize)
     agent.load()
 
     kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory("debug_videos")
 
-    executionSession = ExecutionSession.loadFromDisk(executionSessionId)
+    executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
 
     videoData = agent.createDebugVideoForExecutionSession(executionSession)
     with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
@@ -59,7 +63,7 @@ def createDebugVideoSubProcess(branchFeatureSize, executionSessionId, name=""):
     del agent
 
 
-def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False):
+def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
     print(datetime.now(), "Starting New Testing Sequence", flush=True)
 
     returnValue = {}
@@ -67,17 +71,17 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
     try:
         multiprocessing.set_start_method('spawn')
 
-        agentConfig = config.getAgentConfiguration()
+        config = Configuration(configDir)
 
-        environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration())
+        environment = WebEnvironment(config=config)
 
-        stepsRemaining = int(agentConfig['testing_sequence_length'])
+        stepsRemaining = int(config['testing_sequence_length'])
 
-        testStep = TestingStep.loadFromDisk(testingStepId)
+        testStep = TestingStep.loadFromDisk(testingStepId, config)
 
         testStep.startTime = datetime.now()
         testStep.status = "running"
-        testStep.saveToDisk()
+        testStep.saveToDisk(config)
 
         returnValue = {"testingStepId": str(testStep.id)}
 
@@ -94,7 +98,7 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
         ]
 
         for session in executionSessions:
-            session.saveToDisk()
+            session.saveToDisk(config)
 
         errorHashes = set()
         uniqueErrors = []
@@ -103,10 +107,10 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
 
         subProcesses = []
 
-        for n in range(agentConfig['testing_subprocess_pool_size']):
+        for n in range(config['testing_subprocess_pool_size']):
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessResultQueue = multiprocessing.Queue()
-            subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+            subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
             subProcess.start()
 
             subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
@@ -138,7 +142,7 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
                 actions = pickle.load(file)
             os.unlink(resultFileName)
 
-            if stepsRemaining % agentConfig['testing_print_every'] == 0:
+            if stepsRemaining % config['testing_print_every'] == 0:
                 print(datetime.now(), f"Finished {step + 1} testing actions.", flush=True)
 
             step += 1
@@ -147,10 +151,10 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
                 trace.executionSessionId = str(executionSession.id)
                 trace.testingStepId = str(testingStepId)
-                trace.saveToDisk()
+                trace.saveToDisk(config)
 
                 executionSessions[sessionN].executionTraces.append(str(trace.id))
-                executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(executionSessions[sessionN])))
+                executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(executionSessions[sessionN], config)))
 
                 for error in trace.errorsDetected:
                     hash = error.computeHash()
@@ -159,7 +163,7 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
                         errorHashes.add(hash)
                         uniqueErrors.append(error)
 
-            if agentConfig['testing_reset_agent_period'] == 1 or stepsRemaining % agentConfig['testing_reset_agent_period'] == (agentConfig['testing_reset_agent_period'] - 1):
+            if config['testing_reset_agent_period'] == 1 or stepsRemaining % config['testing_reset_agent_period'] == (config['testing_reset_agent_period'] - 1):
                 subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses.pop(0)
 
                 subProcessCommandQueue.put("quit")
@@ -167,7 +171,7 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
 
                 subProcessCommandQueue = multiprocessing.Queue()
                 subProcessResultQueue = multiprocessing.Queue()
-                subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+                subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
                 subProcess.start()
 
                 subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
@@ -200,7 +204,7 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
         totalRewards = []
         for session in executionSessions:
             print(datetime.now(), f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
-            session.saveToDisk()
+            session.saveToDisk(config)
             totalRewards.append(session.totalReward)
 
         print(datetime.now(), f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
@@ -213,17 +217,17 @@ def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False
         testStep.endTime = datetime.now()
 
         testStep.executionSessions = [session.id for session in executionSessions]
-        testStep.saveToDisk()
+        testStep.saveToDisk(config)
 
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
-            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
+            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
             debugVideoSubprocess1.start()
 
             # Leave a gap between the two to reduce collision
             time.sleep(5)
 
-            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix"))
+            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix"))
             debugVideoSubprocess2.start()
 
             debugVideoSubprocess1.join()

@@ -1,6 +1,5 @@
 from mongoengine import *
 import datetime
-from kwola.config.config import getKwolaUserDataDirectory
 import os.path
 from kwola.models.id import CustomIDField
 import json
@@ -14,15 +13,15 @@ class ApplicationModel(Document):
 
     url = StringField(required=True)
 
-    def saveToDisk(self):
-        fileName = os.path.join(getKwolaUserDataDirectory("applications"), str(self.id) + ".json.gz")
+    def saveToDisk(self, config):
+        fileName = os.path.join(config.getKwolaUserDataDirectory("applications"), str(self.id) + ".json.gz")
         with gzip.open(fileName, 'wt') as f:
             f.write(json.dumps(json.loads(self.to_json()), indent=4))
 
 
     @staticmethod
-    def loadFromDisk(id):
-        fileName = os.path.join(getKwolaUserDataDirectory("applications"), str(id) + ".json.gz")
+    def loadFromDisk(id, config):
+        fileName = os.path.join(config.getKwolaUserDataDirectory("applications"), str(id) + ".json.gz")
         with gzip.open(fileName, 'rt') as f:
             return ApplicationModel.from_json(f.read())
 

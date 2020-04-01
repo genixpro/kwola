@@ -11,8 +11,8 @@ class RandomAgent(BaseAgent):
         This class represents a completely random fuzzer. It will click around totally chaotically and randomly and will
         not do anything remotely intelligent.
     """
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config):
+        super().__init__(config)
 
 
     def load(self):

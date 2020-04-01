@@ -17,18 +17,16 @@ class WebEnvironment(BaseEnvironment):
         This class represents web / browser based environments. It will boot up a headless browser and use it to communicate
         with the software.
     """
-    def __init__(self, environmentConfiguration, targetURL="http://172.17.0.2:3000/", sessionLimit=None):
-        self.targetURL = targetURL
+    def __init__(self, config, sessionLimit=None):
+        self.config = config
 
         self.startProxyServer()
 
-        self.config = environmentConfiguration
-
         def createSession(number):
-            return WebEnvironmentSession(environmentConfiguration, targetURL, number, self.proxyPort, self.pathTracer)
+            return WebEnvironmentSession(config, number, self.proxyPort, self.pathTracer)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=environmentConfiguration['max_startup_workers']) as executor:
-            sessionCount = environmentConfiguration['parallel_sessions']
+        with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
+            sessionCount = config['web_session_parallel_execution_sessions']
             if sessionLimit is not None:
                 sessionCount = min(sessionLimit, sessionCount)
 
@@ -65,7 +63,7 @@ class WebEnvironment(BaseEnvironment):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        self.codeRewriter = JSRewriteProxy()
+        self.codeRewriter = JSRewriteProxy(self.config)
         self.pathTracer = PathTracer()
 
         opts = options.Options(listen_port=self.proxyPort)

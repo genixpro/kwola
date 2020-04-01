@@ -3,16 +3,17 @@ import subprocess
 import io
 from mitmproxy.script import concurrent
 import hashlib
-from kwola.config.config import getKwolaUserDataDirectory
 import os.path
 
 
 class JSRewriteProxy:
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
+
         self.memoryCache = {}
 
     def getCacheFileName(self, fileHash, fileName):
-        cacheFileName = os.path.join(getKwolaUserDataDirectory("javascript"), fileHash + "_" + fileName)
+        cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("javascript"), fileHash + "_" + fileName)
         return cacheFileName
 
 
@@ -89,8 +90,3 @@ class JSRewriteProxy:
                     flow.response.data.content = transformed
         except Exception as e:
             print(e)
-
-
-addons = [
-    JSRewriteProxy()
-]

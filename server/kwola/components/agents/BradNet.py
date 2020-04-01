@@ -11,17 +11,16 @@ import scipy.signal
 import pandas
 from torchvision import models
 
+
 class BradNet(nn.Module):
-    def __init__(self, agentConfiguration, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
+    def __init__(self, config, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
         super(BradNet, self).__init__()
 
-        self.agentConfiguration = agentConfiguration
+        self.config = config
 
-        self.agentConfiguration['additional_features_stamp_edge_size'] = agentConfiguration['additional_features_stamp_edge_size']
-
-        self.stampSize = self.agentConfiguration['additional_features_stamp_edge_size'] * \
-                         self.agentConfiguration['additional_features_stamp_edge_size'] * \
-                         self.agentConfiguration['additional_features_stamp_depth_size']
+        self.stampSize = self.config['additional_features_stamp_edge_size'] * \
+                         self.config['additional_features_stamp_edge_size'] * \
+                         self.config['additional_features_stamp_depth_size']
 
         self.timeEncodingSize = 1
 
@@ -37,66 +36,66 @@ class BradNet(nn.Module):
         self.mainModel = nn.Sequential(
             nn.Conv2d(
                 in_channels=1,
-                out_channels=self.agentConfiguration['layer_1_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_1_kernel_size'], 
-                stride=self.agentConfiguration['layer_1_stride'], 
-                dilation=self.agentConfiguration['layer_1_dilation'], 
-                padding=self.agentConfiguration['layer_1_padding']
+                out_channels=self.config['layer_1_num_kernels'],
+                kernel_size=self.config['layer_1_kernel_size'], 
+                stride=self.config['layer_1_stride'], 
+                dilation=self.config['layer_1_dilation'], 
+                padding=self.config['layer_1_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_1_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_1_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_1_num_kernels'],
-                out_channels=self.agentConfiguration['layer_2_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_2_kernel_size'],
-                stride=self.agentConfiguration['layer_2_stride'],
-                dilation=self.agentConfiguration['layer_2_dilation'],
-                padding=self.agentConfiguration['layer_2_padding']
+                in_channels=self.config['layer_1_num_kernels'],
+                out_channels=self.config['layer_2_num_kernels'],
+                kernel_size=self.config['layer_2_kernel_size'],
+                stride=self.config['layer_2_stride'],
+                dilation=self.config['layer_2_dilation'],
+                padding=self.config['layer_2_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_2_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_2_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_2_num_kernels'],
-                out_channels=self.agentConfiguration['layer_3_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_3_kernel_size'],
-                stride=self.agentConfiguration['layer_3_stride'],
-                dilation=self.agentConfiguration['layer_3_dilation'],
-                padding=self.agentConfiguration['layer_3_padding']
+                in_channels=self.config['layer_2_num_kernels'],
+                out_channels=self.config['layer_3_num_kernels'],
+                kernel_size=self.config['layer_3_kernel_size'],
+                stride=self.config['layer_3_stride'],
+                dilation=self.config['layer_3_dilation'],
+                padding=self.config['layer_3_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_3_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_3_num_kernels']),
 
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_3_num_kernels'],
-                out_channels=self.agentConfiguration['pixel_features'],
-                kernel_size=self.agentConfiguration['layer_4_kernel_size'],
-                stride=self.agentConfiguration['layer_4_stride'],
-                dilation=self.agentConfiguration['layer_4_dilation'],
-                padding=self.agentConfiguration['layer_4_padding']
+                in_channels=self.config['layer_3_num_kernels'],
+                out_channels=self.config['pixel_features'],
+                kernel_size=self.config['layer_4_kernel_size'],
+                stride=self.config['layer_4_stride'],
+                dilation=self.config['layer_4_dilation'],
+                padding=self.config['layer_4_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['pixel_features'])
+            nn.BatchNorm2d(num_features=self.config['pixel_features'])
         )
 
         self.stateValueConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
-                out_channels=self.agentConfiguration['layer_5_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
-                stride=self.agentConfiguration['layer_5_stride'],
-                dilation=self.agentConfiguration['layer_5_dilation'],
-                padding=self.agentConfiguration['layer_5_padding']
+                in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
+                out_channels=self.config['layer_5_num_kernels'],
+                kernel_size=self.config['layer_5_kernel_size'],
+                stride=self.config['layer_5_stride'],
+                dilation=self.config['layer_5_dilation'],
+                padding=self.config['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                in_channels=self.config['layer_5_num_kernels'],
                 out_channels=1,
-                kernel_size=self.agentConfiguration['state_value_convolution_kernel_size'],
-                stride=self.agentConfiguration['state_value_convolution_stride'],
-                padding=self.agentConfiguration['state_value_convolution_padding'],
+                kernel_size=self.config['state_value_convolution_kernel_size'],
+                stride=self.config['state_value_convolution_stride'],
+                padding=self.config['state_value_convolution_padding'],
                 bias=False
             ),
             torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
@@ -104,21 +103,21 @@ class BradNet(nn.Module):
 
         self.presentRewardConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
-                out_channels=self.agentConfiguration['layer_5_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
-                stride=self.agentConfiguration['layer_5_stride'],
-                dilation=self.agentConfiguration['layer_5_dilation'],
-                padding=self.agentConfiguration['layer_5_padding']
+                in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
+                out_channels=self.config['layer_5_num_kernels'],
+                kernel_size=self.config['layer_5_kernel_size'],
+                stride=self.config['layer_5_stride'],
+                dilation=self.config['layer_5_dilation'],
+                padding=self.config['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
-                kernel_size=self.agentConfiguration['present_reward_convolution_kernel_size'],
-                stride=self.agentConfiguration['present_reward_convolution_stride'],
-                padding=self.agentConfiguration['present_reward_convolution_padding'],
+                kernel_size=self.config['present_reward_convolution_kernel_size'],
+                stride=self.config['present_reward_convolution_stride'],
+                padding=self.config['present_reward_convolution_padding'],
                 bias=False
             ),
             torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
@@ -126,21 +125,21 @@ class BradNet(nn.Module):
 
         self.discountedFutureRewardConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
-                out_channels=self.agentConfiguration['layer_5_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
-                stride=self.agentConfiguration['layer_5_stride'],
-                dilation=self.agentConfiguration['layer_5_dilation'],
-                padding=self.agentConfiguration['layer_5_padding']
+                in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
+                out_channels=self.config['layer_5_num_kernels'],
+                kernel_size=self.config['layer_5_kernel_size'],
+                stride=self.config['layer_5_stride'],
+                dilation=self.config['layer_5_dilation'],
+                padding=self.config['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
-                kernel_size=self.agentConfiguration['discounted_future_reward_convolution_kernel_size'],
-                stride=self.agentConfiguration['discounted_future_reward_convolution_stride'],
-                padding=self.agentConfiguration['discounted_future_reward_convolution_padding'],
+                kernel_size=self.config['discounted_future_reward_convolution_kernel_size'],
+                stride=self.config['discounted_future_reward_convolution_stride'],
+                padding=self.config['discounted_future_reward_convolution_padding'],
                 bias=False
             ),
             torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
@@ -148,21 +147,21 @@ class BradNet(nn.Module):
 
         self.actorConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
-                out_channels=self.agentConfiguration['layer_5_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
-                stride=self.agentConfiguration['layer_5_stride'],
-                dilation=self.agentConfiguration['layer_5_dilation'],
-                padding=self.agentConfiguration['layer_5_padding']
+                in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
+                out_channels=self.config['layer_5_num_kernels'],
+                kernel_size=self.config['layer_5_kernel_size'],
+                stride=self.config['layer_5_stride'],
+                dilation=self.config['layer_5_dilation'],
+                padding=self.config['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
-                kernel_size=self.agentConfiguration['actor_convolution_kernel_size'],
-                stride=self.agentConfiguration['actor_convolution_stride'],
-                padding=self.agentConfiguration['actor_convolution_padding'],
+                kernel_size=self.config['actor_convolution_kernel_size'],
+                stride=self.config['actor_convolution_stride'],
+                padding=self.config['actor_convolution_padding'],
                 bias=False
             ),
             torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
@@ -170,21 +169,21 @@ class BradNet(nn.Module):
 
         self.advantageConvolution = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
-                out_channels=self.agentConfiguration['layer_5_num_kernels'],
-                kernel_size=self.agentConfiguration['layer_5_kernel_size'],
-                stride=self.agentConfiguration['layer_5_stride'],
-                dilation=self.agentConfiguration['layer_5_dilation'],
-                padding=self.agentConfiguration['layer_5_padding']
+                in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
+                out_channels=self.config['layer_5_num_kernels'],
+                kernel_size=self.config['layer_5_kernel_size'],
+                stride=self.config['layer_5_stride'],
+                dilation=self.config['layer_5_dilation'],
+                padding=self.config['layer_5_padding']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.agentConfiguration['layer_5_num_kernels']),
+            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
             nn.Conv2d(
-                in_channels=self.agentConfiguration['layer_5_num_kernels'],
+                in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
-                kernel_size=self.agentConfiguration['advantage_convolution_kernel_size'],
-                stride=self.agentConfiguration['advantage_convolution_stride'],
-                padding=self.agentConfiguration['advantage_convolution_padding'],
+                kernel_size=self.config['advantage_convolution_kernel_size'],
+                stride=self.config['advantage_convolution_stride'],
+                padding=self.config['advantage_convolution_padding'],
                 bias=False
             ),
             torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
@@ -194,28 +193,28 @@ class BradNet(nn.Module):
             torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
         )
 
-        if self.agentConfiguration['enable_trace_prediction_loss']:
+        if self.config['enable_trace_prediction_loss']:
             self.predictedExecutionTraceLinear = nn.Sequential(
                 nn.Linear(
-                    in_features=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
+                    in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                     out_features=executionTracePredictorSize
                 ),
                 nn.ELU()
             )
 
-        if self.agentConfiguration['enable_execution_feature_prediction_loss']:
+        if self.config['enable_execution_feature_prediction_loss']:
             self.predictedExecutionFeaturesLinear = nn.Sequential(
                 nn.Linear(
-                    in_features=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
+                    in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                     out_features=executionFeaturePredictorSize
                 ),
                 nn.Sigmoid()
             )
 
-        if self.agentConfiguration['enable_cursor_prediction_loss']:
+        if self.config['enable_cursor_prediction_loss']:
             self.predictedCursorLinear = nn.Sequential(
                 nn.Linear(
-                    in_features=self.agentConfiguration['pixel_features'] + self.agentConfiguration['additional_features_stamp_depth_size'],
+                    in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                     out_features=cursorCount
                 ),
                 nn.Sigmoid()
@@ -235,22 +234,22 @@ class BradNet(nn.Module):
         additionalFeaturesWithStep = torch.cat([torch.log10(data['stepNumber'] + torch.ones_like(data['stepNumber'])).reshape([-1, 1]), self.stampProjection(data['additionalFeature'])], dim=1)
 
         # Append the stamp layer along side the pixel-by-pixel features
-        stamp = additionalFeaturesWithStep.reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'],
-                                                    self.agentConfiguration['additional_features_stamp_edge_size'],
-                                                    self.agentConfiguration['additional_features_stamp_edge_size']])
+        stamp = additionalFeaturesWithStep.reshape([-1, self.config['additional_features_stamp_depth_size'],
+                                                    self.config['additional_features_stamp_edge_size'],
+                                                    self.config['additional_features_stamp_edge_size']])
 
         featureMapHeight = pixelFeatureMap.shape[2]
         featureMapWidth = pixelFeatureMap.shape[3]
-        stampTiler = stamp.repeat([1, 1, int(featureMapHeight / self.agentConfiguration['additional_features_stamp_edge_size']) + 1, int(featureMapWidth / self.agentConfiguration['additional_features_stamp_edge_size']) + 1])
-        stampLayer = stampTiler[:, :, :featureMapHeight, :featureMapWidth].reshape([-1, self.agentConfiguration['additional_features_stamp_depth_size'], featureMapHeight, featureMapWidth])
+        stampTiler = stamp.repeat([1, 1, int(featureMapHeight / self.config['additional_features_stamp_edge_size']) + 1, int(featureMapWidth / self.config['additional_features_stamp_edge_size']) + 1])
+        stampLayer = stampTiler[:, :, :featureMapHeight, :featureMapWidth].reshape([-1, self.config['additional_features_stamp_depth_size'], featureMapHeight, featureMapWidth])
 
         mergedPixelFeatureMap = torch.cat([stampLayer, pixelFeatureMap], dim=1)
 
         outputDict = {}
 
         if data['computeRewards']:
-            presentRewards = self.presentRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
-            discountFutureRewards = self.discountedFutureRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+            presentRewards = self.presentRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
+            discountFutureRewards = self.discountedFutureRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
 
             totalReward = (presentRewards + discountFutureRewards)
 
@@ -290,7 +289,7 @@ class BradNet(nn.Module):
             outputDict['stateValues'] = averageStateValues
 
         if data['computeAdvantageValues']:
-            advantageValues = self.advantageConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.agentConfiguration['reward_impossible_action']
+            advantageValues = self.advantageConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
             outputDict['advantage'] = advantageValues
 
         if data['computeExtras']:
@@ -319,13 +318,13 @@ class BradNet(nn.Module):
 
             joinedFeatures = torch.cat(forwardFeaturesForAuxillaryLosses, dim=0)
 
-            if self.agentConfiguration['enable_trace_prediction_loss']:
+            if self.config['enable_trace_prediction_loss']:
                 outputDict['predictedTraces'] = self.predictedExecutionTraceLinear(joinedFeatures)
-            if self.agentConfiguration['enable_execution_feature_prediction_loss']:
+            if self.config['enable_execution_feature_prediction_loss']:
                 outputDict['predictedExecutionFeatures'] = self.predictedExecutionFeaturesLinear(joinedFeatures)
-            if self.agentConfiguration['enable_cursor_prediction_loss']:
+            if self.config['enable_cursor_prediction_loss']:
                 outputDict['predictedCursor'] = self.predictedCursorLinear(joinedFeatures)
-            if self.agentConfiguration['enable_homogenization_loss']:
+            if self.config['enable_homogenization_loss']:
                 outputDict['pixelFeatureMap'] = self.pixelFeatureMapUpsampler(mergedPixelFeatureMap)
 
         return outputDict

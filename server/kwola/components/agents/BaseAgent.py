@@ -1,4 +1,3 @@
-from kwola.config import config
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
@@ -11,14 +10,10 @@ class BaseAgent:
     """
         This is a base class for different implementations of the machine learning algorithms that are used to
         control the Environments and find bugs.
-
-
     """
 
-    def __init__(self):
-        agentConfiguration = config.getAgentConfiguration()
 
-
+    def __init__(self, config):
         self.actions = {
             "click": lambda x,y: ClickTapAction(type="click", x=x, y=y, times=1),
             # "double_click": lambda x,y: ClickTapAction(type="double_click", x=x, y=y, times=2),
@@ -64,14 +59,14 @@ class BaseAgent:
         ]
 
         self.elementBaseWeights = {
-            "a": agentConfiguration['random_html_element_a_weight'],
-            "input": agentConfiguration['random_html_element_input_weight'],
-            "button": agentConfiguration['random_html_element_button_weight'],
-            "p": agentConfiguration['random_html_element_p_weight'],
-            "span": agentConfiguration['random_html_element_span_weight'],
-            "div": agentConfiguration['random_html_element_div_weight'],
-            "canvas": agentConfiguration['random_html_element_canvas_weight'],
-            "other": agentConfiguration['random_html_element_other_weight']
+            "a": config['random_html_element_a_weight'],
+            "input": config['random_html_element_input_weight'],
+            "button": config['random_html_element_button_weight'],
+            "p": config['random_html_element_p_weight'],
+            "span": config['random_html_element_span_weight'],
+            "div": config['random_html_element_div_weight'],
+            "canvas": config['random_html_element_canvas_weight'],
+            "other": config['random_html_element_other_weight']
         }
 
         self.actionsSorted = sorted(self.actions.keys())

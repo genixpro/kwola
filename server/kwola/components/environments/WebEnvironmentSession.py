@@ -20,7 +20,6 @@ import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile
 import skimage.io
-from kwola.config import config
 import subprocess
 import os
 import os.path
@@ -39,12 +38,12 @@ class WebEnvironmentSession(BaseEnvironment):
     """
         This class represents a single tab in the web environment.
     """
-    def __init__(self, environmentConfiguration, targetURL, tabNumber, proxyPort, pathTracer):
-        self.targetURL = targetURL
-
+    def __init__(self, config, tabNumber, proxyPort, pathTracer):
+        self.config = config
+        self.targetURL = config['url']
 
         chrome_options = Options()
-        chrome_options.headless = environmentConfiguration['headless']
+        chrome_options.headless = config['web_session_headless']
 
         capabilities = webdriver.DesiredCapabilities.CHROME
         capabilities['loggingPrefs'] = {'browser': 'ALL'}
@@ -60,7 +59,7 @@ class WebEnvironmentSession(BaseEnvironment):
               window.outerHeight - window.innerHeight + arguments[1]];
             """, 800, 600)
         self.driver.set_window_size(*window_size)
-        self.driver.get(targetURL)
+        self.driver.get(self.targetURL)
 
         # HACK! give time for page to load before proceeding.
         time.sleep(2)
@@ -307,12 +306,12 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
-                    if config.getWebEnvironmentConfiguration()['print_every_action']:
+                    if self.config['web_session_print_every_action']:
                         print(datetime.now(), "Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.click(on_element=element)
                     actionChain.pause(uiReactionWaitTime)
                 elif action.times == 2:
-                    if config.getWebEnvironmentConfiguration()['print_every_action']:
+                    if self.config['web_session_print_every_action']:
                         print(datetime.now(), "Double Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.double_click(on_element=element)
                     actionChain.pause(uiReactionWaitTime)
@@ -320,7 +319,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain.perform()
 
             if isinstance(action, RightClickAction):
-                if config.getWebEnvironmentConfiguration()['print_every_action']:
+                if self.config['web_session_print_every_action']:
                     print(datetime.now(), "Right Clicking", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
@@ -329,7 +328,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain.perform()
 
             if isinstance(action, TypeAction):
-                if config.getWebEnvironmentConfiguration()['print_every_action']:
+                if self.config['web_session_print_every_action']:
                     print(datetime.now(), "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
@@ -340,7 +339,7 @@ class WebEnvironmentSession(BaseEnvironment):
                 actionChain.perform()
 
             if isinstance(action, ClearFieldAction):
-                if config.getWebEnvironmentConfiguration()['print_every_action']:
+                if self.config['web_session_print_every_action']:
                     print(datetime.now(), "Clearing field at", action.x, action.y, action.source, flush=True)
                 element.clear()
 
@@ -349,21 +348,21 @@ class WebEnvironmentSession(BaseEnvironment):
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
-            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+            if self.config['web_session_print_every_action_failure']:
                 print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
-            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+            if self.config['web_session_print_every_action_failure']:
                 print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
-            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+            if self.config['web_session_print_every_action_failure']:
                 print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except AttributeError as e:
-            if config.getWebEnvironmentConfiguration()['print_every_action_failure']:
+            if self.config['web_session_print_every_action_failure']:
                 print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False

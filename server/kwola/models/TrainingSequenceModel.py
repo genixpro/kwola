@@ -1,5 +1,4 @@
 from mongoengine import *
-from kwola.config.config import getKwolaUserDataDirectory
 import os.path
 from kwola.models.id import CustomIDField
 import json
@@ -29,15 +28,15 @@ class TrainingSequence(Document):
     averageTimePerStep = FloatField()
 
 
-    def saveToDisk(self):
-        fileName = os.path.join(getKwolaUserDataDirectory("training_sequences"), str(self.id) + ".json.gz")
+    def saveToDisk(self, config):
+        fileName = os.path.join(config.getKwolaUserDataDirectory("training_sequences"), str(self.id) + ".json.gz")
         with gzip.open(fileName, 'wt') as f:
             f.write(json.dumps(json.loads(self.to_json()), indent=4))
 
 
     @staticmethod
-    def loadFromDisk(id):
-        fileName = os.path.join(getKwolaUserDataDirectory("training_sequences"), str(id) + ".json.gz")
+    def loadFromDisk(id, config):
+        fileName = os.path.join(config.getKwolaUserDataDirectory("training_sequences"), str(id) + ".json.gz")
         if not os.path.exists(fileName):
             return None
         with gzip.open(fileName, 'rt') as f:
