@@ -6,6 +6,7 @@ from kwola.config.config import getKwolaUserDataDirectory
 import os.path
 from kwola.models.id import CustomIDField
 import json
+import gzip
 
 class TrainingStep(Document):
     id = CustomIDField()
@@ -52,16 +53,16 @@ class TrainingStep(Document):
 
 
     def saveToDisk(self):
-        fileName = os.path.join(getKwolaUserDataDirectory("training_steps"), str(self.id) + ".json")
-        with open(fileName, 'wt') as f:
+        fileName = os.path.join(getKwolaUserDataDirectory("training_steps"), str(self.id) + ".json.gz")
+        with gzip.open(fileName, 'wt') as f:
             f.write(json.dumps(json.loads(self.to_json()), indent=4))
 
 
 
     @staticmethod
     def loadFromDisk(id):
-        fileName = os.path.join(getKwolaUserDataDirectory("training_steps"), str(id) + ".json")
+        fileName = os.path.join(getKwolaUserDataDirectory("training_steps"), str(id) + ".json.gz")
         if not os.path.exists(fileName):
             return None
-        with open(fileName, 'rt') as f:
+        with gzip.open(fileName, 'rt') as f:
             return TrainingStep.from_json(f.read())

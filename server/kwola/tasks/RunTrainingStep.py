@@ -28,8 +28,8 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
 
     agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
 
-    sampleCacheDir = config.getKwolaUserDataDirectory("samples")
-    cacheFile = os.path.join(sampleCacheDir, executionTraceId + ".bin")
+    sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
+    cacheFile = os.path.join(sampleCacheDir, executionTraceId + ".pickle.gz")
 
     if os.path.exists(cacheFile):
         cacheHit = True
@@ -53,7 +53,7 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
         for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
             traceId = traceBatch['traceIds'][0]
 
-            cacheFile = os.path.join(sampleCacheDir, traceId + ".bin")
+            cacheFile = os.path.join(sampleCacheDir, traceId + ".pickle.gz")
 
             pickleBytes = pickle.dumps(traceBatch)
             compressedPickleBytes = gzip.compress(pickleBytes)
@@ -203,7 +203,7 @@ def loadAllTestingSteps():
     testingSteps = []
 
     for fileName in os.listdir(testStepsDir):
-        stepId = fileName.replace(".json", "")
+        stepId = fileName.replace(".json.gz", "")
 
         testingSteps.append(TestingStep.loadFromDisk(stepId))
 

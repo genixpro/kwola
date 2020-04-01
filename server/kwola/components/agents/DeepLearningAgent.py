@@ -612,7 +612,7 @@ class DeepLearningAgent(BaseAgent):
         mpl.use('Agg')
         mpl.rcParams['figure.max_open_warning'] = 1000
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = []
             for traceId, rawImage in zip(executionSession.executionTraces, rawImages):
                 trace = ExecutionTrace.loadFromDisk(traceId)
