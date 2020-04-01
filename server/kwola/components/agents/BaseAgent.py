@@ -1,4 +1,4 @@
-
+from kwola.config import config
 from kwola.models.actions.ClickTapAction import ClickTapAction
 from kwola.models.actions.RightClickAction import RightClickAction
 from kwola.models.actions.TypeAction import TypeAction
@@ -16,6 +16,7 @@ class BaseAgent:
     """
 
     def __init__(self):
+        agentConfiguration = config.getAgentConfiguration()
 
 
         self.actions = {
@@ -48,17 +49,6 @@ class BaseAgent:
             1.0
         ]
 
-        self.elementBaseWeights = {
-            "a": 0.5,
-            "input": 1.0,
-            "button": 0.7,
-            "p": 0.7,
-            "span": 0.7,
-            "div": 1.0,
-            "canvas": 1.0,
-            "other": 0.5
-        }
-
         self.actionProbabilityBoostKeywords = [
             [],
             # [],
@@ -72,6 +62,17 @@ class BaseAgent:
             # [],
             []
         ]
+
+        self.elementBaseWeights = {
+            "a": agentConfiguration['random_html_element_a_weight'],
+            "input": agentConfiguration['random_html_element_input_weight'],
+            "button": agentConfiguration['random_html_element_button_weight'],
+            "p": agentConfiguration['random_html_element_p_weight'],
+            "span": agentConfiguration['random_html_element_span_weight'],
+            "div": agentConfiguration['random_html_element_div_weight'],
+            "canvas": agentConfiguration['random_html_element_canvas_weight'],
+            "other": agentConfiguration['random_html_element_other_weight']
+        }
 
         self.actionsSorted = sorted(self.actions.keys())
 

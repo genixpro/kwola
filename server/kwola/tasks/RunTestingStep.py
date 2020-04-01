@@ -1,29 +1,18 @@
-from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.TestingSequenceModel import TestingSequenceModel
-from kwola.models.ExecutionTraceModel import ExecutionTrace
+from kwola.models.TestingStepModel import TestingStep
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
-from kwola.components.agents.RandomAgent import RandomAgent
 from kwola.components.TaskProcess import TaskProcess
-import mongoengine
-import random
 import pickle
 from datetime import datetime
-import pandas as pd
-import torch
 import time
 import numpy
-import bson
-import concurrent.futures
 import traceback
-from bson import ObjectId
 import tempfile
 import os
 import multiprocessing
-from multiprocessing import Pool
 from kwola.config import config
+
 
 def predictedActionSubProcess(shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
     agent = DeepLearningAgent(config.getAgentConfiguration(), whichGpu=None)
@@ -61,7 +50,7 @@ def createDebugVideoSubProcess(branchFeatureSize, executionSessionId, name=""):
 
     kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory("debug_videos")
 
-    executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
+    executionSession = ExecutionSession.loadFromDisk(executionSessionId)
 
     videoData = agent.createDebugVideoForExecutionSession(executionSession)
     with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
@@ -70,7 +59,7 @@ def createDebugVideoSubProcess(branchFeatureSize, executionSessionId, name=""):
     del agent
 
 
-def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVideo=False):
+def runTestingStep(testingStepId, shouldBeRandom=False, generateDebugVideo=False):
     print(datetime.now(), "Starting New Testing Sequence", flush=True)
 
     returnValue = {}
@@ -84,17 +73,18 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVid
 
         stepsRemaining = int(agentConfig['testing_sequence_length'])
 
-        testSequence = TestingSequenceModel.objects(id=testingSequenceId).first()
+        testStep = TestingStep.loadFromDisk(testingStepId)
 
-        testSequence.startTime = datetime.now()
-        testSequence.status = "running"
-        testSequence.save()
+        testStep.startTime = datetime.now()
+        testStep.status = "running"
+        testStep.saveToDisk()
 
-        returnValue = {"testingSequenceId": str(testSequence.id)}
+        returnValue = {"testingStepId": str(testStep.id)}
 
         executionSessions = [
             ExecutionSession(
-                testingSequenceId=str(testingSequenceId),
+                id=str(testingStepId) + "_session_" + str(sessionN),
+                testingStepId=str(testingStepId),
                 startTime=datetime.now(),
                 endTime=None,
                 tabNumber=sessionN,
@@ -104,7 +94,7 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVid
         ]
 
         for session in executionSessions:
-            session.save()
+            session.saveToDisk()
 
         errorHashes = set()
         uniqueErrors = []
@@ -153,13 +143,13 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVid
 
             step += 1
 
-            traces = environment.runActions(actions)
+            traces = environment.runActions(actions, [executionSession.id for executionSession in executionSessions])
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
                 trace.executionSessionId = str(executionSession.id)
-                trace.testingSequenceId = str(testingSequenceId)
-                trace.save()
+                trace.testingStepId = str(testingStepId)
+                trace.saveToDisk()
 
-                executionSessions[sessionN].executionTraces.append(trace)
+                executionSessions[sessionN].executionTraces.append(str(trace.id))
                 executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(executionSessions[sessionN])))
 
                 for error in trace.errorsDetected:
@@ -210,20 +200,20 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVid
         totalRewards = []
         for session in executionSessions:
             print(datetime.now(), f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
-            session.save()
+            session.saveToDisk()
             totalRewards.append(session.totalReward)
 
         print(datetime.now(), f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
 
-        testSequence.bugsFound = len(uniqueErrors)
-        testSequence.errors = uniqueErrors
+        testStep.bugsFound = len(uniqueErrors)
+        testStep.errors = uniqueErrors
 
-        testSequence.status = "completed"
+        testStep.status = "completed"
 
-        testSequence.endTime = datetime.now()
+        testStep.endTime = datetime.now()
 
-        testSequence.executionSessions = executionSessions
-        testSequence.save()
+        testStep.executionSessions = [session.id for session in executionSessions]
+        testStep.saveToDisk()
 
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
@@ -251,13 +241,8 @@ def runTestingSequence(testingSequenceId, shouldBeRandom=False, generateDebugVid
 
     return returnValue
 
-@app.task
-def runTestingSequenceTask(testingSequenceId, shouldBeRandom=False):
-    runTestingSequence(testingSequenceId, shouldBeRandom)
-
 
 if __name__ == "__main__":
-    mongoengine.connect('kwola')
-    task = TaskProcess(runTestingSequence)
+    task = TaskProcess(runTestingStep)
     task.run()
 

@@ -15,6 +15,7 @@ import concurrent.futures
 import cv2
 import bson
 import cv2
+import copy
 from datetime import datetime
 import itertools
 import math, random
@@ -487,7 +488,9 @@ class DeepLearningAgent(BaseAgent):
 
         # First compute the present reward at each time step
         presentRewards = []
-        for trace in executionSession.executionTraces:
+        for traceId in executionSession.executionTraces:
+            trace = ExecutionTrace.loadFromDisk(traceId)
+
             tracePresentReward = 0.0
 
             if trace.didActionSucceed:
@@ -611,11 +614,10 @@ class DeepLearningAgent(BaseAgent):
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             futures = []
-            for trace, rawImage in zip(executionSession.executionTraces, rawImages):
+            for traceId, rawImage in zip(executionSession.executionTraces, rawImages):
+                trace = ExecutionTrace.loadFromDisk(traceId)
                 future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
                 futures.append(future)
-
-                # self.createDebugImagesForExecutionTrace(str(executionSession.id), debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
 
                 debugImageIndex += 2
                 lastRawImage = rawImage
@@ -1043,17 +1045,10 @@ class DeepLearningAgent(BaseAgent):
 
     @staticmethod
     def computeTotalRewardsParallel(execusionSessionId):
-        session = ExecutionSession.objects(id=bson.ObjectId(execusionSessionId)).no_dereference().first()
-
-        session.executionTraces = [
-            ExecutionTrace.objects(id=traceId['_ref'].id).exclude("branchExecutionTraceCompressed", "startDecayingExecutionTraceCompressed", "startCumulativeBranchExecutionTraceCompressed").first()
-            for traceId in session.executionTraces
-        ]
+        session = ExecutionSession.loadFromDisk(execusionSessionId)
 
         presentRewards = DeepLearningAgent.computePresentRewards(session)
-        # futureRewards = DeepLearningAgent.computeDiscountedFutureRewards(session)
 
-        # return [present + future for present, future in zip(presentRewards, futureRewards)]
         return list(presentRewards)
 
     @staticmethod
@@ -1142,23 +1137,24 @@ class DeepLearningAgent(BaseAgent):
             presentRewards = normalizedTotalRewards[:len(presentRewards)]
 
         # Create the decaying future execution trace for the prediction algorithm
-        tracesReversed = list(executionSession.executionTraces)
+        executionTraces = [ExecutionTrace.loadFromDisk(traceId) for traceId in executionSession.executionTraces]
+        tracesReversed = list(copy.copy(executionTraces))
         tracesReversed.reverse()
-        currentTrace = numpy.zeros_like(executionSession.executionTraces[0].branchExecutionTrace)
+        currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace)
         executionTraceDiscountRate = self.agentConfiguration['future_execution_trace_decay_rate']
-        executionTraces = []
+        decayingFutureBranchTraces = []
         for trace in tracesReversed:
-            executionTrace = numpy.array(trace.branchExecutionTrace)
+            decayingFutureBranchTrace = numpy.array(trace.branchExecutionTrace)
             currentTrace *= executionTraceDiscountRate
-            currentTrace += numpy.minimum(executionTrace, numpy.ones_like(executionTrace))
-            executionTraces.append(executionTrace)
+            currentTrace += numpy.minimum(decayingFutureBranchTrace, numpy.ones_like(decayingFutureBranchTrace))
+            decayingFutureBranchTraces.append(decayingFutureBranchTrace)
 
-        executionTraces.reverse()
+        decayingFutureBranchTraces.reverse()
 
-        nextTraces = list(executionSession.executionTraces)[1:]
+        nextTraces = list(executionTraces)[1:]
         nextProcessedImages = list(processedImages)[1:]
 
-        for trace, nextTrace, processedImage, nextProcessedImage, presentReward, executionTrace in zip(executionSession.executionTraces, nextTraces, processedImages, nextProcessedImages, presentRewards, executionTraces):
+        for trace, nextTrace, processedImage, nextProcessedImage, presentReward, decayingFutureBranchTrace in zip(executionTraces, nextTraces, processedImages, nextProcessedImages, presentRewards, decayingFutureBranchTraces):
             width = processedImage.shape[2]
             height = processedImage.shape[1]
 
@@ -1217,7 +1213,7 @@ class DeepLearningAgent(BaseAgent):
                 "actionTypes": [trace.actionPerformed.type],
                 "actionXs": numpy.array([int(trace.actionPerformed.x * self.agentConfiguration['model_image_downscale_ratio'])], dtype=numpy.int16),
                 "actionYs": numpy.array([int(trace.actionPerformed.y * self.agentConfiguration['model_image_downscale_ratio'])], dtype=numpy.int16),
-                "executionTraces": numpy.array([executionTrace], dtype=numpy.int8),
+                "futureBranchTraces": numpy.array([decayingFutureBranchTrace], dtype=numpy.int8),
 
                 "presentRewards": numpy.array([presentReward], dtype=numpy.float32),
                 "rewardPixelMasks": numpy.array([rewardPixelMask], dtype=numpy.uint8),
@@ -1229,7 +1225,7 @@ class DeepLearningAgent(BaseAgent):
         """
             Runs backprop on the neural network with the given batch.
 
-            :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingSequence
+            :param batch: A batch of image/action/output pairs. Should be the return value from prepareBatchesForTestingStep
             :return:
         """
         rewardPixelMasks = self.variableWrapperFunc(torch.IntTensor, batch['rewardPixelMasks'])
@@ -1253,9 +1249,9 @@ class DeepLearningAgent(BaseAgent):
         nextStepNumbers = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextStepNumbers']))
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
-            executionTracesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['executionTraces'])
+            futureBranchTracesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['futureBranchTraces'])
         else:
-            executionTracesTensor = None
+            futureBranchTracesTensor = None
 
         if self.agentConfiguration['enable_execution_feature_prediction_loss']:
             executionFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['executionFeatures'])
@@ -1389,7 +1385,7 @@ class DeepLearningAgent(BaseAgent):
         extraLosses = []
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
-            tracePredictionLoss = (currentStateOutputs['predictedTraces'] - executionTracesTensor).abs().mean()
+            tracePredictionLoss = (currentStateOutputs['predictedTraces'] - futureBranchTracesTensor).abs().mean()
             extraLosses.append(tracePredictionLoss.unsqueeze(0))
         else:
             tracePredictionLoss = zeroTensor
@@ -1417,7 +1413,7 @@ class DeepLearningAgent(BaseAgent):
 
         if self.agentConfiguration['enable_homogenization_loss']:
             targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
-            extraLosses.append(targetHomogenizationLoss)
+            extraLosses.append(targetHomogenizationLoss.unsqueeze(0))
         else:
             targetHomogenizationLoss = zeroTensor
 
@@ -1532,8 +1528,16 @@ class DeepLearningAgent(BaseAgent):
         shrunkWidth = int(width * config.getAgentConfiguration()['model_image_downscale_ratio'])
         shrunkHeight = int(height * config.getAgentConfiguration()['model_image_downscale_ratio'])
 
-        shrunkWidth += 8 - (shrunkWidth % 8)
-        shrunkHeight += 8 - (shrunkHeight % 8)
+        # Make sure the image aligns to the nearest 8 pixels,
+        # this is because the image gets downsampled and upsampled
+        # within the neural network by 8x, so both the image width
+        # and image height must perfectly divide 8 or else there
+        # will be errors within the neural network.
+        if (shrunkWidth % 8) > 0:
+            shrunkWidth += 8 - (shrunkWidth % 8)
+
+        if (shrunkHeight % 8) > 0:
+            shrunkHeight += 8 - (shrunkHeight % 8)
 
         shrunk = skimage.transform.resize(grey, (shrunkHeight, shrunkWidth), anti_aliasing=True)
 

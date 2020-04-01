@@ -1,11 +1,10 @@
-import kwola.tasks.TrainAgent
+import kwola.tasks.TrainAgentLoop
 import mongoengine
 
 
 
 
 def main():
-    mongoengine.connect('kwola')
-    kwola.tasks.TrainAgent.trainAgent()
+    kwola.tasks.TrainAgentLoop.trainAgent()
 
 

@@ -1,42 +1,43 @@
-from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
 from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.TestingSequenceModel import TestingSequenceModel
+from kwola.models.TestingStepModel import TestingStep
 from kwola.models.TrainingSequenceModel import TrainingSequence
 from kwola.models.TrainingStepModel import TrainingStep
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
 from .RunTrainingStep import runTrainingStep
-from .RunTestingSequence import runTestingSequence
+from .RunTestingStep import runTestingStep
 from concurrent.futures import ThreadPoolExecutor
 import mongoengine
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait
 from kwola.components.ManagedTaskSubprocess import ManagedTaskSubprocess
 import time
+import torch.cuda
 import multiprocessing
 import psutil
 import subprocess
 import os
 import os.path
 import traceback
+from kwola.models.id import generateNewUUID
 from datetime import datetime
 import atexit
 import bson
 from kwola.config import config
 
-def runRandomInitializationSubprocess(trainingSequence):
-    testingSequence = TestingSequenceModel()
-    testingSequence.save()
+def runRandomInitializationSubprocess(trainingSequence, testStepIndex):
+    testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)))
+    testingStep.saveToDisk()
 
-    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingSequence"], {
-        "testingSequenceId": str(testingSequence.id),
+    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingStep"], {
+        "testingStepId": str(testingStep.id),
         "shouldBeRandom": True
     }, timeout=config.getAgentConfiguration()['random_initialization_testing_sequence_timeout'])
     result = process.waitForProcessResult()
 
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
-    testingSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequence.id) ).first()
-    trainingSequence.initializationTestingSequences.append(testingSequence)
-    trainingSequence.save()
+    testingStep = TestingStep.loadFromDisk(testingStep.id)
+    trainingSequence.initializationTestingSteps.append(testingStep)
+    trainingSequence.saveToDisk()
 
     return
 
@@ -46,15 +47,12 @@ def runRandomInitialization(trainingSequence):
 
     agentConfig = config.getAgentConfiguration()
 
-    trainingSequence.initializationTestingSequences = []
+    trainingSequence.initializationTestingSteps = []
 
     futures = []
     with ThreadPoolExecutor(max_workers=agentConfig['training_random_initialization_workers']) as executor:
-        for n in range(agentConfig['training_random_initialization_sequences']):
-            sequence = TestingSequenceModel()
-            sequence.save()
-
-            future = executor.submit(runRandomInitializationSubprocess, trainingSequence)
+        for testStepIndex in range(agentConfig['training_random_initialization_sequences']):
+            future = executor.submit(runRandomInitializationSubprocess, trainingSequence, testStepIndex)
             futures.append(future)
 
             # Add in a delay for each successive task so that they parallelize smoother
@@ -66,16 +64,17 @@ def runRandomInitialization(trainingSequence):
             print(datetime.now(), "Random Testing Sequence Completed", flush=True)
 
     # Save the training sequence with all the data on the initialization sequences
-    trainingSequence.save()
+    trainingSequence.saveToDisk()
     print(datetime.now(), "Random initialization completed", flush=True)
 
 
 
 
-def runTrainingSubprocess(trainingSequence, gpuNumber):
+def runTrainingSubprocess(trainingSequence, trainingStepIndex, gpuNumber):
     try:
         process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
             "trainingSequenceId": str(trainingSequence.id),
+            "trainingStepIndex": trainingStepIndex,
             "gpu": gpuNumber
         }, timeout=config.getAgentConfiguration()['training_step_timeout'])
 
@@ -83,29 +82,29 @@ def runTrainingSubprocess(trainingSequence, gpuNumber):
 
         if 'trainingStepId' in result:
             trainingStepId = str(result['trainingStepId'])
-            trainingStep = TrainingStep.objects(id=bson.ObjectId(trainingStepId)).first()
+            trainingStep = TrainingStep.loadFromDisk(trainingStepId)
             trainingSequence.trainingSteps.append(trainingStep)
-            trainingSequence.save()
+            trainingSequence.saveToDisk()
     except Exception as e:
         traceback.print_exc()
         print(datetime.now(), "Training task subprocess appears to have failed", flush=True)
 
 
-def runTestingSubprocess(trainingSequence, generateDebugVideo=False):
-    testingSequence = TestingSequenceModel()
-    testingSequence.save()
+def runTestingSubprocess(trainingSequence, testStepIndex, generateDebugVideo=False):
+    testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)))
+    testingStep.saveToDisk()
 
-    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingSequence"], {
-        "testingSequenceId": str(testingSequence.id),
+    process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTestingStep"], {
+        "testingStepId": str(testingStep.id),
         "shouldBeRandom": False,
         "generateDebugVideo": generateDebugVideo
     }, timeout=config.getAgentConfiguration()['training_step_timeout'])
     result = process.waitForProcessResult()
 
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
-    testingSequence = TestingSequenceModel.objects(id=bson.ObjectId(testingSequence.id)).first()
-    trainingSequence.testingSequences.append(testingSequence)
-    trainingSequence.save()
+    testingStep = TestingStep.loadFromDisk(testingStep.id)
+    trainingSequence.testingSteps.append(testingStep)
+    trainingSequence.saveToDisk()
 
 
 
@@ -124,21 +123,31 @@ def runMainTrainingLoop(trainingSequence):
 
     stepStartTime = datetime.now()
 
+    testStepsLaunched = 0
+    trainingStepsLaunched = 0
+
+    numberOfTrainingStepsInParallel = max(1, torch.cuda.device_count())
+
     while stepsCompleted < agentConfig['training_steps_needed']:
-        with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + 2)) as executor:
+        with ThreadPoolExecutor(max_workers=(agentConfig['testing_sequences_in_parallel_per_training_step'] + numberOfTrainingStepsInParallel)) as executor:
             if os.path.exists("/tmp/kwola_distributed_coordinator"):
                 os.unlink("/tmp/kwola_distributed_coordinator")
 
             futures = []
 
-            trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=0)
-            futures.append(trainingFuture)
+            if torch.cuda.device_count() > 0:
+                for gpu in range(numberOfTrainingStepsInParallel):
+                    trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=gpu)
+                    futures.append(trainingFuture)
+                    trainingStepsLaunched += 1
+            else:
+                trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=None)
+                futures.append(trainingFuture)
+                trainingStepsLaunched += 1
 
-            trainingFuture = executor.submit(runTrainingSubprocess, trainingSequence, gpuNumber=1)
-            futures.append(trainingFuture)
-
-            for testingSequenceNumber in range(agentConfig['testing_sequences_per_training_step']):
-                futures.append(executor.submit(runTestingSubprocess, trainingSequence, generateDebugVideo=True if testingSequenceNumber == 0 else False))
+            for testingStepNumber in range(agentConfig['testing_sequences_per_training_step']):
+                testStepIndex = testStepsLaunched + agentConfig['training_random_initialization_sequences']
+                futures.append(executor.submit(runTestingSubprocess, trainingSequence, testStepIndex, generateDebugVideo=True if testingStepNumber == 0 else False))
                 time.sleep(3)
 
             wait(futures)
@@ -151,13 +160,13 @@ def runMainTrainingLoop(trainingSequence):
 
         trainingSequence.trainingStepsCompleted += 1
         trainingSequence.averageTimePerStep = (datetime.now() - stepStartTime).total_seconds() / stepsCompleted
-        trainingSequence.save()
+        trainingSequence.saveToDisk()
 
 
 def trainAgent():
     multiprocessing.set_start_method('spawn')
 
-    trainingSequence = TrainingSequence()
+    trainingSequence = TrainingSequence(id=generateNewUUID(TrainingSequence))
 
     trainingSequence.startTime = datetime.now()
     trainingSequence.status = "running"
@@ -168,15 +177,9 @@ def trainAgent():
 
     trainingSequence.status = "completed"
     trainingSequence.endTime = datetime.now()
-    trainingSequence.save()
-
-
-@app.task
-def trainAgentTask():
-    trainAgent()
+    trainingSequence.saveToDisk()
 
 
 if __name__ == "__main__":
-    mongoengine.connect('kwola')
     trainAgent()
 

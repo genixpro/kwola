@@ -277,8 +277,8 @@ class WebEnvironmentSession(BaseEnvironment):
         return actionMaps
 
 
-    def runAction(self, action):
-        executionTrace = ExecutionTrace()
+    def runAction(self, action, executionSessionId):
+        executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
         executionTrace.time = datetime.now()
         executionTrace.actionPerformed = action
         executionTrace.errorsDetected = []

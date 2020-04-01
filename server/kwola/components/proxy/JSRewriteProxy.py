@@ -2,14 +2,32 @@ from mitmproxy import ctx
 import subprocess
 import io
 from mitmproxy.script import concurrent
-import redis
 import hashlib
+from kwola.config.config import getKwolaUserDataDirectory
+import os.path
 
 
 class JSRewriteProxy:
     def __init__(self):
-        self.cache = redis.Redis(db=2)
         self.memoryCache = {}
+
+    def getCacheFileName(self, fileHash, fileName):
+        cacheFileName = os.path.join(getKwolaUserDataDirectory("javascript"), fileHash + "_" + fileName)
+        return cacheFileName
+
+
+    def findInCache(self, fileHash, fileName):
+        cacheFileName = self.getCacheFileName(fileHash, fileName)
+        if os.path.exists(cacheFileName):
+            with open(cacheFileName, 'rb') as f:
+                return f.read()
+
+
+    def saveInCache(self, fileHash, fileName, data):
+        cacheFileName = self.getCacheFileName(fileHash, fileName)
+        with open(cacheFileName, 'wb') as f:
+            return f.write(data)
+
 
     def request(self, flow):
         flow.request.headers['Accept-Encoding'] = 'identity'
@@ -39,11 +57,12 @@ class JSRewriteProxy:
             return
 
         fileHash = hasher.hexdigest()
+        fileName = flow.request.path.split("/")[-1]
         try:
-            if '.js' in flow.request.path:
+            if '.js' in fileName:
                 cached = self.memoryCache.get(fileHash)
                 if cached is None:
-                    cached = self.cache.get(fileHash)
+                    cached = self.findInCache(fileHash, fileName)
                     if cached is not None:
                         self.memoryCache[fileHash] = cached
 
@@ -63,7 +82,7 @@ class JSRewriteProxy:
                 else:
                     transformed = result.stdout
 
-                    self.cache.set(fileHash, transformed)
+                    self.saveInCache(fileHash, fileName, transformed)
                     self.memoryCache[fileHash] = transformed
 
                     flow.response.data.headers['Content-Length'] = str(len(transformed))

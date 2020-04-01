@@ -4,13 +4,19 @@ from .actions.BaseAction import BaseAction
 from .errors.BaseError import BaseError
 from .ActionMapModel import ActionMap
 import numpy
+from kwola.config.config import getKwolaUserDataDirectory
+import os.path
+from kwola.models.id import CustomIDField
+import json
 
 class ExecutionTrace(Document):
+    id = CustomIDField()
+
     time = DateField()
 
     executionSessionId = StringField()
 
-    testingSequenceId = StringField()
+    testingStepId = StringField()
 
     actionMaps = EmbeddedDocumentListField(ActionMap)
 
@@ -159,3 +165,17 @@ class ExecutionTrace(Document):
 
 
         return numpy.array(newArray)
+
+    def saveToDisk(self):
+        fileName = os.path.join(getKwolaUserDataDirectory("execution_traces"), str(self.id) + ".json")
+        with open(fileName, 'wt') as f:
+            f.write(json.dumps(json.loads(self.to_json()), indent=4))
+
+
+    @staticmethod
+    def loadFromDisk(id):
+        fileName = os.path.join(getKwolaUserDataDirectory("execution_traces"), str(id) + ".json")
+        if not os.path.exists(fileName):
+            return None
+        with open(fileName, 'rt') as f:
+            return ExecutionTrace.from_json(f.read())

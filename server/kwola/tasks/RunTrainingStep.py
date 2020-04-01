@@ -1,15 +1,11 @@
-from .celery_config import app
 from kwola.components.environments.WebEnvironment import WebEnvironment
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.TestingSequenceModel import TestingSequenceModel
+from kwola.models.TestingStepModel import TestingStep
 from kwola.models.TrainingStepModel import TrainingStep
 from kwola.models.ExecutionSessionModel import ExecutionSession
 from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
-from kwola.config.config import getKwolaUserDataDirectory
 from kwola.components.TaskProcess import TaskProcess
 import concurrent.futures
-import mongoengine
 import random
 import torch
 import torch.distributed
@@ -20,19 +16,11 @@ import multiprocessing.pool
 import gzip
 from datetime import datetime
 import traceback
-import redis
-import json
 import scipy.special
-import bson
 import tempfile
-import sklearn.preprocessing
 import pickle
 import os
 from kwola.config import config
-
-
-def getCacheIdForExecutionTraceId(executionTraceId):
-    return "execution-trace-" + str(executionTraceId)
 
 
 def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchDirectory):
@@ -40,13 +28,14 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
 
     agent = DeepLearningAgent(agentConfiguration=agentConfiguration, whichGpu=None)
 
-    sampleCache = redis.Redis(db=3)
-    cacheId = getCacheIdForExecutionTraceId(executionTraceId)
-    cached = sampleCache.get(cacheId)
-    if cached is not None:
+    sampleCacheDir = config.getKwolaUserDataDirectory("samples")
+    cacheFile = os.path.join(sampleCacheDir, executionTraceId + ".bin")
+
+    if os.path.exists(cacheFile):
         cacheHit = True
 
-        sampleBatch = pickle.loads(gzip.decompress(cached))
+        with open(cacheFile, 'rb') as file:
+            sampleBatch = pickle.loads(gzip.decompress(file.read()))
     else:
         cacheHit = False
 
@@ -56,7 +45,7 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
         else:
             trainingRewardNormalizer = None
 
-        executionSession = ExecutionSession.objects(id=bson.ObjectId(executionSessionId)).first()
+        executionSession = ExecutionSession.loadFromDisk(executionSessionId)
 
         batches = agent.prepareBatchesForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
 
@@ -64,14 +53,13 @@ def prepareBatchesForExecutionTrace(executionTraceId, executionSessionId, batchD
         for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
             traceId = traceBatch['traceIds'][0]
 
-            cacheId = getCacheIdForExecutionTraceId(traceId)
+            cacheFile = os.path.join(sampleCacheDir, traceId + ".bin")
 
             pickleBytes = pickle.dumps(traceBatch)
             compressedPickleBytes = gzip.compress(pickleBytes)
 
-            # Add random number here to ensure there isn't a bunch of entries expiring in the cache at the same time. We want to spread it out over the entire cache expiration period
-            expiration = agentConfiguration['training_execution_session_cache_expiration_seconds'] + random.randint(0, agentConfiguration['training_execution_session_cache_expiration_max_additional_random_seconds'])
-            sampleCache.set(cacheId, compressedPickleBytes, ex=expiration)
+            with open(cacheFile, 'wb') as file:
+                file.write(compressedPickleBytes)
 
             if traceId == executionTraceId:
                 sampleBatch = traceBatch
@@ -209,20 +197,29 @@ def prepareAndLoadSingleBatchForSubprocess(executionTraces, executionTraceIdMap,
         print("prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue", flush=True)
         subProcessCommandQueue.put(("batch", {}))
 
+def loadAllTestingSteps():
+    testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
+
+    testingSteps = []
+
+    for fileName in os.listdir(testStepsDir):
+        stepId = fileName.replace(".json", "")
+
+        testingSteps.append(TestingStep.loadFromDisk(stepId))
+
+    return testingSteps
+
+
 def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer=True, subprocessIndex=0):
     try:
         agentConfig = config.getAgentConfiguration()
 
         print(datetime.now(), "Starting initialization for batch preparation sub process.", flush=True)
 
-        testSequences = list(TestingSequenceModel.objects(status="completed")
-                             .no_dereference()
-                             .order_by('-startTime')
-                             .only('status', 'startTime', 'executionSessions')
-                             .limit(int(agentConfig['training_number_of_recent_testing_sequences_to_use']))
-                         )
+        testingSteps = sorted([step for step in loadAllTestingSteps() if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
+        testingSteps = list(testingSteps)[:int(agentConfig['training_number_of_recent_testing_sequences_to_use'])]
 
-        if len(testSequences) == 0:
+        if len(testingSteps) == 0:
             print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
             return
 
@@ -230,11 +227,11 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         executionSessionIds = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=int(agentConfig['training_max_initialization_workers']/agentConfig['training_batch_prep_subprocesses'])) as executor:
             executionSessionFutures = []
-            for testSequenceIndex, testSequence in enumerate(testSequences):
-                if testSequenceIndex % agentConfig['training_batch_prep_subprocesses'] == subprocessIndex:
-                    for session in testSequence.executionSessions:
-                        executionSessionIds.append(str(session['_ref'].id))
-                        executionSessionFutures.append(executor.submit(loadExecutionSession, session['_ref'].id))
+            for testStepIndex, testStep in enumerate(testingSteps):
+                if testStepIndex % agentConfig['training_batch_prep_subprocesses'] == subprocessIndex:
+                    for sessionId in testStep.executionSessions:
+                        executionSessionIds.append(str(sessionId))
+                        executionSessionFutures.append(executor.submit(loadExecutionSession, sessionId))
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
@@ -245,8 +242,8 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
         with concurrent.futures.ProcessPoolExecutor(max_workers=int(agentConfig['training_max_initialization_workers']/agentConfig['training_batch_prep_subprocesses'])) as executor:
             executionTraceFutures = []
             for session in executionSessions:
-                for trace in session.executionTraces[:-1]:
-                    executionTraceFutures.append(executor.submit(loadExecutionTrace, trace['_ref'].id))
+                for traceId in session.executionTraces[:-1]:
+                    executionTraceFutures.append(executor.submit(loadExecutionTrace, traceId))
 
             for traceFuture in executionTraceFutures:
                 trace = pickle.loads(traceFuture.result())
@@ -267,7 +264,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
             print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
 
 
-        del testSequences, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
+        del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
 
 
@@ -312,7 +309,7 @@ def prepareAndLoadBatchesSubprocess(batchDirectory, subProcessCommandQueue, subP
                     if executionTraceId in executionTraceIdMap:
                         trace = executionTraceIdMap[executionTraceId]
                         trace.lastTrainingRewardLoss = sampleRewardLoss
-                        trace.save()
+                        trace.saveToDisk()
 
                 if needToResetPool and lastProcessPool is None:
                     needToResetPool = False
@@ -412,16 +409,19 @@ def printMovingAverageLosses(trainingStep):
 
 
 def loadExecutionSession(sessionId):
-    session = ExecutionSession.objects(id=bson.ObjectId(sessionId)).no_dereference().first()
+    session = ExecutionSession.loadFromDisk(sessionId)
+    if session is None:
+        print(datetime.now(), f"Error! Did not find execution session {sessionId}")
+
     return session
 
 
 def loadExecutionTrace(traceId):
-    trace = ExecutionTrace.objects(id=bson.ObjectId(traceId)).no_dereference().only('executionSessionId', 'lastTrainingRewardLoss').first()
+    trace = ExecutionTrace.loadFromDisk(traceId)
     return pickle.dumps(trace)
 
 
-def runTrainingStep(trainingSequenceId, gpu=None):
+def runTrainingStep(trainingSequenceId, trainingStepIndex, gpu=None):
     if gpu is not None:
         for subprocessIndex in range(10):
             try:
@@ -440,13 +440,13 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         agentConfig = config.getAgentConfiguration()
 
         print(datetime.now(), "Starting Training Step", flush=True)
-        testSequences = list(TestingSequenceModel.objects(status="completed").no_dereference().order_by('-startTime').only('status', 'startTime', 'executionSessions').limit(agentConfig['training_number_of_recent_testing_sequences_to_use']))
-        if len(testSequences) == 0:
+        testingSteps = [step for step in loadAllTestingSteps() if step.status == "completed"]
+        if len(testingSteps) == 0:
             print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
             print(datetime.now(), "==== Training Step Completed ====", flush=True)
             return {}
 
-        trainingStep = TrainingStep()
+        trainingStep = TrainingStep(id=str(trainingSequenceId) + "_training_step_" + str(trainingStepIndex))
         trainingStep.startTime = datetime.now()
         trainingStep.trainingSequenceId = trainingSequenceId
         trainingStep.status = "running"
@@ -460,11 +460,11 @@ def runTrainingStep(trainingSequenceId, gpu=None):
         trainingStep.totalRewardLosses = []
         trainingStep.totalLosses = []
         trainingStep.totalRebalancedLosses = []
-        trainingStep.save()
+        trainingStep.saveToDisk()
 
         environment = WebEnvironment(environmentConfiguration=config.getWebEnvironmentConfiguration(), sessionLimit=1)
 
-        agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu="all" if gpu is None else gpu)
+        agent = DeepLearningAgent(agentConfiguration=config.getAgentConfiguration(), whichGpu=gpu)
         agent.initialize(environment.branchFeatureSize())
         agent.load()
 
@@ -595,13 +595,13 @@ def runTrainingStep(trainingSequenceId, gpu=None):
 
                 if trainingStep.numberOfIterationsCompleted % agentConfig['iterations_between_db_saves'] == (agentConfig['iterations_between_db_saves']-1):
                     if gpu is None or gpu == 0:
-                        trainingStep.save()
+                        trainingStep.saveToDisk()
 
         trainingStep.endTime = datetime.now()
         trainingStep.averageTimePerIteration = (trainingStep.endTime - trainingStep.startTime).total_seconds() / trainingStep.numberOfIterationsCompleted
         trainingStep.averageLoss = float(numpy.mean(trainingStep.totalLosses))
         trainingStep.status = "completed"
-        trainingStep.save()
+        trainingStep.saveToDisk()
 
         for subProcessCommandQueue in subProcessCommandQueues:
             subProcessCommandQueue.put(("quit", {}))
@@ -630,12 +630,6 @@ def runTrainingStep(trainingSequenceId, gpu=None):
     return {"trainingStepId": str(trainingStep.id)}
 
 
-@app.task
-def runTrainingStepTask(trainingSequenceId):
-    runTrainingStep(trainingSequenceId)
-
-
 if __name__ == "__main__":
-    mongoengine.connect('kwola')
     task = TaskProcess(runTrainingStep)
     task.run()

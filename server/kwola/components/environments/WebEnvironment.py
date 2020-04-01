@@ -135,7 +135,7 @@ class WebEnvironment(BaseEnvironment):
         return len(self.sessions)
 
 
-    def runActions(self, actions):
+    def runActions(self, actions, executionSessionIds):
         """
             Run a single action on each of the browser tabs within this environment.
 
@@ -146,8 +146,8 @@ class WebEnvironment(BaseEnvironment):
         resultFutures = []
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for tab, action in zip(self.sessions, actions):
-                resultFuture = executor.submit(tab.runAction, action)
+            for tab, action, executionSessionId in zip(self.sessions, actions, executionSessionIds):
+                resultFuture = executor.submit(tab.runAction, action, executionSessionId)
                 resultFutures.append(resultFuture)
 
         results = [
