@@ -21,7 +21,9 @@ import scipy.special
 import tempfile
 import pickle
 import os
-
+import sys
+import subprocess
+import atexit
 
 def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessionId, batchDirectory):
     config = Configuration(configDir)
@@ -218,7 +220,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
         testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
 
         if len(testingSteps) == 0:
-            print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
+            print(datetime.now(), "Error, no test sequences to train on for training step.", flush=True)
             return
 
         # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
@@ -229,7 +231,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                 if testStepIndex % config['training_batch_prep_subprocesses'] == subprocessIndex:
                     for sessionId in testStep.executionSessions:
                         executionSessionIds.append(str(sessionId))
-                        executionSessionFutures.append(executor.submit(loadExecutionSession, sessionId))
+                        executionSessionFutures.append(executor.submit(loadExecutionSession, sessionId, config))
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
@@ -241,7 +243,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
             executionTraceFutures = []
             for session in executionSessions:
                 for traceId in session.executionTraces[:-1]:
-                    executionTraceFutures.append(executor.submit(loadExecutionTrace, traceId))
+                    executionTraceFutures.append(executor.submit(loadExecutionTrace, traceId, configDir))
 
             for traceFuture in executionTraceFutures:
                 trace = pickle.loads(traceFuture.result())
@@ -250,17 +252,25 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
         print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.", flush=True)
 
-        if createRewardNormalizer:
-            print(datetime.now(), "Starting creation of the reward normalizer.", flush=True)
+        if config['enable_reward_normalization']:
+            rewardNormalizerPath = os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer")
+            if createRewardNormalizer:
+                print(datetime.now(), "Starting creation of the reward normalizer.", flush=True)
 
-            trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), config['training_reward_normalizer_fit_population_size'])))
+                trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), config['training_reward_normalizer_fit_population_size'])), configDir)
 
-            with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "wb") as normalizerFile:
-                pickle.dump(trainingRewardNormalizer, normalizerFile)
+                with open(rewardNormalizerPath, "wb") as normalizerFile:
+                    pickle.dump(trainingRewardNormalizer, normalizerFile)
 
-            del trainingRewardNormalizer
-            print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
-
+                del trainingRewardNormalizer
+                print(datetime.now(), "Finished creation of the reward normalizer.", flush=True)
+            else:
+                # Wait for a reward normalizer to be created by another of the batch-prep sub-proccesses
+                while True:
+                    if os.path.exists(rewardNormalizerPath):
+                        break
+                    else:
+                        time.sleep(1)
 
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
@@ -355,6 +365,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
     except Exception:
         print(datetime.now(), f"Error occurred in the batch preparation sub-process. Exiting.", flush=True)
         traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
 
 
 def prepareAndLoadBatch(subProcessCommandQueue, subProcessBatchResultQueue):
@@ -405,7 +417,7 @@ def printMovingAverageLosses(config, trainingStep):
         print(datetime.now(), "Moving Average Total Loss:", averageTotalLoss, flush=True)
 
 
-def loadExecutionSession(sessionId):
+def loadExecutionSession(sessionId, config):
     session = ExecutionSession.loadFromDisk(sessionId, config)
     if session is None:
         print(datetime.now(), f"Error! Did not find execution session {sessionId}")
@@ -413,7 +425,8 @@ def loadExecutionSession(sessionId):
     return session
 
 
-def loadExecutionTrace(traceId):
+def loadExecutionTrace(traceId, configDir):
+    config = Configuration(configDir)
     trace = ExecutionTrace.loadFromDisk(traceId, config)
     return pickle.dumps(trace)
 
@@ -439,7 +452,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         print(datetime.now(), "Starting Training Step", flush=True)
         testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
         if len(testingSteps) == 0:
-            print(datetime.now(), "Error, no test sequences in db to train on for training step.", flush=True)
+            print(datetime.now(), "Error, no test sequences to train on for training step.", flush=True)
             print(datetime.now(), "==== Training Step Completed ====", flush=True)
             return {}
 
@@ -487,6 +500,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
 
             subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer, subprocessIndex))
             subProcess.start()
+            atexit.register(lambda: subProcess.terminate())
 
             subProcessCommandQueues.append(subProcessCommandQueue)
             subProcessBatchResultQueues.append(subProcessBatchResultQueue)
@@ -586,7 +600,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                 if trainingStep.numberOfIterationsCompleted % config['print_loss_iterations'] == (config['print_loss_iterations']-1):
                     if gpu is None or gpu == 0:
                         print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
-                        printMovingAverageLosses(trainingStep)
+                        printMovingAverageLosses(config, trainingStep)
                         if config['print_cache_hit_rate']:
                             print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-config['print_cache_hit_rate_moving_average_length']:]):.0f}%", flush=True)
 
@@ -607,6 +621,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         if numpy.count_nonzero(numpy.isnan(trainingStep.totalLosses)) == 0:
             if gpu is None or gpu == 0:
                 agent.save()
+                agent.save(saveName=str(trainingStep.id))
                 print(datetime.now(), "Agent saved!", flush=True)
         else:
             print(datetime.now(), "ERROR! A NaN was detected in this models output. Not saving model.", flush=True)

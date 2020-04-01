@@ -4,7 +4,8 @@ import atexit
 import time
 import json
 import threading
-import datetime
+from datetime import datetime
+import os
 from kwola.components.TaskProcess import TaskProcess
 
 
@@ -19,18 +20,37 @@ class ManagedTaskSubprocess:
         They will also be monitored with a timeout and such.
     """
 
-    def __init__(self, args, data, timeout):
-        self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=None, stdin=subprocess.PIPE)
+    def __init__(self, args, data, timeout, config, logId):
+        self.logFilePath = os.path.join(config.getKwolaUserDataDirectory("logs"), logId + "_log.txt")
+        self.currentLogSize = 0
+
+        processOutputFile = open(self.logFilePath, 'w')
+        self.process = subprocess.Popen(args, stdout=processOutputFile, stderr=processOutputFile, stdin=subprocess.PIPE)
 
         self.process.stdin.write(bytes(json.dumps(data) + "\n", "utf8"))
         self.process.stdin.flush()
-        self.startTime = datetime.datetime.now()
+        self.startTime = datetime.now()
         self.alive = True
         self.timeout = timeout
 
         self.output = ''
 
         self.monitorTimeoutProcess = threading.Thread(target=lambda: self.timeoutMonitoringThread())
+
+    def __del__(self):
+        self.process.terminate()
+
+    def getLatestLogOutput(self):
+        newSize = os.stat(self.logFilePath).st_size
+
+        if newSize == self.currentLogSize:
+            return None
+        else:
+            file = open(self.logFilePath, 'rt')
+            file.seek(self.currentLogSize)
+            data = file.read()
+            self.currentLogSize += len(data)
+            return data
 
 
     def gracefullyTerminateProcess(self):
@@ -64,43 +84,58 @@ class ManagedTaskSubprocess:
 
 
     def extractResultFromOutput(self):
-        resultStart = self.output.index(TaskProcess.resultStartString)
-        resultFinish = self.output.index(TaskProcess.resultFinishString)
-
-        if resultStart is None or resultFinish is None:
-            print("Error! Unable to exact result from the subprocess. Possible it may have died", flush=True)
+        if TaskProcess.resultStartString not in self.output or TaskProcess.resultFinishString not in self.output:
+            print(datetime.now(), "Error! Unable to extract result from the subprocess. Its possible the subprocess may have died", flush=True)
             return None
         else:
+            resultStart = self.output.index(TaskProcess.resultStartString)
+            resultFinish = self.output.index(TaskProcess.resultFinishString)
+
             resultDataString = self.output[resultStart + len(TaskProcess.resultStartString) : resultFinish]
             result = json.loads(resultDataString)
             return result
 
+    def doesOutputHaveExitString(self):
+        # This is here to catch when a python exception happens in the sub-process but it did not fully die
+        if "Traceback (most recent call last)" in self.output:
+            return True
+
+        if TaskProcess.resultFinishString in self.output:
+            return True
+
+        return False
 
     def waitForProcessResult(self):
         atexit.register(lambda: self.process.kill())
 
+        waitBetweenStdoutUpdates = 0.5
+
         self.output = ''
-        while self.process.returncode is None and (TaskProcess.resultFinishString not in self.output) and self.alive:
-            nextChars = str(self.process.stdout.readline(), 'utf8')
-            for nextChar in nextChars:
-                if nextChar == chr(127):
-                    self.output = self.output[:-1]  # Erase the last character from the self.output.
-                else:
-                    self.output += nextChar
-                    print(nextChar, sep="", end="")
+        while self.process.returncode is None and (not self.doesOutputHaveExitString()) and self.alive:
+            nextChars = self.getLatestLogOutput()
 
-            print("", sep="", end="", flush=True)
+            if nextChars is not None:
+                for nextChar in nextChars:
+                    if nextChar == chr(127):
+                        self.output = self.output[:-1]  # Erase the last character from the self.output.
+                    else:
+                        self.output += nextChar
+                        print(nextChar, sep="", end="")
+                print("", sep="", end="", flush=True)
+            else:
+                time.sleep(waitBetweenStdoutUpdates)
 
-        print("Terminating process, task finished.", flush=True)
+        print(datetime.now(), "Terminating task subprocess, task finished.", flush=True)
         self.alive = False
         self.stopProcessBothMethods()
 
-        additionalOutput = str(self.process.stdout.read(), 'utf8')
-        self.output += additionalOutput
-        print(additionalOutput, sep="", end="", flush=True)
+        additionalOutput = self.getLatestLogOutput()
+        if additionalOutput is not None:
+            self.output += additionalOutput
+            print(additionalOutput, sep="", end="", flush=True)
 
         result = self.extractResultFromOutput()
-        print("Task Subprocess finished and gave back result", flush=True)
+        print(datetime.now(), "Task Subprocess finished and gave back result", flush=True)
         print(json.dumps(result, indent=4), flush=True)
 
         return result
@@ -109,9 +144,9 @@ class ManagedTaskSubprocess:
 
     def timeoutMonitoringThread(self):
         while self.alive:
-            elapsedSeconds = (datetime.datetime.now() - self.startTime).total_seconds()
+            elapsedSeconds = (datetime.now() - self.startTime).total_seconds()
             if elapsedSeconds > self.timeout:
-                print("Killing Process due to too much time elapsed", flush=True)
+                print(datetime.now(), "Killing Process due to too much time elapsed", flush=True)
                 self.stopProcessBothMethods()
 
             time.sleep(1)

@@ -155,13 +155,17 @@ class DeepLearningAgent(BaseAgent):
             self.targetNetwork.load_state_dict(stateDict)
 
 
-    def save(self):
+    def save(self, saveName=""):
         """
             Saves the agent to the db / disk.
 
             :return:
         """
-        torch.save(self.model.state_dict(), self.modelPath)
+
+        if saveName:
+            saveName = "_" + saveName
+
+        torch.save(self.model.state_dict(), self.modelPath + saveName)
 
 
     def initialize(self, branchFeatureSize):
@@ -612,7 +616,7 @@ class DeepLearningAgent(BaseAgent):
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = []
             for traceId, rawImage in zip(executionSession.executionTraces, rawImages):
-                trace = ExecutionTrace.loadFromDisk(traceId, config)
+                trace = ExecutionTrace.loadFromDisk(traceId, self.config)
                 future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
                 futures.append(future)
 
@@ -1052,6 +1056,8 @@ class DeepLearningAgent(BaseAgent):
 
     @staticmethod
     def createTrainingRewardNormalizer(execusionSessionIds, configDir):
+        config = Configuration(configDir)
+
         rewardFutures = []
 
         rewardSequences = []
@@ -1059,7 +1065,7 @@ class DeepLearningAgent(BaseAgent):
         cumulativeRewards = []
 
         longest = 0
-        with concurrent.futures.ProcessPoolExecutor(max_workers=agentConfig['training_max_initialization_workers']) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=config['training_max_initialization_workers']) as executor:
             for sessionId in execusionSessionIds:
                 rewardFutures.append(executor.submit(DeepLearningAgent.computeTotalRewardsParallel, str(sessionId), configDir))
 
@@ -1118,7 +1124,7 @@ class DeepLearningAgent(BaseAgent):
             processedImages.append(processedImage)
 
         # First compute the present reward at each time step
-        presentRewards = DeepLearningAgent.computePresentRewards(executionSession, config)
+        presentRewards = DeepLearningAgent.computePresentRewards(executionSession, self.config)
 
         # If there is a normalizer, use it to normalize the rewards
         if trainingRewardNormalizer is not None:
@@ -1134,7 +1140,7 @@ class DeepLearningAgent(BaseAgent):
             presentRewards = normalizedTotalRewards[:len(presentRewards)]
 
         # Create the decaying future execution trace for the prediction algorithm
-        executionTraces = [ExecutionTrace.loadFromDisk(traceId, config) for traceId in executionSession.executionTraces]
+        executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
         tracesReversed = list(copy.copy(executionTraces))
         tracesReversed.reverse()
         currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace)

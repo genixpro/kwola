@@ -27,7 +27,10 @@ class Configuration:
 
         subDirectory = os.path.join(self.configurationDirectory, subDirName)
         if not os.path.exists(subDirectory):
-            os.mkdir(subDirectory)
+            try:
+                os.mkdir(subDirectory)
+            except FileExistsError:
+                pass
 
         return subDirectory
 

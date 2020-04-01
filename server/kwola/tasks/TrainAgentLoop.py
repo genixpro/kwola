@@ -32,7 +32,7 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
         "configDir": config.configurationDirectory,
         "testingStepId": str(testingStep.id),
         "shouldBeRandom": True
-    }, timeout=config['random_initialization_testing_sequence_timeout'])
+    }, timeout=config['random_initialization_testing_sequence_timeout'], config=config, logId=testingStep.id)
     result = process.waitForProcessResult()
 
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
@@ -76,15 +76,18 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
             "trainingSequenceId": str(trainingSequence.id),
             "trainingStepIndex": trainingStepIndex,
             "gpu": gpuNumber
-        }, timeout=config['training_step_timeout'])
+        }, timeout=config['training_step_timeout'], config=config, logId=str(trainingSequence.id + "_training_step_" + str(trainingStepIndex)))
 
         result = process.waitForProcessResult()
 
-        if 'trainingStepId' in result:
+        if result is not None and 'trainingStepId' in result:
             trainingStepId = str(result['trainingStepId'])
             trainingStep = TrainingStep.loadFromDisk(trainingStepId, config)
             trainingSequence.trainingSteps.append(trainingStep)
             trainingSequence.saveToDisk(config)
+        else:
+            print(datetime.now(), "Training task subprocess appears to have failed", flush=True)
+
     except Exception as e:
         traceback.print_exc()
         print(datetime.now(), "Training task subprocess appears to have failed", flush=True)
@@ -99,7 +102,7 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         "testingStepId": str(testingStep.id),
         "shouldBeRandom": False,
         "generateDebugVideo": generateDebugVideo
-    }, timeout=config['training_step_timeout'])
+    }, timeout=config['training_step_timeout'], config=config, logId=testingStep.id)
     result = process.waitForProcessResult()
 
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
@@ -148,6 +151,7 @@ def runMainTrainingLoop(config, trainingSequence):
                 testStepIndex = testStepsLaunched + config['training_random_initialization_sequences']
                 futures.append(executor.submit(runTestingSubprocess, config, trainingSequence, testStepIndex, generateDebugVideo=True if testingStepNumber == 0 else False))
                 time.sleep(3)
+                testStepsLaunched += 1
 
             wait(futures)
 

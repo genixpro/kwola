@@ -1,5 +1,6 @@
 import sys
 import json
+from datetime import datetime
 
 class TaskProcess:
     """
@@ -15,10 +16,10 @@ class TaskProcess:
 
 
     def run(self):
-        print("Waiting for input from stdin", flush=True)
+        print(datetime.now(), "TaskProcess: Waiting for input from stdin", flush=True)
         dataStr = sys.stdin.readline()
         data = json.loads(dataStr)
-        print("Running process with following data:", flush=True)
+        print(datetime.now(), "Running process with following data:", flush=True)
         print(json.dumps(data, indent=4), flush=True)
         result = self.targetFunc(**data)
         print(TaskProcess.resultStartString, flush=True)

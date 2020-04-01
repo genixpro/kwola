@@ -12,6 +12,7 @@ import traceback
 import tempfile
 import os
 import multiprocessing
+import atexit
 
 
 def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
@@ -112,6 +113,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             subProcessResultQueue = multiprocessing.Queue()
             subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
             subProcess.start()
+            atexit.register(lambda: subProcess.terminate())
 
             subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
 
@@ -173,6 +175,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 subProcessResultQueue = multiprocessing.Queue()
                 subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
                 subProcess.start()
+                atexit.register(lambda: subProcess.terminate())
 
                 subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
 
@@ -223,12 +226,14 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             # Start some parallel processes generating debug videos.
             debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
             debugVideoSubprocess1.start()
+            atexit.register(lambda: debugVideoSubprocess1.terminate())
 
             # Leave a gap between the two to reduce collision
             time.sleep(5)
 
             debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix"))
             debugVideoSubprocess2.start()
+            atexit.register(lambda: debugVideoSubprocess2.terminate())
 
             debugVideoSubprocess1.join()
             debugVideoSubprocess2.join()
