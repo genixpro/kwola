@@ -143,21 +143,15 @@ class DeepLearningAgent(BaseAgent):
         if os.path.exists(self.modelPath):
             if self.whichGpu is None:
                 device = torch.device('cpu')
-                self.model.load_state_dict(torch.load(self.modelPath, map_location=device))
+                stateDict = torch.load(self.modelPath, map_location=device)
             elif self.whichGpu != "all":
                 device = torch.device(f"cuda:{self.whichGpu}")
-                self.model.load_state_dict(torch.load(self.modelPath, map_location=device))
+                stateDict = torch.load(self.modelPath, map_location=device)
             else:
-                self.model.load_state_dict(torch.load(self.modelPath))
+                stateDict = torch.load(self.modelPath)
 
-            if self.whichGpu is None:
-                device = torch.device('cpu')
-                self.targetNetwork.load_state_dict(torch.load(self.modelPath, map_location=device))
-            elif self.whichGpu != "all":
-                device = torch.device(f"cuda:{self.whichGpu}")
-                self.targetNetwork.load_state_dict(torch.load(self.modelPath, map_location=device))
-            else:
-                self.targetNetwork.load_state_dict(torch.load(self.modelPath))
+            self.model.load_state_dict(stateDict)
+            self.targetNetwork.load_state_dict(stateDict)
 
 
     def save(self):
@@ -953,7 +947,7 @@ class DeepLearningAgent(BaseAgent):
                 stampImageWidth = self.agentConfiguration['additional_features_stamp_edge_size'] * self.agentConfiguration['additional_features_stamp_edge_size']
                 stampImageHeight = self.agentConfiguration['additional_features_stamp_depth_size']
 
-                stampIm = stampAxes.imshow(numpy.array(stamp.data[0]).reshape([stampImageWidth, stampImageHeight]), cmap=greyColorMap, interpolation="nearest", vmin=-20.0, vmax=20.0)
+                stampIm = stampAxes.imshow(numpy.array(stamp.data[0]).reshape([stampImageWidth, stampImageHeight]), cmap=greyColorMap, interpolation="nearest", vmin=-1.0, vmax=5.0)
                 mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
                 stampAxes.set_title("Memory Stamp")
 
@@ -1396,21 +1390,21 @@ class DeepLearningAgent(BaseAgent):
 
         if self.agentConfiguration['enable_trace_prediction_loss']:
             tracePredictionLoss = (currentStateOutputs['predictedTraces'] - executionTracesTensor).abs().mean()
-            extraLosses.append(tracePredictionLoss)
+            extraLosses.append(tracePredictionLoss.unsqueeze(0))
         else:
             tracePredictionLoss = zeroTensor
 
 
         if self.agentConfiguration['enable_execution_feature_prediction_loss']:
             predictedExecutionFeaturesLoss = (currentStateOutputs['predictedExecutionFeatures'] - executionFeaturesTensor).abs().mean()
-            extraLosses.append(predictedExecutionFeaturesLoss)
+            extraLosses.append(predictedExecutionFeaturesLoss.unsqueeze(0))
         else:
             predictedExecutionFeaturesLoss = zeroTensor
 
 
         if self.agentConfiguration['enable_cursor_prediction_loss']:
             predictedCursorLoss = (currentStateOutputs['predictedCursor'] - cursorsTensor).abs().mean()
-            extraLosses.append(predictedCursorLoss)
+            extraLosses.append(predictedCursorLoss.unsqueeze(0))
         else:
             predictedCursorLoss = zeroTensor
 
