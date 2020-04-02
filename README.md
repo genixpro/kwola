@@ -1,21 +1,62 @@
 Kwola
 =====
 
-Kwola is an artificial intelligence framework used for frontend testing. Kwola replaces out-dated techniques such as writing automated tests with Selenium or Cypress, with a new automated approach using taking advantage of reinforcement learning.
+Kwola is an AI user that helps you find bugs in your software. Unlike conventional Selenium or Cypress tests,
+Kwola will learn to use your user-interface completely automatically, with no configuration.
 
 Please go to https://kwola.io/ or https://kwolatesting.com/ to learn more.
 
 Installation
 ============
 
-Kwola is based on Python. Please first install Tensorflow prior to executing the Kwola codebase.
+Kwola is based on Python 3, please make sure you are using the correct version of Python. Kwola also requires NodeJS to
+rewrite the javascript code in the web applications it touches. Please install NodeJS prior to following these instructions.
+
+
+Clone the git repository.
+
+`[user@localhost]$ git clone https://github.com/Kwola/kwola.git`
+
+Create your Python virtual environment
+
+`[user@localhost]$ cd kwola`
+
+`[user@localhost]$ python3 -m venv venv`
+
+`[user@localhost]$ source venv/bin/activate`
+
+
+Install dependencies
+
+`[user@localhost]$ npm install`
+
+`[user@localhost]$ python3 setup.py develop`
+
+And that's it! 
+
+
 
 Usage
 =====
 
-Use Jupyter notebook to run the Kwola initial demo codebase.
+Running Kwola is very straightforward. To initiate a Kwola testing session, run the following command.
 
-$ jupyter notebook
+Make sure to replace the URL with the url pointing to the website you want to start testing. The URL
+must be a complete, fully validated url containing the http:// part and everything
+
+`[user@localhost]$ kwola http://yoururl.com/`
+
+Kwola will now start testing your application! Its that easy. Kwola will create a directory to hold
+all of its results in your current directory. You can cancel the run simply using Ctrl-C or Cmd-C in
+your terminal. If you want to restart the run, simply run kwola with no arguments:
+
+`[user@localhost]$ kwola`
+
+Or alternatively, you can run Kwola and give it a specific directory containing a Kwola run. This
+allows you to restart specific runs.
+
+`[user@localhost]$ kwola kwola_run_0`
+
 
 Support
 =======
