@@ -211,6 +211,13 @@ def loadAllTestingSteps(config):
     return testingSteps
 
 
+def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
+    config = Configuration(configDir)
+    trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=False)
+    trace.lastTrainingRewardLoss = sampleRewardLoss
+    trace.saveToDisk(config)
+
+
 def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer=True, subprocessIndex=0):
     try:
         config = Configuration(configDir)
@@ -248,8 +255,9 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
             for traceFuture in executionTraceFutures:
                 trace = pickle.loads(traceFuture.result())
-                executionTraces.append(trace)
-                executionTraceIdMap[str(trace.id)] = trace
+                if trace is not None:
+                    executionTraces.append(trace)
+                    executionTraceIdMap[str(trace.id)] = trace
 
         print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.", flush=True)
 
@@ -278,6 +286,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
 
         processPool = multiprocessing.pool.Pool(processes=config['training_initial_batch_prep_workers'])
+        backgroundTraceSaveProcessPool = multiprocessing.pool.Pool(processes=config['training_background_trace_save_workers'])
+        executionTraceSaveFutures = {}
 
         batchCount = 0
         cacheFullState = True
@@ -316,9 +326,11 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     executionTraceId = data["executionTraceId"]
                     sampleRewardLoss = data["sampleRewardLoss"]
                     if executionTraceId in executionTraceIdMap:
-                        trace = executionTraceIdMap[executionTraceId]
-                        trace.lastTrainingRewardLoss = sampleRewardLoss
-                        trace.saveToDisk(config)
+                        if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
+                            trace = executionTraceIdMap[executionTraceId]
+                            trace.lastTrainingRewardLoss = sampleRewardLoss
+                            traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(updateTraceRewardLoss, (executionTraceId, sampleRewardLoss, configDir))
+                            executionTraceSaveFutures[executionTraceId] = traceSaveFuture
 
                 if needToResetPool and lastProcessPool is None:
                     needToResetPool = False
@@ -359,6 +371,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                         lastProcessPool = None
                         lastProcessPoolFutures = []
 
+        backgroundTraceSaveProcessPool.close()
+        backgroundTraceSaveProcessPool.join()
         processPool.terminate()
         if lastProcessPool is not None:
             lastProcessPool.terminate()
@@ -428,7 +442,7 @@ def loadExecutionSession(sessionId, config):
 
 def loadExecutionTrace(traceId, configDir):
     config = Configuration(configDir)
-    trace = ExecutionTrace.loadFromDisk(traceId, config)
+    trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True)
     return pickle.dumps(trace)
 
 

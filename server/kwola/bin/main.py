@@ -35,7 +35,7 @@ Please try again.
             # Create a new config directory for this URL
             url = secondArg
 
-            configDir = Configuration.createNewLocalKwolaConfigDir("laptop", url)
+            configDir = Configuration.createNewLocalKwolaConfigDir("rig", url)
             print(f"Starting a fresh Kwola run in directory {configDir} targeting URL {url}")
         else:
             print(cantStartMessage)

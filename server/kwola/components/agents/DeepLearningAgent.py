@@ -600,9 +600,14 @@ class DeepLearningAgent(BaseAgent):
 
         executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
 
-        presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
+        # Filter out any traces that failed to load. Generally this only happens when you interrupt the process
+        # while it is writing a file. So it happens to devs but not in production. Still we protect against
+        # this case in several places throughout the code.
+        executionTracesFiltered = [trace for trace in executionTraces if trace is not None]
 
-        discountedFutureRewards = DeepLearningAgent.computeDiscountedFutureRewards(executionTraces, self.config)
+        presentRewards = DeepLearningAgent.computePresentRewards(executionTracesFiltered, self.config)
+
+        discountedFutureRewards = DeepLearningAgent.computeDiscountedFutureRewards(executionTracesFiltered, self.config)
 
         tempScreenshotDirectory = tempfile.mkdtemp()
 
@@ -616,11 +621,12 @@ class DeepLearningAgent(BaseAgent):
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = []
             for trace, rawImage in zip(executionTraces, rawImages):
-                future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
-                futures.append(future)
+                if trace is not None:
+                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
+                    futures.append(future)
 
-                debugImageIndex += 2
-                lastRawImage = rawImage
+                    debugImageIndex += 2
+                    lastRawImage = rawImage
 
             concurrent.futures.wait(futures)
 
@@ -1049,7 +1055,8 @@ class DeepLearningAgent(BaseAgent):
 
         session = ExecutionSession.loadFromDisk(execusionSessionId, config)
 
-        executionTraces = [ExecutionTrace.loadFromDisk(traceId, config) for traceId in session.executionTraces]
+        executionTraces = [ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True) for traceId in session.executionTraces]
+        executionTraces = [trace for trace in executionTraces if trace is not None]
 
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, config)
 
@@ -1119,12 +1126,15 @@ class DeepLearningAgent(BaseAgent):
         """
         processedImages = []
 
-        videoPath = self.config.getKwolaUserDataDirectory("videos")
-        for rawImage in DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')):
-            processedImage = DeepLearningAgent.processRawImageParallel(rawImage, self.config)
-            processedImages.append(processedImage)
+        executionTraces = []
 
-        executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
+        videoPath = self.config.getKwolaUserDataDirectory("videos")
+        for rawImage, traceId in zip(DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')), executionSession.executionTraces):
+            trace = ExecutionTrace.loadFromDisk(traceId, self.config)
+            if trace is not None:
+                processedImage = DeepLearningAgent.processRawImageParallel(rawImage, self.config)
+                processedImages.append(processedImage)
+                executionTraces.append(trace)
 
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)

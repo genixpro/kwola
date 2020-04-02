@@ -22,8 +22,11 @@ class ApplicationModel(Document):
 
     @staticmethod
     def loadFromDisk(id, config):
-        fileName = os.path.join(config.getKwolaUserDataDirectory("applications"), str(id) + ".json.gz")
-        with LockedFile(fileName, 'rb') as f:
-            return ApplicationModel.from_json(str(gzip.decompress(f.read()), "utf8"))
+        try:
+            fileName = os.path.join(config.getKwolaUserDataDirectory("applications"), str(id) + ".json.gz")
+            with LockedFile(fileName, 'rb') as f:
+                return ApplicationModel.from_json(str(gzip.decompress(f.read()), "utf8"))
+        except json.JSONDecodeError:
+            return
 
 

@@ -174,9 +174,20 @@ class ExecutionTrace(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config):
-        fileName = os.path.join(config.getKwolaUserDataDirectory("execution_traces"), str(id) + ".json.gz")
-        if not os.path.exists(fileName):
-            return None
-        with LockedFile(fileName, 'rb') as f:
-            return ExecutionTrace.from_json(str(gzip.decompress(f.read()), "utf8"))
+    def loadFromDisk(id, config, omitLargeFields=False):
+        try:
+            fileName = os.path.join(config.getKwolaUserDataDirectory("execution_traces"), str(id) + ".json.gz")
+            if not os.path.exists(fileName):
+                return None
+            with LockedFile(fileName, 'rb') as f:
+                trace = ExecutionTrace.from_json(str(gzip.decompress(f.read()), "utf8"))
+
+                if omitLargeFields:
+                    trace.branchExecutionTrace = []
+                    trace.startDecayingExecutionTrace = []
+                    trace.startCumulativeBranchExecutionTrace = []
+
+                return trace
+        except json.JSONDecodeError:
+            return
+

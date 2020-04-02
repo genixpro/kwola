@@ -34,8 +34,12 @@ class TestingStep(Document):
 
     @staticmethod
     def loadFromDisk(id, config):
-        fileName = os.path.join(config.getKwolaUserDataDirectory("testing_steps"), str(id) + ".json.gz")
-        if not os.path.exists(fileName):
-            return None
-        with LockedFile(fileName, 'rb') as f:
-            return TestingStep.from_json(str(gzip.decompress(f.read()), "utf8"))
+        try:
+            fileName = os.path.join(config.getKwolaUserDataDirectory("testing_steps"), str(id) + ".json.gz")
+            if not os.path.exists(fileName):
+                return None
+            with LockedFile(fileName, 'rb') as f:
+                return TestingStep.from_json(str(gzip.decompress(f.read()), "utf8"))
+        except json.JSONDecodeError:
+            return
+
