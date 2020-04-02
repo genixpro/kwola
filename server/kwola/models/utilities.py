@@ -50,7 +50,7 @@ def loadObjectFromDisk(modelClass, id, folder, config):
             gzipPickleFileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(id) + ".pickle.gz")
             if os.path.exists(gzipPickleFileName):
                 with LockedFile(gzipPickleFileName, 'rb') as f:
-                    object = pickle.load(gzip.decompress(f.read()))
+                    object = pickle.loads(gzip.decompress(f.read()))
 
         # Next try to load vanilla json version
         if object is None:

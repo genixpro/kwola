@@ -104,7 +104,7 @@
   "testing_subprocess_pool_size": 1,
   "training_action_prob_reward_square_size": 6,
   "training_batch_prep_subprocesses": 1,
-  "training_background_trace_save_workers": 2,
+  "training_background_trace_save_workers": 1,
   "training_cache_full_batch_prep_workers": 4,
   "training_cache_full_state_min_cache_hit_rate": 0.997,
   "training_cache_full_state_moving_average_length": 50,
@@ -145,5 +145,6 @@
   "web_session_print_every_action_failure": true,
   "data_compress_level": 1,
   "data_serialization_method": "json",
-  "training_trace_selection_min_loss_difference_for_save": 0.1
+  "training_trace_selection_min_loss_ratio_difference_for_save": 0.25,
+  "training_trace_selection_iterations_before_end_to_stop_updating_trace_losses": 250
 }

@@ -329,12 +329,14 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     executionTraceId = data["executionTraceId"]
                     sampleRewardLoss = data["sampleRewardLoss"]
                     if executionTraceId in executionTraceIdMap:
-                        if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
-                            trace = executionTraceIdMap[executionTraceId]
-                            # We do this check here because saving execution traces is actually a pretty CPU heavy process,
-                            # so we only want to do it when absolutely necessary
-                            if abs(trace.lastTrainingRewardLoss - sampleRewardLoss) > config['training_trace_selection_min_loss_difference_for_save']:
-                                trace.lastTrainingRewardLoss = sampleRewardLoss
+                        trace = executionTraceIdMap[executionTraceId]
+
+                        # We do this check here because saving execution traces is actually a pretty CPU heavy process,
+                        # so we only want to do it if the loss has actually changed by a significant degree
+                        differenceRatio = abs(trace.lastTrainingRewardLoss - sampleRewardLoss) / trace.lastTrainingRewardLoss
+                        if differenceRatio > config['training_trace_selection_min_loss_ratio_difference_for_save']:
+                            trace.lastTrainingRewardLoss = sampleRewardLoss
+                            if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
                                 traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(updateTraceRewardLoss, (executionTraceId, sampleRewardLoss, configDir))
                                 executionTraceSaveFutures[executionTraceId] = traceSaveFuture
 
@@ -608,9 +610,14 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                     trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
                     trainingStep.totalLosses.append(totalLoss)
 
-                    for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                        for subProcessCommandQueue in subProcessCommandQueues:
-                            subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                    # This extra check is done here because updating the trace losses in an expensive operation,
+                    # and what often happens is that there is a backlog of such operations when the training loop
+                    # finishes. To prevent this, we just stop doing these loss updates some number of iterations
+                    # before the training loop finishes.
+                    if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
+                        for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
+                            for subProcessCommandQueue in subProcessCommandQueues:
+                                subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
 
                 if trainingStep.numberOfIterationsCompleted % config['training_update_target_network_every'] == (config['training_update_target_network_every'] - 1):
                     print(datetime.now(), "Updating the target network weights to the current primary network weights.", flush=True)

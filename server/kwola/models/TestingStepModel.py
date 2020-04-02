@@ -30,5 +30,11 @@ class TestingStep(Document):
 
     @staticmethod
     def loadFromDisk(id, config):
-        return loadObjectFromDisk(TestingStep, id, "testing_steps", config)
+        data = loadObjectFromDisk(TestingStep, id, "testing_steps", config)
 
+        if data.startTime is not None:
+            data.startTime = datetime.datetime(year=data.startTime.year, month=data.startTime.month, day=data.startTime.day, hour=data.startTime.hour, minute=data.startTime.minute, second=data.startTime.second)
+        if data.endTime is not None:
+            data.endTime = datetime.datetime(year=data.endTime.year, month=data.endTime.month, day=data.endTime.day, hour=data.endTime.hour, minute=data.endTime.minute, second=data.endTime.second)
+
+        return data
