@@ -8,8 +8,6 @@ import torch.autograd as autograd
 import torch.nn.functional as F
 import scipy.signal
 import pandas
-from torchvision import models
-
 
 class BradNet(nn.Module):
     def __init__(self, config, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
