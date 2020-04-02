@@ -28,26 +28,26 @@ class ActionMap(EmbeddedDocument):
     
     keywords = StringField()
 
-    def __eq__(self, other):
+    def doesOverlapWith(self, other, tolerancePixels=0):
         if self.elementType != other.elementType:
             return False
 
-        if self.left != other.left:
+        if abs(self.left - other.left) > tolerancePixels:
             return False
 
-        if self.top != other.top:
+        if abs(self.top - other.top) > tolerancePixels:
             return False
 
-        if self.bottom != other.bottom:
+        if abs(self.bottom - other.bottom) > tolerancePixels:
             return False
 
-        if self.right != other.right:
+        if abs(self.right - other.right) > tolerancePixels:
             return False
 
-        if self.width != other.width:
+        if abs(self.width - other.width) > tolerancePixels:
             return False
 
-        if self.height != other.height:
+        if abs(self.height - other.height) > tolerancePixels:
             return False
 
         if self.canClick != other.canClick:
@@ -60,6 +60,9 @@ class ActionMap(EmbeddedDocument):
             return False
 
         return True
+
+    def __eq__(self, other):
+        return self.doesOverlapWith(other)
 
     def __ne__(self, other):
         return not (self == other)

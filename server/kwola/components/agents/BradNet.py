@@ -1,7 +1,6 @@
 import math, random
 
-import numpy as np
-
+import numpy
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -266,7 +265,7 @@ class BradNet(nn.Module):
 
             actorProbExp = torch.exp(actorLogProbs) * data['pixelActionMaps']
             actorProbSums = torch.sum(actorProbExp.reshape(shape=[-1, width * height * self.numActions]), dim=1).unsqueeze(1).unsqueeze(1).unsqueeze(1)
-            actorProbSums = torch.max(torch.ones_like(actorProbSums) * 1e-4, actorProbSums)
+            actorProbSums = torch.max((actorProbSums == 0) * 1e-8, actorProbSums)
             actorActionProbs = actorProbExp / actorProbSums
             actorActionProbs = actorActionProbs.reshape([-1, self.numActions, height, width])
 

@@ -298,7 +298,7 @@ class DeepLearningAgent(BaseAgent):
                 count = 0
                 for recentAction in sampleRecentActions:
                     for recentActionMap in self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable):
-                        if map == recentActionMap:
+                        if map.doesOverlapWith(recentActionMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
                             count += 1
                             break
                 if count < self.config['testing_max_repeat_action_maps_without_new_branches']:
@@ -396,7 +396,7 @@ class DeepLearningAgent(BaseAgent):
                         for recentMap in recentActionMaps:
                             found = False
                             for potentialMap in potentialActionMaps:
-                                if recentMap == potentialMap:
+                                if recentMap.doesOverlapWith(potentialMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
                                     found = True
                                     break
                             if not found:
@@ -450,7 +450,7 @@ class DeepLearningAgent(BaseAgent):
         width = pixelActionMap.shape[2]
         height = pixelActionMap.shape[1]
 
-        actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, 0.5) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)
+        actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, self.elementBaseWeights['other']) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)
 
         chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
         chosenActionMap = sampleActionMaps[chosenActionMapIndex]

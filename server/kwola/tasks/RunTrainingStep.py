@@ -614,10 +614,11 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                     # and what often happens is that there is a backlog of such operations when the training loop
                     # finishes. To prevent this, we just stop doing these loss updates some number of iterations
                     # before the training loop finishes.
-                    if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
-                        for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                            for subProcessCommandQueue in subProcessCommandQueues:
-                                subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                    if trainingStep.numberOfIterationsCompleted % 3 == 0:
+                        if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
+                            for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
+                                for subProcessCommandQueue in subProcessCommandQueues:
+                                    subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
 
                 if trainingStep.numberOfIterationsCompleted % config['training_update_target_network_every'] == (config['training_update_target_network_every'] - 1):
                     print(datetime.now(), "Updating the target network weights to the current primary network weights.", flush=True)
