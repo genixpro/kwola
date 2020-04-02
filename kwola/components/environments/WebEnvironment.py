@@ -69,7 +69,7 @@ class WebEnvironment(BaseEnvironment):
         opts = options.Options(listen_port=self.proxyPort)
         pconf = proxy.config.ProxyConfig(opts)
 
-        m = DumpMaster(opts)
+        m = DumpMaster(opts, with_termlog=False, with_dumper=False)
         m.server = proxy.server.ProxyServer(pconf)
         m.addons.add(self.codeRewriter)
         m.addons.add(self.pathTracer)
