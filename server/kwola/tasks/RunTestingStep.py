@@ -98,6 +98,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             for sessionN in range(environment.numberParallelSessions())
         ]
 
+        executionSessionTraces = [[] for sessionN in range(environment.numberParallelSessions())]
+
         for session in executionSessions:
             session.saveToDisk(config)
 
@@ -156,7 +158,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 trace.saveToDisk(config)
 
                 executionSessions[sessionN].executionTraces.append(str(trace.id))
-                executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(executionSessions[sessionN], config)))
+                executionSessionTraces[sessionN].append(trace)
+                executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(executionSessionTraces[sessionN], config)))
 
                 for error in trace.errorsDetected:
                     hash = error.computeHash()

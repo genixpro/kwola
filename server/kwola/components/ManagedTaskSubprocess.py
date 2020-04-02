@@ -108,7 +108,7 @@ class ManagedTaskSubprocess:
     def waitForProcessResult(self):
         atexit.register(lambda: self.process.kill())
 
-        waitBetweenStdoutUpdates = 0.5
+        waitBetweenStdoutUpdates = 0.2
 
         self.output = ''
         while self.process.returncode is None and (not self.doesOutputHaveExitString()) and self.alive:

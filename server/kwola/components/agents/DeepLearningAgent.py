@@ -487,13 +487,11 @@ class DeepLearningAgent(BaseAgent):
         return actionX, actionY, actionType
 
     @staticmethod
-    def computePresentRewards(executionSession, config):
+    def computePresentRewards(executionTraces, config):
 
         # First compute the present reward at each time step
         presentRewards = []
-        for traceId in executionSession.executionTraces:
-            trace = ExecutionTrace.loadFromDisk(traceId, config)
-
+        for trace in executionTraces:
             tracePresentReward = 0.0
 
             if trace.didActionSucceed:
@@ -550,9 +548,9 @@ class DeepLearningAgent(BaseAgent):
         return presentRewards
 
     @staticmethod
-    def computeDiscountedFutureRewards(executionSession, config):
+    def computeDiscountedFutureRewards(executionTraces, config):
         # First compute the present reward at each time step
-        presentRewards = DeepLearningAgent.computePresentRewards(executionSession, config)
+        presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, config)
 
         # Now compute the discounted reward
         discountedFutureRewards = []
@@ -600,9 +598,11 @@ class DeepLearningAgent(BaseAgent):
 
         rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"))
 
-        presentRewards = DeepLearningAgent.computePresentRewards(executionSession, self.config)
+        executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
 
-        discountedFutureRewards = DeepLearningAgent.computeDiscountedFutureRewards(executionSession, self.config)
+        presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
+
+        discountedFutureRewards = DeepLearningAgent.computeDiscountedFutureRewards(executionTraces, self.config)
 
         tempScreenshotDirectory = tempfile.mkdtemp()
 
@@ -615,8 +615,7 @@ class DeepLearningAgent(BaseAgent):
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = []
-            for traceId, rawImage in zip(executionSession.executionTraces, rawImages):
-                trace = ExecutionTrace.loadFromDisk(traceId, self.config)
+            for trace, rawImage in zip(executionTraces, rawImages):
                 future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
                 futures.append(future)
 
@@ -1050,7 +1049,9 @@ class DeepLearningAgent(BaseAgent):
 
         session = ExecutionSession.loadFromDisk(execusionSessionId, config)
 
-        presentRewards = DeepLearningAgent.computePresentRewards(session, config)
+        executionTraces = [ExecutionTrace.loadFromDisk(traceId, config) for traceId in session.executionTraces]
+
+        presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, config)
 
         return list(presentRewards)
 
@@ -1123,8 +1124,10 @@ class DeepLearningAgent(BaseAgent):
             processedImage = DeepLearningAgent.processRawImageParallel(rawImage, self.config)
             processedImages.append(processedImage)
 
+        executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
+
         # First compute the present reward at each time step
-        presentRewards = DeepLearningAgent.computePresentRewards(executionSession, self.config)
+        presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
 
         # If there is a normalizer, use it to normalize the rewards
         if trainingRewardNormalizer is not None:
@@ -1140,7 +1143,6 @@ class DeepLearningAgent(BaseAgent):
             presentRewards = normalizedTotalRewards[:len(presentRewards)]
 
         # Create the decaying future execution trace for the prediction algorithm
-        executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
         tracesReversed = list(copy.copy(executionTraces))
         tracesReversed.reverse()
         currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace)
