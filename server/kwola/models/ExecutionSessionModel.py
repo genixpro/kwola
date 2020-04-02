@@ -4,9 +4,7 @@ from .ExecutionTraceModel import ExecutionTrace
 from .errors.BaseError import BaseError
 import os.path
 from kwola.models.id import CustomIDField
-import json
-import gzip
-from .lockedfile import LockedFile
+from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 class ExecutionSession(Document):
     id = CustomIDField()
@@ -24,19 +22,10 @@ class ExecutionSession(Document):
     totalReward = FloatField()
 
     def saveToDisk(self, config):
-        fileName = os.path.join(config.getKwolaUserDataDirectory("execution_sessions"), str(self.id) + ".json.gz")
-        with LockedFile(fileName, 'wb') as f:
-            f.write(gzip.compress(bytes(json.dumps(json.loads(self.to_json()), indent=4), "utf8")))
+        saveObjectToDisk(self, "execution_sessions", config)
 
 
     @staticmethod
     def loadFromDisk(id, config):
-        try:
-            fileName = os.path.join(config.getKwolaUserDataDirectory("execution_sessions"), str(id) + ".json.gz")
-            if not os.path.exists(fileName):
-                return None
-            with LockedFile(fileName, 'rb') as f:
-                return ExecutionSession.from_json(str(gzip.decompress(f.read()), "utf8"))
-        except json.JSONDecodeError:
-            return
+        return loadObjectFromDisk(ExecutionSession, id, "execution_sessions", config)
 

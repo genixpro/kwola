@@ -1,9 +1,7 @@
 from mongoengine import *
 import os.path
 from kwola.models.id import CustomIDField
-import json
-import gzip
-from .lockedfile import LockedFile
+from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 
 
@@ -30,21 +28,11 @@ class TrainingSequence(Document):
 
 
     def saveToDisk(self, config):
-        fileName = os.path.join(config.getKwolaUserDataDirectory("training_sequences"), str(self.id) + ".json.gz")
-        with LockedFile(fileName, 'wb') as f:
-            f.write(gzip.compress(bytes(json.dumps(json.loads(self.to_json()), indent=4), "utf8")))
+        saveObjectToDisk(self, "training_sequences", config)
 
 
     @staticmethod
     def loadFromDisk(id, config):
-        try:
-            fileName = os.path.join(config.getKwolaUserDataDirectory("training_sequences"), str(id) + ".json.gz")
-            if not os.path.exists(fileName):
-                return None
-            with LockedFile(fileName, 'rb') as f:
-                return TrainingSequence.from_json(str(gzip.decompress(f.read()), "utf8"))
-        except json.JSONDecodeError:
-            return
-
+        return loadObjectFromDisk(TrainingSequence, id, "training_sequences", config)
 
 

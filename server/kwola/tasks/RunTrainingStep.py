@@ -204,7 +204,10 @@ def loadAllTestingSteps(config):
 
     for fileName in os.listdir(testStepsDir):
         if ".lock" not in fileName:
-            stepId = fileName.replace(".json.gz", "")
+            stepId = fileName
+            stepId = stepId.replace(".json", "")
+            stepId = stepId.replace(".gz", "")
+            stepId = stepId.replace(".pickle", "")
 
             testingSteps.append(TestingStep.loadFromDisk(stepId, config))
 
@@ -328,9 +331,12 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     if executionTraceId in executionTraceIdMap:
                         if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
                             trace = executionTraceIdMap[executionTraceId]
-                            trace.lastTrainingRewardLoss = sampleRewardLoss
-                            traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(updateTraceRewardLoss, (executionTraceId, sampleRewardLoss, configDir))
-                            executionTraceSaveFutures[executionTraceId] = traceSaveFuture
+                            # We do this check here because saving execution traces is actually a pretty CPU heavy process,
+                            # so we only want to do it when absolutely necessary
+                            if abs(trace.lastTrainingRewardLoss - sampleRewardLoss) > config['training_trace_selection_min_loss_difference_for_save']:
+                                trace.lastTrainingRewardLoss = sampleRewardLoss
+                                traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(updateTraceRewardLoss, (executionTraceId, sampleRewardLoss, configDir))
+                                executionTraceSaveFutures[executionTraceId] = traceSaveFuture
 
                 if needToResetPool and lastProcessPool is None:
                     needToResetPool = False

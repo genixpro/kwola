@@ -1,14 +1,12 @@
 from mongoengine import *
-import datetime
+from datetime import datetime
 from .actions.BaseAction import BaseAction
 from .errors.BaseError import BaseError
 from .ActionMapModel import ActionMap
 import numpy
 import os.path
 from kwola.models.id import CustomIDField
-import json
-from .lockedfile import LockedFile
-import gzip
+from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 class ExecutionTrace(Document):
     id = CustomIDField()
@@ -168,26 +166,16 @@ class ExecutionTrace(Document):
         return numpy.array(newArray)
 
     def saveToDisk(self, config):
-        fileName = os.path.join(config.getKwolaUserDataDirectory("execution_traces"), str(self.id) + ".json.gz")
-        with LockedFile(fileName, 'wb') as f:
-            f.write(gzip.compress(bytes(json.dumps(json.loads(self.to_json()), indent=4), "utf8")))
+        saveObjectToDisk(self, "execution_traces", config)
 
 
     @staticmethod
     def loadFromDisk(id, config, omitLargeFields=False):
-        try:
-            fileName = os.path.join(config.getKwolaUserDataDirectory("execution_traces"), str(id) + ".json.gz")
-            if not os.path.exists(fileName):
-                return None
-            with LockedFile(fileName, 'rb') as f:
-                trace = ExecutionTrace.from_json(str(gzip.decompress(f.read()), "utf8"))
+        trace = loadObjectFromDisk(ExecutionTrace, id, "execution_traces", config)
+        if trace is not None:
+            if omitLargeFields:
+                trace.branchExecutionTrace = []
+                trace.startDecayingExecutionTrace = []
+                trace.startCumulativeBranchExecutionTrace = []
 
-                if omitLargeFields:
-                    trace.branchExecutionTrace = []
-                    trace.startDecayingExecutionTrace = []
-                    trace.startCumulativeBranchExecutionTrace = []
-
-                return trace
-        except json.JSONDecodeError:
-            return
-
+        return trace

@@ -142,5 +142,8 @@
   "web_session_max_startup_workers": 1,
   "web_session_headless": true,
   "web_session_print_every_action": true,
-  "web_session_print_every_action_failure": true
+  "web_session_print_every_action_failure": true,
+  "data_compress_level": 1,
+  "data_serialization_method": "json",
+  "training_trace_selection_min_loss_difference_for_save": 0.1
 }
