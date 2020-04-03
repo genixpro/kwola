@@ -558,7 +558,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         return {}
 
     try:
-        totalBatchesNeeded = config['iterations_per_training_step'] + int(config['training_surplus_batches'])
+        totalBatchesNeeded = config['iterations_per_training_step'] * config['batches_per_iteration'] + int(config['training_surplus_batches'])
         batchesPrepared = 0
 
         batchFutures = []
