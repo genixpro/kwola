@@ -1,5 +1,5 @@
 from .BaseAgent import BaseAgent
-from .BradNet import BradNet
+from .  TraceNet import   TraceNet
 from kwola.components.utilities.debug_plot import showRewardImageDebug
 from kwola.models.ExecutionTraceModel import ExecutionTrace
 from kwola.models.ExecutionSessionModel import ExecutionSession
@@ -184,8 +184,8 @@ class DeepLearningAgent(BaseAgent):
             device_ids = [torch.device(f'cuda:{self.whichGpu}')]
             output_device = device_ids[0]
 
-        self.model = BradNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
-        self.targetNetwork = BradNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+        self.model =   TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+        self.targetNetwork =   TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
 
         if self.whichGpu == "all":
             self.model = self.model.cuda()
