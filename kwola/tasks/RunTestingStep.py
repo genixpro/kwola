@@ -226,6 +226,9 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         testStep.executionSessions = [session.id for session in executionSessions]
         testStep.saveToDisk(config)
 
+        debugVideoSubprocess1 = None
+        debugVideoSubprocess2 = None
+
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
             debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
@@ -239,16 +242,18 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             debugVideoSubprocess2.start()
             atexit.register(lambda: debugVideoSubprocess2.terminate())
 
-            debugVideoSubprocess1.join()
-            debugVideoSubprocess2.join()
-        else:
-            for session in executionSessions:
-                print(datetime.now(), f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
-                addExecutionSessionToSampleCache(session.id, config)
-
         environment.shutdown()
 
         del environment
+
+        for session in executionSessions:
+            print(datetime.now(), f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
+            addExecutionSessionToSampleCache(session.id, config)
+
+        if debugVideoSubprocess1 is not None:
+            debugVideoSubprocess1.join()
+        if debugVideoSubprocess2 is not None:
+            debugVideoSubprocess2.join()
 
     except Exception as e:
         traceback.print_exc()

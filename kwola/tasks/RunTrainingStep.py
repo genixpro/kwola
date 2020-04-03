@@ -575,15 +575,6 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                 batchesPrepared += 1
 
             while trainingStep.numberOfIterationsCompleted < config['iterations_per_training_step']:
-                chosenBatchIndex = 0
-                for futureIndex, future in enumerate(batchFutures):
-                    if future.done():
-                        chosenBatchIndex = futureIndex
-                        break
-
-                batch, cacheHitRate = batchFutures.pop(chosenBatchIndex).result()
-                recentCacheHits.append(float(cacheHitRate))
-
                 ready = 0
                 for future in batchFutures:
                     if future.done():
@@ -605,42 +596,56 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                             print(datetime.now(), "GPU pipeline is full of batches. Switching to full state", flush=True)
                             lastStarveStateAdjustment = trainingStep.numberOfIterationsCompleted
 
-                if batchesPrepared <= totalBatchesNeeded:
-                    # Request another session be prepared
-                    subProcessIndex = (batchesPrepared % config['training_batch_prep_subprocesses'])
-                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
-                    batchesPrepared += 1
+                batches = []
 
-                result = agent.learnFromBatch(batch)
+                for batchIndex in range(config['batches_per_iteration']):
+                    chosenBatchIndex = 0
+                    for futureIndex, future in enumerate(batchFutures):
+                        if future.done():
+                            chosenBatchIndex = futureIndex
+                            break
 
-                if result is not None:
-                    totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
-                        stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
-                        executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
-                        totalLoss, totalRebalancedLoss, batchReward, \
-                        sampleRewardLosses = result
+                    batch, cacheHitRate = batchFutures.pop(chosenBatchIndex).result()
+                    recentCacheHits.append(float(cacheHitRate))
+                    batches.append(batch)
 
-                    trainingStep.presentRewardLosses.append(presentRewardLoss)
-                    trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
-                    trainingStep.stateValueLosses.append(stateValueLoss)
-                    trainingStep.advantageLosses.append(advantageLoss)
-                    trainingStep.actionProbabilityLosses.append(actionProbabilityLoss)
-                    trainingStep.tracePredictionLosses.append(tracePredictionLoss)
-                    trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
-                    trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
-                    trainingStep.predictedCursorLosses.append(predictedCursorLoss)
-                    trainingStep.totalRewardLosses.append(totalRewardLoss)
-                    trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
-                    trainingStep.totalLosses.append(totalLoss)
+                    if batchesPrepared <= totalBatchesNeeded:
+                        # Request another session be prepared
+                        subProcessIndex = (batchesPrepared % config['training_batch_prep_subprocesses'])
+                        batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
+                        batchesPrepared += 1
 
-                    # This extra check is done here because updating the trace losses in an expensive operation,
-                    # and what often happens is that there is a backlog of such operations when the training loop
-                    # finishes. To prevent this, we just stop doing these loss updates some number of iterations
-                    # before the training loop finishes.
-                    if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
-                        for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                            for subProcessCommandQueue in subProcessCommandQueues:
-                                subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                results = agent.learnFromBatches(batches)
+
+                if results is not None:
+                    for result, batch in zip(results, batches):
+                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
+                            stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
+                            executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
+                            totalLoss, totalRebalancedLoss, batchReward, \
+                            sampleRewardLosses = result
+
+                        trainingStep.presentRewardLosses.append(presentRewardLoss)
+                        trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
+                        trainingStep.stateValueLosses.append(stateValueLoss)
+                        trainingStep.advantageLosses.append(advantageLoss)
+                        trainingStep.actionProbabilityLosses.append(actionProbabilityLoss)
+                        trainingStep.tracePredictionLosses.append(tracePredictionLoss)
+                        trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
+                        trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
+                        trainingStep.predictedCursorLosses.append(predictedCursorLoss)
+                        trainingStep.totalRewardLosses.append(totalRewardLoss)
+                        trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
+                        trainingStep.totalLosses.append(totalLoss)
+
+                        # This extra check is done here because updating the trace losses in an expensive operation,
+                        # and what often happens is that there is a backlog of such operations when the training loop
+                        # finishes. To prevent this, we just stop doing these loss updates some number of iterations
+                        # before the training loop finishes.
+                        if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
+                            for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
+                                for subProcessCommandQueue in subProcessCommandQueues:
+                                    subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
 
                 if trainingStep.numberOfIterationsCompleted % config['training_update_target_network_every'] == (config['training_update_target_network_every'] - 1):
                     print(datetime.now(), "Updating the target network weights to the current primary network weights.", flush=True)
