@@ -76,26 +76,18 @@ class TraceNet(nn.Module):
             nn.BatchNorm2d(num_features=self.config['pixel_features'])
         )
 
-        self.stateValueConvolution = nn.Sequential(
-            nn.Conv2d(
-                in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
-                out_channels=self.config['layer_5_num_kernels'],
-                kernel_size=self.config['layer_5_kernel_size'],
-                stride=self.config['layer_5_stride'],
-                dilation=self.config['layer_5_dilation'],
-                padding=self.config['layer_5_padding']
+        self.stateValueLinear = nn.Sequential(
+            nn.Linear(
+                in_features=int(self.config['pixel_features'] * self.config['training_crop_width'] * self.config['training_crop_height'] / 64) \
+                            + self.config['additional_features_stamp_depth_size'] * self.config['additional_features_stamp_edge_size'] * self.config['additional_features_stamp_edge_size'],
+                out_features=self.config['layer_5_num_kernels']
             ),
             nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
-            nn.Conv2d(
-                in_channels=self.config['layer_5_num_kernels'],
-                out_channels=1,
-                kernel_size=self.config['state_value_convolution_kernel_size'],
-                stride=self.config['state_value_convolution_stride'],
-                padding=self.config['state_value_convolution_padding'],
-                bias=False
-            ),
-            torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
+            nn.BatchNorm1d(num_features=self.config['layer_5_num_kernels']),
+            nn.Linear(
+                in_features=self.config['layer_5_num_kernels'],
+                out_features=1
+            )
         )
 
         self.presentRewardConvolution = nn.Sequential(
@@ -222,6 +214,7 @@ class TraceNet(nn.Module):
         self.numActions = numActions
 
     def forward(self, data):
+        batchSize = data['image'].shape[0]
         width = data['image'].shape[3]
         height = data['image'].shape[2]
 
@@ -270,20 +263,22 @@ class TraceNet(nn.Module):
             outputDict["actionProbabilities"] = actorActionProbs
 
         if data['computeStateValues']:
-            stateValueMap = self.stateValueConvolution(mergedPixelFeatureMap)
+            shrunkTrainingWidth = int(self.config['training_crop_width'] / 8)
+            shrunkTrainingHeight = int(self.config['training_crop_width'] / 8)
 
-            combinedPixelActionMask = torch.min(torch.ones_like(stateValueMap, dtype=torch.float32), torch.sum(data['pixelActionMaps'], dim=1, dtype=torch.float32))
-            stateValueMap = stateValueMap * combinedPixelActionMask
+            centerCropLeft = torch.div((torch.div(width, 8) - shrunkTrainingWidth), 2)
+            centerCropTop = torch.div((torch.div(height, 8) - shrunkTrainingHeight), 2)
 
-            flatStateValueMap = stateValueMap.reshape([-1, width * height])
-            flatCombinedPixelActionMask = combinedPixelActionMask.reshape([-1, width * height])
+            centerCropRight = torch.add(centerCropLeft, shrunkTrainingWidth)
+            centerCropBottom = torch.add(centerCropTop, shrunkTrainingHeight)
 
-            totalStateValues = torch.sum(flatStateValueMap, dim=1)
-            pixelsWithValue = torch.sum(flatCombinedPixelActionMask != 0, dim=1)
+            croppedPixelFeatureMap = pixelFeatureMap[:, :, centerCropTop:centerCropBottom, centerCropLeft:centerCropRight]
 
-            averageStateValues = totalStateValues / (torch.max(torch.ones_like(pixelsWithValue), pixelsWithValue))
+            flatFeatureMap = torch.cat([additionalFeaturesWithStep.reshape(shape=[batchSize, -1]), croppedPixelFeatureMap.reshape(shape=[batchSize, -1])], dim=1)
 
-            outputDict['stateValues'] = averageStateValues
+            stateValuePredictions = self.stateValueLinear(flatFeatureMap)
+
+            outputDict['stateValues'] = stateValuePredictions
 
         if data['computeAdvantageValues']:
             advantageValues = self.advantageConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']

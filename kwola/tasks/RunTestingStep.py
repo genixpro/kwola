@@ -13,6 +13,7 @@ import tempfile
 import os
 import multiprocessing
 import atexit
+from .RunTrainingStep import addExecutionSessionToSampleCache
 
 
 def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
@@ -240,10 +241,15 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
             debugVideoSubprocess1.join()
             debugVideoSubprocess2.join()
+        else:
+            for session in executionSessions:
+                print(datetime.now(), f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
+                addExecutionSessionToSampleCache(session.id, config)
 
         environment.shutdown()
 
         del environment
+
     except Exception as e:
         traceback.print_exc()
         print(datetime.now(), "Unhandled exception occurred during testing sequence", flush=True)

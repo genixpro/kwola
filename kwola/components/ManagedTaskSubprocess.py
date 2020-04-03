@@ -25,7 +25,7 @@ class ManagedTaskSubprocess:
         self.currentLogSize = 0
 
         processOutputFile = open(self.logFilePath, 'w')
-        self.process = subprocess.Popen(args, stdout=processOutputFile, stderr=processOutputFile, stdin=subprocess.PIPE)
+        self.process = subprocess.Popen(args, stdout=processOutputFile, stderr=None, stdin=subprocess.PIPE)
 
         self.process.stdin.write(bytes(json.dumps(data) + "\n", "utf8"))
         self.process.stdin.flush()

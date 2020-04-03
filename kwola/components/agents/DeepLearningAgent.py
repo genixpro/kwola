@@ -961,7 +961,7 @@ class DeepLearningAgent(BaseAgent):
 
                 stateValueAxes.set_xticks([])
                 stateValueAxes.set_yticks([])
-                stateValueIm = stateValueAxes.imshow([[stateValue]], cmap=mainColorMap, interpolation="nearest", vmin=-2.0, vmax=20.0)
+                stateValueIm = stateValueAxes.imshow([stateValue], cmap=mainColorMap, interpolation="nearest", vmin=-2.0, vmax=20.0)
                 mainFigure.colorbar(stateValueIm, ax=stateValueAxes, orientation='vertical')
                 stateValueAxes.set_title(f"State Value {stateValue:.3f}")
 
