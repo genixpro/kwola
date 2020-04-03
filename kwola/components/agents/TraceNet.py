@@ -9,9 +9,9 @@ import torch.nn.functional as F
 import scipy.signal
 import pandas
 
-class BradNet(nn.Module):
+class TraceNet(nn.Module):
     def __init__(self, config, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
-        super(BradNet, self).__init__()
+        super(TraceNet, self).__init__()
 
         self.config = config
 
