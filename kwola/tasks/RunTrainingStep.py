@@ -194,6 +194,7 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
         traceback.print_exc()
         print("prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue", flush=True)
         subProcessCommandQueue.put(("batch", {}))
+        return 1.0
 
 def loadAllTestingSteps(config):
     testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
@@ -638,14 +639,9 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                         trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
                         trainingStep.totalLosses.append(totalLoss)
 
-                        # This extra check is done here because updating the trace losses in an expensive operation,
-                        # and what often happens is that there is a backlog of such operations when the training loop
-                        # finishes. To prevent this, we just stop doing these loss updates some number of iterations
-                        # before the training loop finishes.
-                        if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
-                            for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
-                                for subProcessCommandQueue in subProcessCommandQueues:
-                                    subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
+                        for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
+                            for subProcessCommandQueue in subProcessCommandQueues:
+                                subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
 
                 if trainingStep.numberOfIterationsCompleted % config['training_update_target_network_every'] == (config['training_update_target_network_every'] - 1):
                     print(datetime.now(), "Updating the target network weights to the current primary network weights.", flush=True)
