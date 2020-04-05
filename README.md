@@ -11,7 +11,11 @@ Installation
 
 Kwola is based on Python 3, please make sure you are using the correct version of Python. Kwola also requires NodeJS to
 rewrite the javascript code in the web applications it touches. Please install NodeJS prior to following these instructions.
+Lastly, you must have either Google Chrome or Chromium installed already. Please follow the installation instructions
+on those products websites.
 
+To use GPUs, you must have the Nvidia drivers and CUDA installed. The model can run on the CPU but training will be
+very slow, even with the smallest model.
 
 Clone the git repository.
 
@@ -25,24 +29,37 @@ Create your Python virtual environment
 
 `[user@localhost]$ source venv/bin/activate`
 
+Install chromedriver to your Python virtual environment. Go here: https://chromedriver.chromium.org/getting-started
+and install the binary appropriate for your operating system and which Chrome version you have installed.
+For example, I run the following on Linux with Chrome 80.
 
-Install dependencies
+`[user@localhost]$ wget https://chromedriver.storage.googleapis.com/80.0.3987.106/chromedriver_linux64.zip`
+
+`[user@localhost]$ unzip chromedriver_linux64.zip`
+
+`[user@localhost]$ cp chromedriver venv/bin`
+
+Install main dependencies.
 
 `[user@localhost]$ npm install`
 
 `[user@localhost]$ python3 setup.py develop`
 
+Install babel-cli globally. This makes it easier for the code to access.
+
+`[user@localhost]$ npm install @babel/cli -g`
+
 And that's it! 
-
-
 
 Usage
 =====
 
-Running Kwola is very straightforward. To initiate a Kwola testing session, run the following command.
-
+Running Kwola is very straightforward. To initiate a Kwola testing session, run the following command. 
 Make sure to replace the URL with the url pointing to the website you want to start testing. The URL
-must be a complete, fully validated url containing the http:// part and everything
+must be a complete, fully validated url containing the http:// part and everything. Also for now, its
+easiest just to run it from within the Kwola directory.
+
+`[user@localhost]$ cd kwola`
 
 `[user@localhost]$ kwola http://yoururl.com/`
 
