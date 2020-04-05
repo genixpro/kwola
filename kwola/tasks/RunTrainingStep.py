@@ -14,6 +14,7 @@ import numpy
 import time
 import multiprocessing
 import multiprocessing.pool
+import json
 import gzip
 from datetime import datetime
 import traceback
@@ -25,6 +26,34 @@ import sys
 import subprocess
 import atexit
 
+
+def addExecutionSessionToSampleCache(executionSessionId, config):
+    agent = DeepLearningAgent(config, whichGpu=None)
+
+    sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
+
+    if config['enable_reward_normalization']:
+        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
+            trainingRewardNormalizer = pickle.load(normalizerFile)
+    else:
+        trainingRewardNormalizer = None
+
+    executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
+
+    batches = agent.prepareBatchesForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
+
+    for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
+        traceId = traceBatch['traceIds'][0]
+
+        cacheFile = os.path.join(sampleCacheDir, traceId + ".pickle.gz")
+
+        pickleBytes = pickle.dumps(traceBatch)
+        compressedPickleBytes = gzip.compress(pickleBytes)
+
+        with open(cacheFile, 'wb') as file:
+            file.write(compressedPickleBytes)
+
+
 def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessionId, batchDirectory):
     config = Configuration(configDir)
 
@@ -33,38 +62,14 @@ def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessio
     sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
     cacheFile = os.path.join(sampleCacheDir, executionTraceId + ".pickle.gz")
 
-    if os.path.exists(cacheFile):
+    if not os.path.exists(cacheFile):
+        addExecutionSessionToSampleCache(executionSessionId, config)
+        cacheHit = False
+    else:
         cacheHit = True
 
-        with open(cacheFile, 'rb') as file:
-            sampleBatch = pickle.loads(gzip.decompress(file.read()))
-    else:
-        cacheHit = False
-
-        if config['enable_reward_normalization']:
-            with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
-                trainingRewardNormalizer = pickle.load(normalizerFile)
-        else:
-            trainingRewardNormalizer = None
-
-        executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
-
-        batches = agent.prepareBatchesForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
-
-        sampleBatch = None
-        for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
-            traceId = traceBatch['traceIds'][0]
-
-            cacheFile = os.path.join(sampleCacheDir, traceId + ".pickle.gz")
-
-            pickleBytes = pickle.dumps(traceBatch)
-            compressedPickleBytes = gzip.compress(pickleBytes)
-
-            with open(cacheFile, 'wb') as file:
-                file.write(compressedPickleBytes)
-
-            if traceId == executionTraceId:
-                sampleBatch = traceBatch
+    with open(cacheFile, 'rb') as file:
+        sampleBatch = pickle.loads(gzip.decompress(file.read()))
 
     imageWidth = sampleBatch['processedImages'].shape[3]
     imageHeight = sampleBatch['processedImages'].shape[2]
@@ -126,19 +131,12 @@ def isNumpyArray(obj):
     return type(obj).__module__ == numpy.__name__
 
 
-def prepareAndLoadSingleBatchForSubprocess(config, executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue):
+def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, executionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue):
     try:
-        for trace in executionTraces:
-            trace.lastTrainingRewardLoss = 1
+        traceWeights = numpy.array([traceWeightData['weight'] for traceWeightData in executionTraceWeightDatas])
 
-        traceWeights = numpy.array([trace.lastTrainingRewardLoss for trace in executionTraces])
-        countWithLossValue = numpy.count_nonzero(traceWeights)
-
-        if (countWithLossValue / len(executionTraces)) > 0.2:
-            traceWeights = numpy.minimum(config['training_trace_selection_maximum_weight'], traceWeights)
-            traceWeights = numpy.maximum(config['training_trace_selection_minimum_weight'], traceWeights)
-        else:
-            traceWeights = numpy.ones_like(traceWeights)
+        traceWeights = numpy.minimum(config['training_trace_selection_maximum_weight'], traceWeights)
+        traceWeights = numpy.maximum(config['training_trace_selection_minimum_weight'], traceWeights)
 
         if not cacheFullState:
             # We bias the random selection of the algorithm towards whatever
@@ -153,15 +151,15 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraces, executionTra
             traceWeights = traceWeights + numpy.arange(0, config['training_trace_selection_cache_not_full_state_one_side_bias'], len(traceWeights))
 
         traceProbabilities = scipy.special.softmax(traceWeights)
-        traceIds = [trace.id for trace in executionTraces]
+        traceIds = [trace['id'] for trace in executionTraceWeightDatas]
 
         chosenExecutionTraceIds = numpy.random.choice(traceIds, [config['batch_size']], p=traceProbabilities)
 
         futures = []
         for traceId in chosenExecutionTraceIds:
-            trace = executionTraceIdMap[str(traceId)]
+            traceWeightData = executionTraceWeightDataIdMap[str(traceId)]
 
-            future = processPool.apply_async(prepareBatchesForExecutionTrace, (config.configurationDirectory, str(traceId), str(trace.executionSessionId), batchDirectory))
+            future = processPool.apply_async(prepareBatchesForExecutionTrace, (config.configurationDirectory, str(traceId), str(traceWeightData['executionSessionId']), batchDirectory))
             futures.append(future)
 
         cacheHits = []
@@ -196,6 +194,7 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraces, executionTra
         traceback.print_exc()
         print("prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue", flush=True)
         subProcessCommandQueue.put(("batch", {}))
+        return 1.0
 
 def loadAllTestingSteps(config):
     testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
@@ -246,23 +245,23 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
-        print(datetime.now(), "Starting loading of execution traces.", flush=True)
+        print(datetime.now(), "Starting loading of execution trace weight datas.", flush=True)
 
-        executionTraces = []
-        executionTraceIdMap = {}
+        executionTraceWeightDatas = []
+        executionTraceWeightDataIdMap = {}
         with concurrent.futures.ProcessPoolExecutor(max_workers=int(config['training_max_initialization_workers']/config['training_batch_prep_subprocesses'])) as executor:
             executionTraceFutures = []
             for session in executionSessions:
                 for traceId in session.executionTraces[:-1]:
-                    executionTraceFutures.append(executor.submit(loadExecutionTrace, traceId, configDir))
+                    executionTraceFutures.append(executor.submit(loadExecutionTraceWeightData, traceId, session.id, configDir))
 
             for traceFuture in executionTraceFutures:
-                trace = pickle.loads(traceFuture.result())
-                if trace is not None:
-                    executionTraces.append(trace)
-                    executionTraceIdMap[str(trace.id)] = trace
+                traceWeightData = pickle.loads(traceFuture.result())
+                if traceWeightData is not None:
+                    executionTraceWeightDatas.append(traceWeightData)
+                    executionTraceWeightDataIdMap[str(traceWeightData['id'])] = traceWeightData
 
-        print(datetime.now(), f"Finished loading of {len(executionTraces)} execution traces.", flush=True)
+        print(datetime.now(), f"Finished loading of weight datas for {len(executionTraceWeightDatas)} execution traces.", flush=True)
 
         if config['enable_reward_normalization']:
             rewardNormalizerPath = os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer")
@@ -320,7 +319,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     if batchCount % config['training_reset_workers_every_n_batches'] == (config['training_reset_workers_every_n_batches'] - 1):
                         needToResetPool = True
 
-                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, config, executionTraces, executionTraceIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue)
+                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, config, executionTraceWeightDatas, executionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue)
                     cacheRateFutures.append(future)
                     currentProcessPoolFutures.append(future)
 
@@ -328,16 +327,16 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                 elif message == "update-loss":
                     executionTraceId = data["executionTraceId"]
                     sampleRewardLoss = data["sampleRewardLoss"]
-                    if executionTraceId in executionTraceIdMap:
-                        trace = executionTraceIdMap[executionTraceId]
+                    if executionTraceId in executionTraceWeightDataIdMap:
+                        traceWeightData = executionTraceWeightDataIdMap[executionTraceId]
 
                         # We do this check here because saving execution traces is actually a pretty CPU heavy process,
                         # so we only want to do it if the loss has actually changed by a significant degree
-                        differenceRatio = abs(trace.lastTrainingRewardLoss - sampleRewardLoss) / trace.lastTrainingRewardLoss
+                        differenceRatio = abs(traceWeightData['weight'] - sampleRewardLoss) / traceWeightData['weight']
                         if differenceRatio > config['training_trace_selection_min_loss_ratio_difference_for_save']:
-                            trace.lastTrainingRewardLoss = sampleRewardLoss
+                            traceWeightData['weight'] = sampleRewardLoss
                             if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
-                                traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(updateTraceRewardLoss, (executionTraceId, sampleRewardLoss, configDir))
+                                traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(saveExecutionTraceWeightData, (traceWeightData, configDir))
                                 executionTraceSaveFutures[executionTraceId] = traceSaveFuture
 
                 if needToResetPool and lastProcessPool is None:
@@ -453,6 +452,31 @@ def loadExecutionTrace(traceId, configDir):
     trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True)
     return pickle.dumps(trace)
 
+def loadExecutionTraceWeightData(traceId, sessionId, configDir):
+    config = Configuration(configDir)
+
+    weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceId + ".json")
+
+    if os.path.exists(weightFile):
+        with open(weightFile, "rt") as f:
+            data = json.load(f)
+    else:
+        data = {
+            "id": traceId,
+            "executionSessionId": sessionId,
+            "weight": config['training_trace_selection_maximum_weight']
+        }
+
+    return pickle.dumps(data)
+
+def saveExecutionTraceWeightData(traceWeightData, configDir):
+    config = Configuration(configDir)
+
+    weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceId + ".json")
+
+    with open(weightFile, "rw") as f:
+        json.dump(f, traceWeightData)
+
 
 def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
     config = Configuration(configDir)
@@ -535,7 +559,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         return {}
 
     try:
-        totalBatchesNeeded = config['iterations_per_training_step'] + int(config['training_surplus_batches'])
+        totalBatchesNeeded = config['iterations_per_training_step'] * config['batches_per_iteration'] + int(config['training_surplus_batches'])
         batchesPrepared = 0
 
         batchFutures = []
@@ -552,15 +576,6 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                 batchesPrepared += 1
 
             while trainingStep.numberOfIterationsCompleted < config['iterations_per_training_step']:
-                chosenBatchIndex = 0
-                for futureIndex, future in enumerate(batchFutures):
-                    if future.done():
-                        chosenBatchIndex = futureIndex
-                        break
-
-                batch, cacheHitRate = batchFutures.pop(chosenBatchIndex).result()
-                recentCacheHits.append(float(cacheHitRate))
-
                 ready = 0
                 for future in batchFutures:
                     if future.done():
@@ -582,39 +597,48 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                             print(datetime.now(), "GPU pipeline is full of batches. Switching to full state", flush=True)
                             lastStarveStateAdjustment = trainingStep.numberOfIterationsCompleted
 
-                if batchesPrepared <= totalBatchesNeeded:
-                    # Request another session be prepared
-                    subProcessIndex = (batchesPrepared % config['training_batch_prep_subprocesses'])
-                    batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
-                    batchesPrepared += 1
+                batches = []
 
-                result = agent.learnFromBatch(batch)
+                for batchIndex in range(config['batches_per_iteration']):
+                    chosenBatchIndex = 0
+                    for futureIndex, future in enumerate(batchFutures):
+                        if future.done():
+                            chosenBatchIndex = futureIndex
+                            break
 
-                if result is not None:
-                    totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
-                        stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
-                        executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
-                        totalLoss, totalRebalancedLoss, batchReward, \
-                        sampleRewardLosses = result
+                    batch, cacheHitRate = batchFutures.pop(chosenBatchIndex).result()
+                    recentCacheHits.append(float(cacheHitRate))
+                    batches.append(batch)
 
-                    trainingStep.presentRewardLosses.append(presentRewardLoss)
-                    trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
-                    trainingStep.stateValueLosses.append(stateValueLoss)
-                    trainingStep.advantageLosses.append(advantageLoss)
-                    trainingStep.actionProbabilityLosses.append(actionProbabilityLoss)
-                    trainingStep.tracePredictionLosses.append(tracePredictionLoss)
-                    trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
-                    trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
-                    trainingStep.predictedCursorLosses.append(predictedCursorLoss)
-                    trainingStep.totalRewardLosses.append(totalRewardLoss)
-                    trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
-                    trainingStep.totalLosses.append(totalLoss)
+                    if batchesPrepared <= totalBatchesNeeded:
+                        # Request another session be prepared
+                        subProcessIndex = (batchesPrepared % config['training_batch_prep_subprocesses'])
+                        batchFutures.append(threadExecutor.submit(prepareAndLoadBatch, subProcessCommandQueues[subProcessIndex], subProcessBatchResultQueues[subProcessIndex]))
+                        batchesPrepared += 1
 
-                    # This extra check is done here because updating the trace losses in an expensive operation,
-                    # and what often happens is that there is a backlog of such operations when the training loop
-                    # finishes. To prevent this, we just stop doing these loss updates some number of iterations
-                    # before the training loop finishes.
-                    if trainingStep.numberOfIterationsCompleted < (config['iterations_per_training_step'] - config['training_trace_selection_iterations_before_end_to_stop_updating_trace_losses']):
+                results = agent.learnFromBatches(batches)
+
+                if results is not None:
+                    for result, batch in zip(results, batches):
+                        totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
+                            stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
+                            executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
+                            totalLoss, totalRebalancedLoss, batchReward, \
+                            sampleRewardLosses = result
+
+                        trainingStep.presentRewardLosses.append(presentRewardLoss)
+                        trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
+                        trainingStep.stateValueLosses.append(stateValueLoss)
+                        trainingStep.advantageLosses.append(advantageLoss)
+                        trainingStep.actionProbabilityLosses.append(actionProbabilityLoss)
+                        trainingStep.tracePredictionLosses.append(tracePredictionLoss)
+                        trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
+                        trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
+                        trainingStep.predictedCursorLosses.append(predictedCursorLoss)
+                        trainingStep.totalRewardLosses.append(totalRewardLoss)
+                        trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)
+                        trainingStep.totalLosses.append(totalLoss)
+
                         for executionTraceId, sampleRewardLoss in zip(batch['traceIds'], sampleRewardLosses):
                             for subProcessCommandQueue in subProcessCommandQueues:
                                 subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
