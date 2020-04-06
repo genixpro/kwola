@@ -9,13 +9,54 @@ Please go to https://kwola.io/ or https://kwolatesting.com/ to learn more.
 Installation
 ============
 
-Kwola is based on Python 3, please make sure you are using the correct version of Python. Kwola also requires NodeJS to
-rewrite the javascript code in the web applications it touches. Please install NodeJS prior to following these instructions.
-Lastly, you must have either Google Chrome or Chromium installed already. Please follow the installation instructions
-on those products websites.
+Dependencies
+------------
 
-To use GPUs, you must have the Nvidia drivers and CUDA installed. The model can run on the CPU but training will be
-very slow, even with the smallest model.
+1) Python
+
+Please go to https://www.python.org/downloads/ to download and install Python.
+
+2) NodeJS
+
+Please go to https://nodejs.org/en/ to install NodeJS or install it through a package manager
+appropriate for your distribution.
+
+3) Chromium / Google Chrome
+
+Please go to https://www.chromium.org/ to install Chromium (the open source version of Chrome), or 
+go to https://chrome.google.com to install Google Chrome (you may have it installed already).
+
+4) Chromedriver
+
+Install chromedriver globally to your operating system. Go here: https://chromedriver.chromium.org/getting-started
+and install the binary appropriate for your operating system and which Chrome version you have installed.
+
+For example, I run the following on Linux with Chrome 80:
+
+`[user@localhost]$ wget https://chromedriver.storage.googleapis.com/80.0.3987.106/chromedriver_linux64.zip`
+
+`[user@localhost]$ unzip chromedriver_linux64.zip`
+
+`[user@localhost]$ sudo cp chromedriver /usr/bin/`
+
+Alternatively you can also install chromedriver just to your Python virtual environment.
+
+5) [optional] Nvidia Drivers & Cuda
+
+How you install NVIDIA Drivers depends on your operating system. You only need to install NVIDIA drivers if you 
+are using GPUs. Using GPUs is recommended but optional, and you can do test runs with just the CPU.
+
+Windows: Go here for instructions: https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html
+
+MacOS: https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html
+
+Ubuntu: https://linuxconfig.org/how-to-install-the-nvidia-drivers-on-ubuntu-18-04-bionic-beaver-linux
+* Its recommended to stick to LTS releases for Ubuntu when doing high performance computing.
+
+Fedora: https://www.if-not-true-then-false.com/2015/fedora-nvidia-guide/
+
+Instructions
+------------
 
 Clone the git repository.
 
@@ -28,16 +69,6 @@ Create your Python virtual environment
 `[user@localhost]$ python3 -m venv venv`
 
 `[user@localhost]$ source venv/bin/activate`
-
-Install chromedriver to your Python virtual environment. Go here: https://chromedriver.chromium.org/getting-started
-and install the binary appropriate for your operating system and which Chrome version you have installed.
-For example, I run the following on Linux with Chrome 80.
-
-`[user@localhost]$ wget https://chromedriver.storage.googleapis.com/80.0.3987.106/chromedriver_linux64.zip`
-
-`[user@localhost]$ unzip chromedriver_linux64.zip`
-
-`[user@localhost]$ cp chromedriver venv/bin`
 
 Install main dependencies.
 
