@@ -105,6 +105,13 @@ allows you to restart specific runs.
 
 `[user@localhost]$ kwola kwola_run_0`
 
+For example, you can use Kwola with one of our example codebases if you have Docker installed:
+
+`[user@localhost]$ docker run docker.io/kwola/kros-1`
+
+`[user@localhost]$ kwola http://172.17.0.2:3000/`
+
+You will then see Kwola running on our restaraunt backend sample codebase.
 
 Support
 =======
