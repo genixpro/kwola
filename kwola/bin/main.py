@@ -25,6 +25,7 @@ import sys
 from ..config.config import Configuration
 import os.path
 import re
+import questionary
 
 def main():
     commandArgs = sys.argv[1:]
@@ -56,7 +57,16 @@ Please try again.
             # Create a new config directory for this URL
             url = secondArg
 
-            configDir = Configuration.createNewLocalKwolaConfigDir("rig", url)
+            configName = questionary.select(
+                "Which configuration do you want to load for your model?",
+                choices=[
+                    'testing',
+                    'small',
+                    'medium',
+                    'large'
+                ]).ask()  # returns value of selection
+
+            configDir = Configuration.createNewLocalKwolaConfigDir(configName, url)
             print(f"Starting a fresh Kwola run in directory {configDir} targeting URL {url}")
         else:
             print(cantStartMessage)

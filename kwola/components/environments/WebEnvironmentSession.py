@@ -437,6 +437,10 @@ class WebEnvironmentSession(BaseEnvironment):
             msg, source, lineno, colno, stack = tuple(exception)
             executionTrace.errorsDetected.append(ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno))
 
+            print(datetime.now(), "Error detected in client application:")
+            print(datetime.now(), f"{msg} at line {lineno} column {colno} in {source}")
+            print(datetime.now(), str(stack), flush=True)
+
             hasher = hashlib.md5()
             hasher.update(stack)
             exceptionHash = hasher.hexdigest()

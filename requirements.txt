@@ -5,6 +5,7 @@ numpy
 opencv-python
 pandas
 psutil
+questionary
 requests
 scikit-image
 scikit-learn
