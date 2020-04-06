@@ -46,14 +46,14 @@ def getConfigurationDirFromCommandLineArgs():
             print(cantStartMessage)
             exit(1)
         else:
-            print(f"Restarting the Kwola run in directory {configDir}")
+            print(f"Loading the Kwola run in directory {configDir}")
 
     elif len(commandArgs) == 1:
         secondArg = commandArgs[0]
 
         if os.path.exists(secondArg) and Configuration.checkDirectoryContainsKwolaConfig(secondArg):
             configDir = secondArg
-            print(f"Restarting the Kwola run in directory {configDir}")
+            print(f"Loading the Kwola run in directory {configDir}")
         elif Configuration.isValidURL(secondArg):
             # Create a new config directory for this URL
             url = secondArg
