@@ -252,18 +252,34 @@ class DeepLearningAgent(BaseAgent):
             actionTypes = []
 
             if element['canClick']:
-                actionTypes.append(self.actionsSorted.index("click"))
-                # actionTypes.append(self.actionsSorted.index("double_click"))
+                if "click" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("click"))
+                if "doubleClick" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("doubleClick"))
+
+            if element['canRightClick']:
+                if "rightClick" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("rightClick"))
+
             if element['canType']:
-                actionTypes.append(self.actionsSorted.index("typeEmail"))
-                actionTypes.append(self.actionsSorted.index("typePassword"))
-                # actionTypes.append(self.actionsSorted.index("typeName"))
-                # actionTypes.append(self.actionsSorted.index("typeNumber"))
-                # actionTypes.append(self.actionsSorted.index("typeBrackets"))
-                # actionTypes.append(self.actionsSorted.index("typeMath"))
-                # actionTypes.append(self.actionsSorted.index("typeOtherSymbol"))
-                # actionTypes.append(self.actionsSorted.index("typeParagraph"))
-                actionTypes.append(self.actionsSorted.index("clear"))
+                if "rightClick" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeEmail"))
+                if "typePassword" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typePassword"))
+                if "typeName" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeName"))
+                if "typeNumber" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeNumber"))
+                if "typeBrackets" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeBrackets"))
+                if "typeMath" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeMath"))
+                if "typeOtherSymbol" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeOtherSymbol"))
+                if "typeParagraph" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("typeParagraph"))
+                if "clear" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("clear"))
 
             for actionTypeIndex in actionTypes:
                 pixelActionMap[actionTypeIndex, int(element['top'] * self.config['model_image_downscale_ratio'])

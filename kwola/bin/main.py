@@ -67,7 +67,53 @@ def getConfigurationDirFromCommandLineArgs():
                     'large'
                 ]).ask()  # returns value of selection
 
-            configDir = Configuration.createNewLocalKwolaConfigDir(configName, url)
+            email = questionary.text("What is the email/username to use for testing (blank disables this action)?").ask()
+            password = questionary.text("What is the password to use for testing (blank disables this action)?").ask()
+            name = questionary.text("What human name / short text to use for testing (blank disables this action)?").ask()
+            paragraph = questionary.text("What is paragraph / long text to use (blank disables this action)?").ask()
+
+            commandChoices = [
+                "Enable random number command?",
+                "Enable random bracket command?",
+                "Enable random math symbol command?",
+                "Enable random other symbol command?",
+                "Enable double click command?",
+                "Enable right click command?"
+            ]
+
+            results = questionary.checkbox("Please select which commands you want to enable", choices=commandChoices).ask()
+
+            enableRandomNumberCommand = bool(commandChoices[0] in results)
+            enableRandomBracketCommand = bool(commandChoices[1] in results)
+            enableRandomMathCommand = bool(commandChoices[2] in results)
+            enableRandomOtherSymbolCommand = bool(commandChoices[3] in results)
+            enableDoubleClickCommand = bool(commandChoices[4] in results)
+            enableRightClickCommand = bool(commandChoices[5] in results)
+
+            configDir = Configuration.createNewLocalKwolaConfigDir(configName,
+                                                                   url=url,
+                                                                   email=email,
+                                                                   password=password,
+                                                                   name=name,
+                                                                   paragraph=paragraph,
+                                                                   enableRandomNumberCommand=enableRandomNumberCommand,
+                                                                   enableRandomBracketCommand=enableRandomBracketCommand,
+                                                                   enableRandomMathCommand=enableRandomMathCommand,
+                                                                   enableRandomOtherSymbolCommand=enableRandomOtherSymbolCommand,
+                                                                   enableDoubleClickCommand=enableDoubleClickCommand,
+                                                                   enableRightClickCommand=enableRightClickCommand
+                                                                   )
+
+            ready = questionary.select(
+                "Are you ready to unleash the Kwolas?",
+                choices=[
+                    'yes',
+                    'no'
+                ]).ask()  # returns value of selection
+
+            if ready == "no":
+                exit(0)
+
             print(f"Starting a fresh Kwola run in directory {configDir} targeting URL {url}")
         else:
             print(cantStartMessage)

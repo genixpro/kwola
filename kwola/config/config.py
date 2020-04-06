@@ -82,7 +82,7 @@ class Configuration:
         return found
 
     @staticmethod
-    def createNewLocalKwolaConfigDir(prebuild, url):
+    def createNewLocalKwolaConfigDir(prebuild, **configArgs):
         n = 0
         while True:
             dirname = f"kwola_results_{n}"
@@ -91,7 +91,8 @@ class Configuration:
 
                 with open(os.path.join(dirname, "kwola.json"), "wt") as configFile:
                     prebuildConfigData = json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
-                    prebuildConfigData['url'] = url
+                    for key, value in configArgs.items():
+                        prebuildConfigData[key] = value
                     configFile.write(json.dumps(prebuildConfigData, indent=4))
 
                 return dirname

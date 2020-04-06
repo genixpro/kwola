@@ -37,47 +37,68 @@ class BaseAgent:
     def __init__(self, config):
         self.actions = {
             "click": lambda x,y: ClickTapAction(type="click", x=x, y=y, times=1),
-            # "double_click": lambda x,y: ClickTapAction(type="double_click", x=x, y=y, times=2),
-            # "right_click": lambda x,y: RightClickAction(type="right_click", x=x, y=y),
-            # "wait": lambda x,y: WaitAction(type="wait", x=x, y=y, time=3),
-            "typeEmail": lambda x,y: TypeAction(type="typeEmail", x=x, y=y, label="email", text="test1@test.com"),
-            "typePassword": lambda x,y: TypeAction(type="typePassword", x=x, y=y, label="password", text="test1"),
-            # "typeName": lambda x,y: TypeAction(type="typeName", x=x, y=y, label="name", text="Kwola"),
-            # "typeNumber": lambda x,y: TypeAction(type="typeNumber", x=x, y=y, label="number", text=self.randomString('-.0123456789$%', random.randint(1, 5))),
-            # "typeBrackets": lambda x,y: TypeAction(type="typeBrackets", x=x, y=y, label="brackets", text=self.randomString('{}[]()', random.randint(1, 3))),
-            # "typeMath": lambda x,y: TypeAction(type="typeOtherSymbol", x=x, y=y, label="symbol", text=self.randomString('*=+<>', random.randint(1, 3))),
-            # "typeOtherSymbol": lambda x,y: TypeAction(type="typeOtherSymbol", x=x, y=y, label="symbol", text=self.randomString('"\';:/?,!^&#@', random.randint(1, 3))),
-            # "typeParagraph": lambda x,y: TypeAction(type="typeParagraph", x=x, y=y, label="paragraph", text="Kwola is the ultimate bug destroying machine. Kwola will annihilate all bugs."),
-            "clear": lambda x,y: ClearFieldAction(type="clear", x=x, y=y)
+            "clear": lambda x, y: ClearFieldAction(type="clear", x=x, y=y),
         }
 
         self.actionBaseWeights = [
-            0.7,
-            # 0.5,
-            1.0,
-            1.0,
-            # 0.7,
-            # 1.0,
-            # 0.4,
-            # 0.4,
-            # 0.4,
-            # 0.4,
-            1.0
+            config['random_weight_click'],
+            config['random_weight_clear']
         ]
 
         self.actionProbabilityBoostKeywords = [
             [],
-            # [],
-            ["email", "user"],
-            ["pass"],
-            # ["name"],
-            # ["num", "count", "int", "float"],
-            # [],
-            # [],
-            # [],
-            # [],
             []
         ]
+
+        if config['email']:
+            self.actions['typeEmail'] = lambda x,y: TypeAction(type="typeEmail", x=x, y=y, label="email", text=config['email'])
+            self.actionBaseWeights.append(config['random_weight_type_email'])
+            self.actionProbabilityBoostKeywords.append(["email", "user"])
+
+        if config['password']:
+            self.actions['typePassword'] = lambda x,y: TypeAction(type="typePassword", x=x, y=y, label="password", text=config['password'])
+            self.actionBaseWeights.append(config['random_weight_type_password'])
+            self.actionProbabilityBoostKeywords.append(["pass"])
+
+        if config['name']:
+            self.actions['typeName'] = lambda x,y: TypeAction(type="typeName", x=x, y=y, label="name", text=config['name'])
+            self.actionBaseWeights.append(config['random_weight_type_name'])
+            self.actionProbabilityBoostKeywords.append(["email", "user"])
+
+        if config['paragraph']:
+            self.actions['typeParagraph'] = lambda x,y: TypeAction(type="typeParagraph", x=x, y=y, label="paragraph", text=config['paragraph'])
+            self.actionBaseWeights.append(config['random_weight_type_paragraph'])
+            self.actionProbabilityBoostKeywords.append(["pass"])
+
+        if config['enableRandomNumberCommand']:
+            self.actions['typeNumber'] = lambda x,y: TypeAction(type="typeNumber", x=x, y=y, label="number", text=self.randomString('-.0123456789$%', random.randint(1, 5)))
+            self.actionBaseWeights.append(config['random_weight_type_number'])
+            self.actionProbabilityBoostKeywords.append(["num", "count", "int", "float"])
+
+        if config['enableDoubleClickCommand']:
+            self.actions['doubleClick'] = lambda x,y: ClickTapAction(type="double_click", x=x, y=y, times=2)
+            self.actionBaseWeights.append(config['random_weight_double_click'])
+            self.actionProbabilityBoostKeywords.append([])
+
+        if config['enableRightClickCommand']:
+            self.actions['rightClick'] = lambda x,y: RightClickAction(type="right_click", x=x, y=y)
+            self.actionBaseWeights.append(config['random_weight_right_click'])
+            self.actionProbabilityBoostKeywords.append([])
+
+        if config['enableRandomBracketCommand']:
+            self.actions['typeBrackets'] = lambda x,y: TypeAction(type="typeBrackets", x=x, y=y, label="brackets", text=self.randomString('{}[]()', random.randint(1, 3)))
+            self.actionBaseWeights.append(config['random_weight_type_brackets'])
+            self.actionProbabilityBoostKeywords.append([])
+
+        if config['enableRandomMathCommand']:
+            self.actions['typeMath'] = lambda x,y: TypeAction(type="typeMath", x=x, y=y, label="symbol", text=self.randomString('*=+<>', random.randint(1, 3)))
+            self.actionBaseWeights.append(config['random_weight_type_math'])
+            self.actionProbabilityBoostKeywords.append([])
+
+        if config['enableRandomOtherSymbolCommand']:
+            self.actions['typeOtherSymbol'] = lambda x,y: TypeAction(type="typeOtherSymbol", x=x, y=y, label="symbol", text=self.randomString('"\';:/?,!^&#@', random.randint(1, 3)))
+            self.actionBaseWeights.append(config['random_weight_type_other_symbol'])
+            self.actionProbabilityBoostKeywords.append([])
 
         self.elementBaseWeights = {
             "a": config['random_html_element_a_weight'],
