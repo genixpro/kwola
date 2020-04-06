@@ -1,18 +1,4 @@
-from mongoengine import *
-import datetime
-import os.path
-from kwola.models.id import CustomIDField
-from .utilities import saveObjectToDisk, loadObjectFromDisk
-
-
-class ApplicationModel(Document):
-    id = CustomIDField()
-
-    name = StringField(required=True)
-
-    url = StringField(required=True)
-
-    def saveToDisk(self, config):#
+#
 #     Kwola is an AI algorithm that learns how to use other programs
 #     automatically so that it can find bugs in them.
 #
@@ -32,8 +18,21 @@ class ApplicationModel(Document):
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
+from mongoengine import *
+import datetime
+import os.path
+from kwola.models.id import CustomIDField
+from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 
+class ApplicationModel(Document):
+    id = CustomIDField()
+
+    name = StringField(required=True)
+
+    url = StringField(required=True)
+
+    def saveToDisk(self, config):
         saveObjectToDisk(self, "applications", config)
 
 
