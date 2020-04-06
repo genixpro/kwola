@@ -86,14 +86,14 @@ class WebEnvironmentSession(BaseEnvironment):
         time.sleep(2)
 
         # Inject bug detection script
-        # self.driver.execute_script("""
-        #     window.kwolaExceptions = [];
-        #     const currentOnError = window.onerror;
-        #     window.onerror=function(msg, source, lineno, colno, error) {
-        #         currentOnError(msg, source, lineno, colno, error);
-        #         window.kwolaExceptions.push([msg, source, lineno, colno, error.stack]);
-        #     }
-        # """)
+        self.driver.execute_script("""
+            window.kwolaExceptions = [];
+            const currentOnError = window.onerror;
+            window.onerror=function(msg, source, lineno, colno, error) {
+                currentOnError(msg, source, lineno, colno, error);
+                window.kwolaExceptions.push([msg, source, lineno, colno, error.stack]);
+            }
+        """)
 
         self.lastScreenshotHash = None
         self.lastProxyPaths = set()
@@ -431,19 +431,19 @@ class WebEnvironmentSession(BaseEnvironment):
 
         executionTrace.didActionSucceed = success
 
-        # hadNewException = False
-        # exceptions = self.extractExceptions()
-        # for exception in exceptions:
-        #     msg, source, lineno, colno, stack = tuple(exception)
-        #     executionTrace.errorsDetected.append(ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno))
-        #
-        #     hasher = hashlib.md5()
-        #     hasher.update(stack)
-        #     exceptionHash = hasher.hexdigest()
-        #
-        #     if exceptionHash not in self.exceptionHashes:
-        #         self.exceptionHashes.add(exceptionHash)
-        #         hadNewException = True
+        hadNewException = False
+        exceptions = self.extractExceptions()
+        for exception in exceptions:
+            msg, source, lineno, colno, stack = tuple(exception)
+            executionTrace.errorsDetected.append(ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno))
+
+            hasher = hashlib.md5()
+            hasher.update(stack)
+            exceptionHash = hasher.hexdigest()
+
+            if exceptionHash not in self.exceptionHashes:
+                self.exceptionHashes.add(exceptionHash)
+                hadNewException = True
 
         screenHash = self.addScreenshot()
 
@@ -471,8 +471,7 @@ class WebEnvironmentSession(BaseEnvironment):
         executionTrace.finishURL = self.driver.current_url
 
         executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-        # executionTrace.didNewErrorOccur = hadNewException
-        executionTrace.didNewErrorOccur = False
+        executionTrace.didNewErrorOccur = hadNewException
         executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
 
         executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
