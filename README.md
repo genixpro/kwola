@@ -55,6 +55,12 @@ Ubuntu: https://linuxconfig.org/how-to-install-the-nvidia-drivers-on-ubuntu-18-0
 
 Fedora: https://www.if-not-true-then-false.com/2015/fedora-nvidia-guide/
 
+6) [optional] Docker
+
+Go here and follow the instructions to install Docker: https://docs.docker.com/install/
+
+Docker not required for Kwola to operate but is used in some of the examples.
+
 Instructions
 ------------
 
