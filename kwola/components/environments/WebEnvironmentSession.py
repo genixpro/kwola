@@ -284,6 +284,47 @@ class WebEnvironmentSession(BaseEnvironment):
                     || isFunction(element.onkeypress) 
                     || isFunction(element.onkeyup))
                     data.canType = true;
+                    
+                if (window.kwolaEvents.has(element))
+                {
+                    const knownEvents = window.kwolaEvents.get(element);
+                    if (knownEvents.indexOf("click") != -1)
+                    {
+                        data.canClick = true;
+                    }
+                    if (knownEvents.indexOf("contextmenu") != -1)
+                    {
+                        data.canRightClick = true;
+                    }
+                    if (knownEvents.indexOf("dblclick") != -1)
+                    {
+                        data.canClick = true;
+                    }
+                    
+                    if (knownEvents.indexOf("mousedown") != -1)
+                    {
+                        data.canClick = true;
+                        data.canRightClick = true;
+                    }
+                    if (knownEvents.indexOf("mouseup") != -1)
+                    {
+                        data.canClick = true;
+                        data.canRightClick = true;
+                    }
+                    
+                    if (knownEvents.indexOf("keydown") != -1)
+                    {
+                        data.canType = true;
+                    }
+                    if (knownEvents.indexOf("keypress") != -1)
+                    {
+                        data.canType = true;
+                    }
+                    if (knownEvents.indexOf("keyup") != -1)
+                    {
+                        data.canType = true;
+                    }
+                }
                 
                 if (data.canType || data.canClick || data.canRightClick)
                     if (data.width > 0 && data.height > 0)
