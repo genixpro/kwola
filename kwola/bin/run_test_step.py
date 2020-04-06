@@ -20,9 +20,9 @@
 
 
 from ..tasks import RunTestingStep
-from ..models.TestingStepModel import TestingStep
+from ..datamodels.TestingStepModel import TestingStep
 import mongoengine
-from ..models.id import generateNewUUID
+from ..datamodels.id import generateNewUUID
 from .main import getConfigurationDirFromCommandLineArgs
 from ..config.config import Configuration
 

@@ -20,10 +20,10 @@
 
 
 from ..components.environments.WebEnvironment import WebEnvironment
-from ..models.TestingStepModel import TestingStep
-from ..models.TrainingStepModel import TrainingStep
-from ..models.ExecutionSessionModel import ExecutionSession
-from ..models.ExecutionTraceModel import ExecutionTrace
+from ..datamodels.TestingStepModel import TestingStep
+from ..datamodels.TrainingStepModel import TrainingStep
+from ..datamodels.ExecutionSessionModel import ExecutionSession
+from ..datamodels.ExecutionTraceModel import ExecutionTrace
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.TaskProcess import TaskProcess
 from ..config.config import Configuration

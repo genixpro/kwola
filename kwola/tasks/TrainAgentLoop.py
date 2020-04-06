@@ -20,10 +20,10 @@
 
 
 from ..components.environments.WebEnvironment import WebEnvironment
-from ..models.actions.ClickTapAction import ClickTapAction
-from ..models.TestingStepModel import TestingStep
-from ..models.TrainingSequenceModel import TrainingSequence
-from ..models.TrainingStepModel import TrainingStep
+from ..datamodels.actions.ClickTapAction import ClickTapAction
+from ..datamodels.TestingStepModel import TestingStep
+from ..datamodels.TrainingSequenceModel import TrainingSequence
+from ..datamodels.TrainingStepModel import TrainingStep
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from .RunTrainingStep import runTrainingStep
 from ..config.config import Configuration
@@ -40,7 +40,7 @@ import subprocess
 import os
 import os.path
 import traceback
-from ..models.id import generateNewUUID
+from ..datamodels.id import generateNewUUID
 from datetime import datetime
 import atexit
 import bson

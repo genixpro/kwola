@@ -20,9 +20,9 @@
 
 
 from ..tasks import RunTrainingStep
-from ..models.TrainingStepModel import TrainingStep
+from ..datamodels.TrainingStepModel import TrainingStep
 import mongoengine
-from ..models.id import generateNewUUID
+from ..datamodels.id import generateNewUUID
 from .main import getConfigurationDirFromCommandLineArgs
 from ..config.config import Configuration
 

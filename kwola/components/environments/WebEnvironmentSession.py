@@ -29,14 +29,14 @@ import numpy as np
 from mitmproxy.tools.dump import DumpMaster
 from ...components.proxy.JSRewriteProxy import JSRewriteProxy
 from ...components.proxy.PathTracer import PathTracer
-from ...models.actions.ClickTapAction import ClickTapAction
-from ...models.actions.RightClickAction import RightClickAction
-from ...models.actions.ClearFieldAction import ClearFieldAction
-from ...models.actions.TypeAction import TypeAction
-from ...models.actions.WaitAction import WaitAction
-from ...models.ActionMapModel import ActionMap
-from ...models.ExecutionTraceModel import ExecutionTrace
-from ...models.errors.ExceptionError import ExceptionError
+from ...datamodels.actions.ClickTapAction import ClickTapAction
+from ...datamodels.actions.RightClickAction import RightClickAction
+from ...datamodels.actions.ClearFieldAction import ClearFieldAction
+from ...datamodels.actions.TypeAction import TypeAction
+from ...datamodels.actions.WaitAction import WaitAction
+from ...datamodels.ActionMapModel import ActionMap
+from ...datamodels.ExecutionTraceModel import ExecutionTrace
+from ...datamodels.errors.ExceptionError import ExceptionError
 import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile

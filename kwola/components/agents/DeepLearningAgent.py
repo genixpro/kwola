@@ -22,13 +22,13 @@
 from .BaseAgent import BaseAgent
 from .  TraceNet import   TraceNet
 from ...components.utilities.debug_plot import showRewardImageDebug
-from ...models.ExecutionTraceModel import ExecutionTrace
-from ...models.ExecutionSessionModel import ExecutionSession
-from ...models.actions.ClickTapAction import ClickTapAction
-from ...models.actions.ClickTapAction import ClickTapAction
-from ...models.actions.RightClickAction import RightClickAction
-from ...models.actions.TypeAction import TypeAction
-from ...models.actions.WaitAction import WaitAction
+from ...datamodels.ExecutionTraceModel import ExecutionTrace
+from ...datamodels.ExecutionSessionModel import ExecutionSession
+from ...datamodels.actions.ClickTapAction import ClickTapAction
+from ...datamodels.actions.ClickTapAction import ClickTapAction
+from ...datamodels.actions.RightClickAction import RightClickAction
+from ...datamodels.actions.TypeAction import TypeAction
+from ...datamodels.actions.WaitAction import WaitAction
 from skimage.segmentation import felzenszwalb, mark_boundaries
 import bz2
 import concurrent.futures

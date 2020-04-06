@@ -19,11 +19,11 @@
 #
 
 
-from ...models.actions.ClickTapAction import ClickTapAction
-from ...models.actions.RightClickAction import RightClickAction
-from ...models.actions.TypeAction import TypeAction
-from ...models.actions.WaitAction import WaitAction
-from ...models.actions.ClearFieldAction import ClearFieldAction
+from ...datamodels.actions.ClickTapAction import ClickTapAction
+from ...datamodels.actions.RightClickAction import RightClickAction
+from ...datamodels.actions.TypeAction import TypeAction
+from ...datamodels.actions.WaitAction import WaitAction
+from ...datamodels.actions.ClearFieldAction import ClearFieldAction
 import scipy.special
 import random
 
