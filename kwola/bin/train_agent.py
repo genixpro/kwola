@@ -21,11 +21,12 @@
 
 from ..tasks import TrainAgentLoop
 import mongoengine
-
+from .main import getConfigurationDirFromCommandLineArgs
 
 
 
 def main():
-    TrainAgentLoop.trainAgent()
+    configDir = getConfigurationDirFromCommandLineArgs()
+    TrainAgentLoop.trainAgent(configDir)
 
 

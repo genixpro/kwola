@@ -23,14 +23,15 @@ from ..tasks import RunTestingStep
 from ..models.TestingStepModel import TestingStep
 import mongoengine
 from ..models.id import generateNewUUID
-
+from .main import getConfigurationDirFromCommandLineArgs
+from ..config.config import Configuration
 
 
 def main():
-    # testingStep = TestingStep(id=generateNewUUID(TestingStep))
-    # testingStep.saveToDisk(config)
-    #
-    # RunTestingStep.runTestingStep(str(testingStep.id))
-    #
-    #
-    pass
+    configDir = getConfigurationDirFromCommandLineArgs()
+    config = Configuration(configDir)
+
+    testingStep = TestingStep(id=generateNewUUID(TestingStep, config))
+    testingStep.saveToDisk(config)
+
+    RunTestingStep.runTestingStep(configDir, str(testingStep.id))

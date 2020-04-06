@@ -62,7 +62,7 @@ Go here and follow the instructions to install Docker: https://docs.docker.com/i
 Docker not required for Kwola to operate but is used in some of the examples.
 
 Installation Instructions
-------------
+-------------------------
 
 Install Kwola using pip.
 

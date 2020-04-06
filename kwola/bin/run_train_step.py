@@ -19,21 +19,19 @@
 #
 
 
-from ..models.ApplicationModel import ApplicationModel
-from ..models.TrainingSequenceModel import TrainingSequence
-from ..models.TestingStepModel import TestingStep
-from ..models.ExecutionSessionModel import ExecutionSession
-from ..models.ExecutionTraceModel import ExecutionTrace
+from ..tasks import RunTrainingStep
 from ..models.TrainingStepModel import TrainingStep
-from mongoengine import connect
+import mongoengine
+from ..models.id import generateNewUUID
+from .main import getConfigurationDirFromCommandLineArgs
+from ..config.config import Configuration
 
 
 def main():
-    ApplicationModel.objects().delete()
-    TrainingSequence.objects().delete()
-    TestingStep.objects().delete()
-    ExecutionSession.objects().delete()
-    ExecutionTrace.objects().delete()
-    TrainingStep.objects().delete()
+    configDir = getConfigurationDirFromCommandLineArgs()
+    config = Configuration(configDir)
 
-    print("Kwola Mongo database is now cleared")
+    trainingStep = TrainingStep(id=generateNewUUID(TrainingStep, config))
+    trainingStep.saveToDisk(config)
+
+    RunTrainingStep.runTrainingStep(configDir, str(trainingStep.id), 0)

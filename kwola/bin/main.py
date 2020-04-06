@@ -27,15 +27,16 @@ import os.path
 import re
 import questionary
 
-def main():
+
+def getConfigurationDirFromCommandLineArgs():
     commandArgs = sys.argv[1:]
 
     cantStartMessage = """"
-Error! Can not start .. You must provide either a web URL or the directory name of an existing Kwola run. 
-The URL must be a valid url including the http:// part. If a directory name, the directory must be accessible
-from the current working folder, and must have the ..json configuration file contained within it.
-Please try again.
-    """
+    Error! Can not start .. You must provide either a web URL or the directory name of an existing Kwola run. 
+    The URL must be a valid url including the http:// part. If a directory name, the directory must be accessible
+    from the current working folder, and must have the ..json configuration file contained within it.
+    Please try again.
+        """
 
     configDir = None
 
@@ -72,6 +73,11 @@ Please try again.
             print(cantStartMessage)
             exit(2)
 
+    return configDir
+
+
+def main():
+    configDir = getConfigurationDirFromCommandLineArgs()
     TrainAgentLoop.trainAgent(configDir)
 
 

@@ -70,10 +70,10 @@ setup(
             'main = kwola:main',
         ],
         'console_scripts': [
-            'kwola= kwola.bin.main:main',
-            'kwola_clear_db = kwola.bin.clear_db:main',
+            'kwola = kwola.bin.main:main',
             'kwola_train_agent = kwola.bin.train_agent:main',
-            'kwola_run_test_sequence = kwola.bin.run_test_sequence:main'
+            'kwola_run_train_step = kwola.bin.run_train_step:main',
+            'kwola_run_test_step = kwola.bin.run_test_step:main'
         ]
     },
 )
