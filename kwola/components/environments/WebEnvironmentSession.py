@@ -27,16 +27,16 @@ import time
 import traceback
 import numpy as np
 from mitmproxy.tools.dump import DumpMaster
-from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
-from kwola.components.proxy.PathTracer import PathTracer
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.actions.RightClickAction import RightClickAction
-from kwola.models.actions.ClearFieldAction import ClearFieldAction
-from kwola.models.actions.TypeAction import TypeAction
-from kwola.models.actions.WaitAction import WaitAction
-from kwola.models.ActionMapModel import ActionMap
-from kwola.models.ExecutionTraceModel import ExecutionTrace
-from kwola.models.errors.ExceptionError import ExceptionError
+from ...components.proxy.JSRewriteProxy import JSRewriteProxy
+from ...components.proxy.PathTracer import PathTracer
+from ...models.actions.ClickTapAction import ClickTapAction
+from ...models.actions.RightClickAction import RightClickAction
+from ...models.actions.ClearFieldAction import ClearFieldAction
+from ...models.actions.TypeAction import TypeAction
+from ...models.actions.WaitAction import WaitAction
+from ...models.ActionMapModel import ActionMap
+from ...models.ExecutionTraceModel import ExecutionTrace
+from ...models.errors.ExceptionError import ExceptionError
 import selenium.common.exceptions
 from selenium.webdriver.common.keys import Keys
 import tempfile

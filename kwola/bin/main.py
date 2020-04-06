@@ -19,10 +19,10 @@
 #
 
 
-import kwola.tasks.TrainAgentLoop
+from ..tasks import TrainAgentLoop
 import mongoengine
 import sys
-from kwola.config.config import Configuration
+from ..config.config import Configuration
 import os.path
 import re
 
@@ -30,9 +30,9 @@ def main():
     commandArgs = sys.argv[1:]
 
     cantStartMessage = """"
-Error! Can not start Kwola. You must provide either a web URL or the directory name of an existing Kwola run. 
+Error! Can not start .. You must provide either a web URL or the directory name of an existing Kwola run. 
 The URL must be a valid url including the http:// part. If a directory name, the directory must be accessible
-from the current working folder, and must have the kwola.json configuration file contained within it.
+from the current working folder, and must have the ..json configuration file contained within it.
 Please try again.
     """
 
@@ -62,6 +62,6 @@ Please try again.
             print(cantStartMessage)
             exit(2)
 
-    kwola.tasks.TrainAgentLoop.trainAgent(configDir)
+    TrainAgentLoop.trainAgent(configDir)
 
 

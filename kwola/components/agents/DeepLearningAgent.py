@@ -21,21 +21,21 @@
 
 from .BaseAgent import BaseAgent
 from .  TraceNet import   TraceNet
-from kwola.components.utilities.debug_plot import showRewardImageDebug
-from kwola.models.ExecutionTraceModel import ExecutionTrace
-from kwola.models.ExecutionSessionModel import ExecutionSession
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.actions.RightClickAction import RightClickAction
-from kwola.models.actions.TypeAction import TypeAction
-from kwola.models.actions.WaitAction import WaitAction
+from ...components.utilities.debug_plot import showRewardImageDebug
+from ...models.ExecutionTraceModel import ExecutionTrace
+from ...models.ExecutionSessionModel import ExecutionSession
+from ...models.actions.ClickTapAction import ClickTapAction
+from ...models.actions.ClickTapAction import ClickTapAction
+from ...models.actions.RightClickAction import RightClickAction
+from ...models.actions.TypeAction import TypeAction
+from ...models.actions.WaitAction import WaitAction
 from skimage.segmentation import felzenszwalb, mark_boundaries
 import bz2
 import concurrent.futures
 import cv2
 import bson
 import cv2
-from kwola.config.config import Configuration
+from ...config.config import Configuration
 import copy
 from datetime import datetime
 import itertools

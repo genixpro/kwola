@@ -25,7 +25,7 @@
 
 class BaseEnvironment:
     """
-        This is a base class for all different types of environments in Kwola.
+        This is a base class for all different types of environments in ...
 
         This is not 'environment' from a devops perspective, with say credentials and configuration. A Kwola Environment
         is the interface that connects directly to the software that we are trying to test. E.g. if we are testing

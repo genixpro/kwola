@@ -26,7 +26,7 @@ from .errors.BaseError import BaseError
 from .ActionMapModel import ActionMap
 import numpy
 import os.path
-from kwola.models.id import CustomIDField
+from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 class ExecutionTrace(Document):

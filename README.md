@@ -100,7 +100,7 @@ The project was founded by Quinn Lawson, Bradley Arsenault and Daniel Shakmundes
 License
 =======
 
-The project is licensed GPLv3.
+The project is licensed GPLv3 Affero. 
 
 Project status
 ==============

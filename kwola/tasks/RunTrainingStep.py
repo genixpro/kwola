@@ -19,14 +19,14 @@
 #
 
 
-from kwola.components.environments.WebEnvironment import WebEnvironment
-from kwola.models.TestingStepModel import TestingStep
-from kwola.models.TrainingStepModel import TrainingStep
-from kwola.models.ExecutionSessionModel import ExecutionSession
-from kwola.models.ExecutionTraceModel import ExecutionTrace
-from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
-from kwola.components.TaskProcess import TaskProcess
-from kwola.config.config import Configuration
+from ..components.environments.WebEnvironment import WebEnvironment
+from ..models.TestingStepModel import TestingStep
+from ..models.TrainingStepModel import TrainingStep
+from ..models.ExecutionSessionModel import ExecutionSession
+from ..models.ExecutionTraceModel import ExecutionTrace
+from ..components.agents.DeepLearningAgent import DeepLearningAgent
+from ..components.TaskProcess import TaskProcess
+from ..config.config import Configuration
 import concurrent.futures
 import random
 import torch

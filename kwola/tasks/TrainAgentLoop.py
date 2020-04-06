@@ -19,19 +19,19 @@
 #
 
 
-from kwola.components.environments.WebEnvironment import WebEnvironment
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.TestingStepModel import TestingStep
-from kwola.models.TrainingSequenceModel import TrainingSequence
-from kwola.models.TrainingStepModel import TrainingStep
-from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
+from ..components.environments.WebEnvironment import WebEnvironment
+from ..models.actions.ClickTapAction import ClickTapAction
+from ..models.TestingStepModel import TestingStep
+from ..models.TrainingSequenceModel import TrainingSequence
+from ..models.TrainingStepModel import TrainingStep
+from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from .RunTrainingStep import runTrainingStep
-from kwola.config.config import Configuration
+from ..config.config import Configuration
 from .RunTestingStep import runTestingStep
 from concurrent.futures import ThreadPoolExecutor
 import mongoengine
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait
-from kwola.components.ManagedTaskSubprocess import ManagedTaskSubprocess
+from ..components.ManagedTaskSubprocess import ManagedTaskSubprocess
 import time
 import torch.cuda
 import multiprocessing
@@ -40,7 +40,7 @@ import subprocess
 import os
 import os.path
 import traceback
-from kwola.models.id import generateNewUUID
+from ..models.id import generateNewUUID
 from datetime import datetime
 import atexit
 import bson

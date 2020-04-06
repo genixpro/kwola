@@ -20,10 +20,10 @@
 
 
 from .BaseAgent import BaseAgent
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.actions.RightClickAction import RightClickAction
-from kwola.models.actions.TypeAction import TypeAction
-from kwola.models.actions.WaitAction import WaitAction
+from ...models.actions.ClickTapAction import ClickTapAction
+from ...models.actions.RightClickAction import RightClickAction
+from ...models.actions.TypeAction import TypeAction
+from ...models.actions.WaitAction import WaitAction
 import random
 import numpy
 

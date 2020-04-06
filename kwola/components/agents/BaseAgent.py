@@ -19,11 +19,11 @@
 #
 
 
-from kwola.models.actions.ClickTapAction import ClickTapAction
-from kwola.models.actions.RightClickAction import RightClickAction
-from kwola.models.actions.TypeAction import TypeAction
-from kwola.models.actions.WaitAction import WaitAction
-from kwola.models.actions.ClearFieldAction import ClearFieldAction
+from ...models.actions.ClickTapAction import ClickTapAction
+from ...models.actions.RightClickAction import RightClickAction
+from ...models.actions.TypeAction import TypeAction
+from ...models.actions.WaitAction import WaitAction
+from ...models.actions.ClearFieldAction import ClearFieldAction
 import scipy.special
 import random
 

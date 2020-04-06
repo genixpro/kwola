@@ -19,13 +19,13 @@
 #
 
 
-import kwola.tasks.TrainAgentLoop
+from ..tasks import TrainAgentLoop
 import mongoengine
 
 
 
 
 def main():
-    kwola.tasks.TrainAgentLoop.trainAgent()
+    TrainAgentLoop.trainAgent()
 
 

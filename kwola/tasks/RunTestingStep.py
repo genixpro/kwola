@@ -19,12 +19,12 @@
 #
 
 
-from kwola.components.environments.WebEnvironment import WebEnvironment
-from kwola.models.TestingStepModel import TestingStep
-from kwola.models.ExecutionSessionModel import ExecutionSession
-from kwola.components.agents.DeepLearningAgent import DeepLearningAgent
-from kwola.components.TaskProcess import TaskProcess
-from kwola.config.config import Configuration
+from ..components.environments.WebEnvironment import WebEnvironment
+from ..models.TestingStepModel import TestingStep
+from ..models.ExecutionSessionModel import ExecutionSession
+from ..components.agents.DeepLearningAgent import DeepLearningAgent
+from ..components.TaskProcess import TaskProcess
+from ..config.config import Configuration
 import pickle
 from datetime import datetime
 import time

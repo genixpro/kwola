@@ -27,7 +27,7 @@ import json
 import threading
 from datetime import datetime
 import os
-from kwola.components.TaskProcess import TaskProcess
+from ..components.TaskProcess import TaskProcess
 
 
 class ManagedTaskSubprocess:

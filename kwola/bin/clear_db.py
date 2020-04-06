@@ -19,12 +19,12 @@
 #
 
 
-from kwola.models.ApplicationModel import ApplicationModel
-from kwola.models.TrainingSequenceModel import TrainingSequence
-from kwola.models.TestingStepModel import TestingStep
-from kwola.models.ExecutionSessionModel import ExecutionSession
-from kwola.models.ExecutionTraceModel import ExecutionTrace
-from kwola.models.TrainingStepModel import TrainingStep
+from ..models.ApplicationModel import ApplicationModel
+from ..models.TrainingSequenceModel import TrainingSequence
+from ..models.TestingStepModel import TestingStep
+from ..models.ExecutionSessionModel import ExecutionSession
+from ..models.ExecutionTraceModel import ExecutionTrace
+from ..models.TrainingStepModel import TrainingStep
 from mongoengine import connect
 
 

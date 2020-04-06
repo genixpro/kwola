@@ -23,8 +23,8 @@ from .BaseEnvironment import BaseEnvironment
 import time
 import numpy as np
 from mitmproxy.tools.dump import DumpMaster
-from kwola.components.proxy.JSRewriteProxy import JSRewriteProxy
-from kwola.components.proxy.PathTracer import PathTracer
+from ...components.proxy.JSRewriteProxy import JSRewriteProxy
+from ...components.proxy.PathTracer import PathTracer
 from threading import Thread
 import asyncio
 import concurrent.futures

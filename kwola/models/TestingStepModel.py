@@ -25,7 +25,7 @@ from .ExecutionTraceModel import ExecutionTrace
 from .ExecutionSessionModel import ExecutionSession
 from .errors.BaseError import BaseError
 import os.path
-from kwola.models.id import CustomIDField
+from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 class TestingStep(Document):

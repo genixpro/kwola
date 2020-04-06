@@ -21,7 +21,7 @@
 
 from mongoengine import *
 import os.path
-from kwola.models.id import CustomIDField
+from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
 
 

@@ -21,7 +21,7 @@
 
 from mongoengine import *
 import datetime
-from kwola.models.ActionMapModel import ActionMap
+from ...models.ActionMapModel import ActionMap
 
 
 class BaseAction(EmbeddedDocument):
