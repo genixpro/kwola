@@ -61,30 +61,18 @@ Go here and follow the instructions to install Docker: https://docs.docker.com/i
 
 Docker not required for Kwola to operate but is used in some of the examples.
 
-Instructions
+Installation Instructions
 ------------
 
-Clone the git repository.
+Install Kwola using pip.
 
-`[user@localhost]$ git clone https://github.com/Kwola/kwola.git`
+`[user@localhost]$ pip3 install kwola`
 
-Create your Python virtual environment
-
-`[user@localhost]$ cd kwola`
-
-`[user@localhost]$ python3 -m venv venv`
-
-`[user@localhost]$ source venv/bin/activate`
-
-Install main dependencies.
-
-`[user@localhost]$ npm install`
-
-`[user@localhost]$ python3 setup.py develop`
-
-Install babel-cli globally. This makes it easier for the code to access the babel binary.
+Install babel-cli and the Kwola babel plugin globally. This makes it easier for the code to access the babel binary.
 
 `[user@localhost]$ npm install @babel/cli -g`
+
+`[user@localhost]$ npm install babel-plugin-kwola -g`
 
 And that's it! 
 
