@@ -39,7 +39,7 @@ tests_require = [
 
 setup(
     name='kwola',
-    version='0.0',
+    version='0.0.1',
     description='Kwola makes an AI powered tooling for finding bugs in software',
     long_description=README + '\n\n' + CHANGES,
     classifiers=[
