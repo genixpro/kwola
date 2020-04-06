@@ -45,7 +45,7 @@ Install main dependencies.
 
 `[user@localhost]$ python3 setup.py develop`
 
-Install babel-cli globally. This makes it easier for the code to access.
+Install babel-cli globally. This makes it easier for the code to access the babel binary.
 
 `[user@localhost]$ npm install @babel/cli -g`
 
