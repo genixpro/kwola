@@ -27,6 +27,7 @@ from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..datamodels.TrainingSequenceModel import TrainingSequence
 from ..datamodels.TrainingStepModel import TrainingStep
+from .RunTrainingStep import loadAllTestingSteps
 from concurrent.futures import as_completed, wait
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -188,7 +189,10 @@ def trainAgent(configDir):
     trainingSequence.status = "running"
     trainingSequence.trainingStepsCompleted = 0
 
-    runRandomInitialization(config, trainingSequence)
+    testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
+    if len(testingSteps) == 0:
+        runRandomInitialization(config, trainingSequence)
+
     runMainTrainingLoop(config, trainingSequence)
 
     trainingSequence.status = "completed"

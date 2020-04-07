@@ -143,7 +143,7 @@
   "training_next_step_crop_width": 384,
   "training_number_of_recent_testing_sequences_to_use": 64,
   "training_precompute_batches_count": 8,
-  "training_random_initialization_sequences": 0,
+  "training_random_initialization_sequences": 4,
   "training_random_initialization_workers": 4,
   "training_reset_workers_every_n_batches": 100,
   "training_reward_normalizer_fit_population_size": 1000,
