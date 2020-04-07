@@ -6,6 +6,8 @@ Kwola will learn to use your user-interface completely automatically, with no co
 
 Please go to https://kwola.io/ or https://kwolatesting.com/ to learn more.
 
+![Screenshot of Kwola](https://raw.githubusercontent.com/Kwola/kwola/master/docs/debug_video.png "Screenshot of Kwola")
+
 Installation
 ============
 
