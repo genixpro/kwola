@@ -35,7 +35,7 @@ class ApplicationModel(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config):
-        return loadObjectFromDisk(ApplicationModel, id, "applications", config)
+    def loadFromDisk(id, config, printErrorOnFailure=True):
+        return loadObjectFromDisk(ApplicationModel, id, "applications", config, printErrorOnFailure=printErrorOnFailure)
 
 

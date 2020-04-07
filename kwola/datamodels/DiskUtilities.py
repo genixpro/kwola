@@ -52,7 +52,7 @@ def saveObjectToDisk(targetObject, folder, config):
 
 
 
-def loadObjectFromDisk(modelClass, id, folder, config):
+def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True):
     try:
         object = None
         pickleFileName = ''
@@ -88,17 +88,20 @@ def loadObjectFromDisk(modelClass, id, folder, config):
                     object = modelClass.from_json(str(gzip.decompress(f.read()), "utf8"))
 
         if object is None:
-            print(datetime.now(), "Error: Failed to load object. File not found:", pickleFileName, gzipPickleFileName, jsonFileName, gzipJsonFileName, flush=True)
+            if printErrorOnFailure:
+                print(datetime.now(), "Error: Failed to load object. File not found:", pickleFileName, gzipPickleFileName, jsonFileName, gzipJsonFileName, flush=True)
             return None
 
         return object
     except json.JSONDecodeError:
-        print(datetime.now(), f"Error: Failed to load object {id}. Bad JSON. Usually implies the file failed to write. "
-                              "Sometimes this occurs if you kill the process while it is running. If this occurs "
-                              "during normal operations without interruption, that would indicate a bug.", flush=True)
+        if printErrorOnFailure:
+            print(datetime.now(), f"Error: Failed to load object {id}. Bad JSON. Usually implies the file failed to write. "
+                                  "Sometimes this occurs if you kill the process while it is running. If this occurs "
+                                  "during normal operations without interruption, that would indicate a bug.", flush=True)
         return
     except EOFError:
-        print(datetime.now(), f"Error: Failed to load object {id}. Bad pickle file. Usually implies the file failed to write. "
-                              "Sometimes this occurs if you kill the process while it is running. If this occurs "
-                              "during normal operations without interruption, that would indicate a bug.", flush=True)
+        if printErrorOnFailure:
+            print(datetime.now(), f"Error: Failed to load object {id}. Bad pickle file. Usually implies the file failed to write. "
+                                  "Sometimes this occurs if you kill the process while it is running. If this occurs "
+                                  "during normal operations without interruption, that would indicate a bug.", flush=True)
         return

@@ -43,6 +43,6 @@ class ExecutionSession(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config):
-        return loadObjectFromDisk(ExecutionSession, id, "execution_sessions", config)
+    def loadFromDisk(id, config, printErrorOnFailure=True):
+        return loadObjectFromDisk(ExecutionSession, id, "execution_sessions", config, printErrorOnFailure=printErrorOnFailure)
 

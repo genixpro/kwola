@@ -189,8 +189,8 @@ class ExecutionTrace(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config, omitLargeFields=False):
-        trace = loadObjectFromDisk(ExecutionTrace, id, "execution_traces", config)
+    def loadFromDisk(id, config, omitLargeFields=False, printErrorOnFailure=True):
+        trace = loadObjectFromDisk(ExecutionTrace, id, "execution_traces", config, printErrorOnFailure=printErrorOnFailure)
         if trace is not None:
             if omitLargeFields:
                 trace.branchExecutionTrace = []

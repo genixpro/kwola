@@ -52,7 +52,7 @@ class TrainingSequence(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config):
-        return loadObjectFromDisk(TrainingSequence, id, "training_sequences", config)
+    def loadFromDisk(id, config, printErrorOnFailure=True):
+        return loadObjectFromDisk(TrainingSequence, id, "training_sequences", config, printErrorOnFailure=printErrorOnFailure)
 
 

@@ -47,8 +47,8 @@ class TestingStep(Document):
         saveObjectToDisk(self, "testing_steps", config)
 
     @staticmethod
-    def loadFromDisk(id, config):
-        data = loadObjectFromDisk(TestingStep, id, "testing_steps", config)
+    def loadFromDisk(id, config, printErrorOnFailure=True):
+        data = loadObjectFromDisk(TestingStep, id, "testing_steps", config, printErrorOnFailure=printErrorOnFailure)
 
         if data.startTime is not None:
             data.startTime = datetime.datetime(year=data.startTime.year, month=data.startTime.month, day=data.startTime.day, hour=data.startTime.hour, minute=data.startTime.minute, second=data.startTime.second)

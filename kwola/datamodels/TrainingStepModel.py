@@ -72,6 +72,6 @@ class TrainingStep(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config):
-        return loadObjectFromDisk(TrainingStep, id, "training_steps", config)
+    def loadFromDisk(id, config, printErrorOnFailure=True):
+        return loadObjectFromDisk(TrainingStep, id, "training_steps", config, printErrorOnFailure=printErrorOnFailure)
 

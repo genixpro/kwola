@@ -41,6 +41,6 @@ class BugModel(Document):
 
 
     @staticmethod
-    def loadFromDisk(id, config):
-        return loadObjectFromDisk(BugModel, id, "bugs", config)
+    def loadFromDisk(id, config, printErrorOnFailure=True):
+        return loadObjectFromDisk(BugModel, id, "bugs", config, printErrorOnFailure=printErrorOnFailure)
 
