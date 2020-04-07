@@ -156,8 +156,8 @@
   "training_trace_selection_minimum_weight": 0.2,
   "training_update_target_network_every": 250,
   "web_session_headless": true,
-  "web_session_max_startup_workers": 8,
-  "web_session_parallel_execution_sessions": 12,
+  "web_session_max_startup_workers": 6,
+  "web_session_parallel_execution_sessions": 8,
   "web_session_print_every_action": false,
   "web_session_print_every_action_failure": false
 }
