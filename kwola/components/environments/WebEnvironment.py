@@ -19,7 +19,6 @@
 #
 
 
-from .BaseEnvironment import BaseEnvironment
 import time
 import numpy as np
 from mitmproxy.tools.dump import DumpMaster
@@ -33,7 +32,7 @@ from contextlib import closing
 from .WebEnvironmentSession import WebEnvironmentSession
 
 
-class WebEnvironment(BaseEnvironment):
+class WebEnvironment:
     """
         This class represents web / browser based environments. It will boot up a headless browser and use it to communicate
         with the software.

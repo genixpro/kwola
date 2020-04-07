@@ -19,7 +19,6 @@
 #
 
 
-from .BaseEnvironment import BaseEnvironment
 from selenium import webdriver
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from selenium.webdriver.chrome.options import Options
@@ -55,7 +54,7 @@ from contextlib import closing
 
 
 
-class WebEnvironmentSession(BaseEnvironment):
+class WebEnvironmentSession:
     """
         This class represents a single tab in the web environment.
     """
