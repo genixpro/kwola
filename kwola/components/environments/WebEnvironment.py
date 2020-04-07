@@ -48,12 +48,12 @@ class WebEnvironment:
         def createSession(number):
             return WebEnvironmentSession(config, number, self.proxyPort, self.pathTracer)
 
-        print(datetime.now(), f"[{os.getpid()}]", f"Starting up {config['web_session_parallel_execution_sessions']} parallel browser sessions to interact with the client application.")
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
             sessionCount = config['web_session_parallel_execution_sessions']
             if sessionLimit is not None:
                 sessionCount = min(sessionLimit, sessionCount)
+
+            print(datetime.now(), f"[{os.getpid()}]", f"Starting up {sessionCount} parallel browser sessions to interact with the client application.")
 
             sessionFutures = [
                 executor.submit(createSession, sessionNumber) for sessionNumber in range(sessionCount)
