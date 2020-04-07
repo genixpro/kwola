@@ -19,12 +19,11 @@
 #
 
 
-from ..tasks import RunTestingStep
-from ..datamodels.TestingStepModel import TestingStep
-import mongoengine
-from ..datamodels.id import generateNewUUID
-from .main import getConfigurationDirFromCommandLineArgs
 from ..config.config import Configuration
+from ..datamodels.id import generateNewUUID
+from ..datamodels.TestingStepModel import TestingStep
+from ..tasks import RunTestingStep
+from .main import getConfigurationDirFromCommandLineArgs
 
 
 def main():

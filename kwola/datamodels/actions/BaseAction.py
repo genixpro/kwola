@@ -19,9 +19,8 @@
 #
 
 
-from mongoengine import *
-import datetime
 from ...datamodels.ActionMapModel import ActionMap
+from mongoengine import *
 
 
 class BaseAction(EmbeddedDocument):

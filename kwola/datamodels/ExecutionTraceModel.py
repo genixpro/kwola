@@ -19,15 +19,13 @@
 #
 
 
-from mongoengine import *
-from datetime import datetime
+from .ActionMapModel import ActionMap
 from .actions.BaseAction import BaseAction
 from .errors.BaseError import BaseError
-from .ActionMapModel import ActionMap
-import numpy
-import os.path
 from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
+from mongoengine import *
+import numpy
 
 class ExecutionTrace(Document):
     id = CustomIDField()

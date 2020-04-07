@@ -19,10 +19,9 @@
 #
 
 
-from mongoengine import *
-import os.path
 from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
+from mongoengine import *
 
 
 

@@ -19,11 +19,12 @@
 #
 
 
+import json
 import os
 import os.path
-import json
 import pkg_resources
 import re
+
 
 class Configuration:
     """

@@ -20,7 +20,6 @@
 
 
 from ..tasks import TrainAgentLoop
-import mongoengine
 from .main import getConfigurationDirFromCommandLineArgs
 
 

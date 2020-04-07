@@ -19,33 +19,32 @@
 #
 
 
-from ..components.environments.WebEnvironment import WebEnvironment
-from ..datamodels.TestingStepModel import TestingStep
-from ..datamodels.TrainingStepModel import TrainingStep
-from ..datamodels.ExecutionSessionModel import ExecutionSession
-from ..datamodels.ExecutionTraceModel import ExecutionTrace
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
+from ..components.environments.WebEnvironment import WebEnvironment
 from ..components.TaskProcess import TaskProcess
 from ..config.config import Configuration
+from ..datamodels.ExecutionSessionModel import ExecutionSession
+from ..datamodels.ExecutionTraceModel import ExecutionTrace
+from ..datamodels.TestingStepModel import TestingStep
+from ..datamodels.TrainingStepModel import TrainingStep
+from datetime import datetime
+import atexit
 import concurrent.futures
-import random
-import torch
-import torch.distributed
-import numpy
-import time
+import gzip
+import json
 import multiprocessing
 import multiprocessing.pool
-import json
-import gzip
-from datetime import datetime
-import traceback
-import scipy.special
-import tempfile
-import pickle
+import numpy
 import os
+import pickle
+import random
+import scipy.special
 import sys
-import subprocess
-import atexit
+import tempfile
+import time
+import torch
+import torch.distributed
+import traceback
 
 
 def addExecutionSessionToSampleCache(executionSessionId, config):

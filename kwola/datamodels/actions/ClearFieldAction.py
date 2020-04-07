@@ -20,7 +20,6 @@
 
 
 from .BaseAction import BaseAction
-from mongoengine import *
 
 
 class ClearFieldAction(BaseAction):

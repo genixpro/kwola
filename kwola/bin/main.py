@@ -19,13 +19,11 @@
 #
 
 
-from ..tasks import TrainAgentLoop
-import mongoengine
-import sys
 from ..config.config import Configuration
+from ..tasks import TrainAgentLoop
 import os.path
-import re
 import questionary
+import sys
 
 
 def getConfigurationDirFromCommandLineArgs():

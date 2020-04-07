@@ -19,18 +19,9 @@
 #
 
 
-import math, random
-
-import numpy
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.autograd as autograd
-import torch.nn.functional as F
-import scipy.signal
-import pandas
 
-class TraceNet(nn.Module):
+class TraceNet(torch.nn.Module):
     def __init__(self, config, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
         super(TraceNet, self).__init__()
 
@@ -42,17 +33,17 @@ class TraceNet(nn.Module):
 
         self.timeEncodingSize = 1
 
-        self.stampProjection = nn.Sequential(
-            nn.Linear(
+        self.stampProjection = torch.nn.Sequential(
+            torch.nn.Linear(
                 in_features=additionalFeatureSize,
                 out_features=self.stampSize - self.timeEncodingSize
             ),
-            nn.ELU(),
-            nn.BatchNorm1d(num_features=self.stampSize - self.timeEncodingSize)
+            torch.nn.ELU(),
+            torch.nn.BatchNorm1d(num_features=self.stampSize - self.timeEncodingSize)
         )
 
-        self.mainModel = nn.Sequential(
-            nn.Conv2d(
+        self.mainModel = torch.nn.Sequential(
+            torch.nn.Conv2d(
                 in_channels=1,
                 out_channels=self.config['layer_1_num_kernels'],
                 kernel_size=self.config['layer_1_kernel_size'], 
@@ -60,10 +51,10 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_1_dilation'], 
                 padding=self.config['layer_1_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_1_num_kernels']),
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_1_num_kernels']),
 
-            nn.Conv2d(
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_1_num_kernels'],
                 out_channels=self.config['layer_2_num_kernels'],
                 kernel_size=self.config['layer_2_kernel_size'],
@@ -71,10 +62,10 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_2_dilation'],
                 padding=self.config['layer_2_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_2_num_kernels']),
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_2_num_kernels']),
 
-            nn.Conv2d(
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_2_num_kernels'],
                 out_channels=self.config['layer_3_num_kernels'],
                 kernel_size=self.config['layer_3_kernel_size'],
@@ -82,10 +73,10 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_3_dilation'],
                 padding=self.config['layer_3_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_3_num_kernels']),
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_3_num_kernels']),
 
-            nn.Conv2d(
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_3_num_kernels'],
                 out_channels=self.config['pixel_features'],
                 kernel_size=self.config['layer_4_kernel_size'],
@@ -93,26 +84,26 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_4_dilation'],
                 padding=self.config['layer_4_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['pixel_features'])
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['pixel_features'])
         )
 
-        self.stateValueLinear = nn.Sequential(
-            nn.Linear(
+        self.stateValueLinear = torch.nn.Sequential(
+            torch.nn.Linear(
                 in_features=int(self.config['pixel_features'] * self.config['training_crop_width'] * self.config['training_crop_height'] / 64) \
                             + self.config['additional_features_stamp_depth_size'] * self.config['additional_features_stamp_edge_size'] * self.config['additional_features_stamp_edge_size'],
                 out_features=self.config['layer_5_num_kernels']
             ),
-            nn.ELU(),
-            nn.BatchNorm1d(num_features=self.config['layer_5_num_kernels']),
-            nn.Linear(
+            torch.nn.ELU(),
+            torch.nn.BatchNorm1d(num_features=self.config['layer_5_num_kernels']),
+            torch.nn.Linear(
                 in_features=self.config['layer_5_num_kernels'],
                 out_features=1
             )
         )
 
-        self.presentRewardConvolution = nn.Sequential(
-            nn.Conv2d(
+        self.presentRewardConvolution = torch.nn.Sequential(
+            torch.nn.Conv2d(
                 in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                 out_channels=self.config['layer_5_num_kernels'],
                 kernel_size=self.config['layer_5_kernel_size'],
@@ -120,9 +111,9 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_5_dilation'],
                 padding=self.config['layer_5_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
-            nn.Conv2d(
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
                 kernel_size=self.config['present_reward_convolution_kernel_size'],
@@ -130,11 +121,11 @@ class TraceNet(nn.Module):
                 padding=self.config['present_reward_convolution_padding'],
                 bias=False
             ),
-            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
-        self.discountedFutureRewardConvolution = nn.Sequential(
-            nn.Conv2d(
+        self.discountedFutureRewardConvolution = torch.nn.Sequential(
+            torch.nn.Conv2d(
                 in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                 out_channels=self.config['layer_5_num_kernels'],
                 kernel_size=self.config['layer_5_kernel_size'],
@@ -142,9 +133,9 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_5_dilation'],
                 padding=self.config['layer_5_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
-            nn.Conv2d(
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
                 kernel_size=self.config['discounted_future_reward_convolution_kernel_size'],
@@ -152,11 +143,11 @@ class TraceNet(nn.Module):
                 padding=self.config['discounted_future_reward_convolution_padding'],
                 bias=False
             ),
-            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
-        self.actorConvolution = nn.Sequential(
-            nn.Conv2d(
+        self.actorConvolution = torch.nn.Sequential(
+            torch.nn.Conv2d(
                 in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                 out_channels=self.config['layer_5_num_kernels'],
                 kernel_size=self.config['layer_5_kernel_size'],
@@ -164,9 +155,9 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_5_dilation'],
                 padding=self.config['layer_5_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
-            nn.Conv2d(
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
                 kernel_size=self.config['actor_convolution_kernel_size'],
@@ -174,11 +165,11 @@ class TraceNet(nn.Module):
                 padding=self.config['actor_convolution_padding'],
                 bias=False
             ),
-            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
-        self.advantageConvolution = nn.Sequential(
-            nn.Conv2d(
+        self.advantageConvolution = torch.nn.Sequential(
+            torch.nn.Conv2d(
                 in_channels=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                 out_channels=self.config['layer_5_num_kernels'],
                 kernel_size=self.config['layer_5_kernel_size'],
@@ -186,9 +177,9 @@ class TraceNet(nn.Module):
                 dilation=self.config['layer_5_dilation'],
                 padding=self.config['layer_5_padding']
             ),
-            nn.ELU(),
-            nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
-            nn.Conv2d(
+            torch.nn.ELU(),
+            torch.nn.BatchNorm2d(num_features=self.config['layer_5_num_kernels']),
+            torch.nn.Conv2d(
                 in_channels=self.config['layer_5_num_kernels'],
                 out_channels=numActions,
                 kernel_size=self.config['advantage_convolution_kernel_size'],
@@ -196,41 +187,41 @@ class TraceNet(nn.Module):
                 padding=self.config['advantage_convolution_padding'],
                 bias=False
             ),
-            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
-        self.pixelFeatureMapUpsampler = nn.Sequential(
-            torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
+        self.pixelFeatureMapUpsampler = torch.nn.Sequential(
+            torch.torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
         )
 
         if self.config['enable_trace_prediction_loss']:
-            self.predictedExecutionTraceLinear = nn.Sequential(
-                nn.Linear(
+            self.predictedExecutionTraceLinear = torch.nn.Sequential(
+                torch.nn.Linear(
                     in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                     out_features=executionTracePredictorSize
                 ),
-                nn.ELU()
+                torch.nn.ELU()
             )
 
         if self.config['enable_execution_feature_prediction_loss']:
-            self.predictedExecutionFeaturesLinear = nn.Sequential(
-                nn.Linear(
+            self.predictedExecutionFeaturesLinear = torch.nn.Sequential(
+                torch.nn.Linear(
                     in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                     out_features=executionFeaturePredictorSize
                 ),
-                nn.Sigmoid()
+                torch.nn.Sigmoid()
             )
 
         if self.config['enable_cursor_prediction_loss']:
-            self.predictedCursorLinear = nn.Sequential(
-                nn.Linear(
+            self.predictedCursorLinear = torch.nn.Sequential(
+                torch.nn.Linear(
                     in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
                     out_features=cursorCount
                 ),
-                nn.Sigmoid()
+                torch.nn.Sigmoid()
             )
         
-        self.actionSoftmax = nn.Softmax(dim=1)
+        self.actionSoftmax = torch.nn.Softmax(dim=1)
 
         self.numActions = numActions
 

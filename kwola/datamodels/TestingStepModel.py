@@ -19,14 +19,11 @@
 #
 
 
-from mongoengine import *
-import datetime
-from .ExecutionTraceModel import ExecutionTrace
-from .ExecutionSessionModel import ExecutionSession
 from .errors.BaseError import BaseError
-import os.path
 from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
+from mongoengine import *
+import datetime
 
 class TestingStep(Document):
     id = CustomIDField()

@@ -19,11 +19,11 @@
 #
 
 
-import os.path
-import gzip
 from .lockedfile import LockedFile
-import json
 from datetime import datetime
+import gzip
+import json
+import os.path
 import pickle
 
 

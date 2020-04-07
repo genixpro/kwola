@@ -19,52 +19,40 @@
 #
 
 
-from .TraceNet import TraceNet
-from ...components.utilities.debug_plot import showRewardImageDebug
-from ...datamodels.ExecutionTraceModel import ExecutionTrace
-from ...datamodels.ExecutionSessionModel import ExecutionSession
-from ...datamodels.actions.ClickTapAction import ClickTapAction
+from ...config.config import Configuration
 from ...datamodels.actions.ClickTapAction import ClickTapAction
 from ...datamodels.actions.RightClickAction import RightClickAction
 from ...datamodels.actions.TypeAction import TypeAction
-from ...datamodels.actions.WaitAction import WaitAction
-from skimage.segmentation import felzenszwalb, mark_boundaries
-import bz2
-import concurrent.futures
-import cv2
-import bson
-import cv2
-from ...config.config import Configuration
-import copy
+from ...datamodels.ExecutionSessionModel import ExecutionSession
+from ...datamodels.ExecutionTraceModel import ExecutionTrace
+from .TraceNet import TraceNet
 from datetime import datetime
-import itertools
-import math, random
+import concurrent.futures
+import copy
+import cv2
+import random
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import traceback
 import numpy
 import os
 import os.path
 import os.path
-import pandas
-import pickle
 import scipy.signal
 import shutil
 import skimage
 import skimage.color
-import sklearn.preprocessing
 import skimage.draw
 import skimage.io
 import skimage.measure
 import skimage.segmentation
 import skimage.transform
+import sklearn.preprocessing
 import subprocess
 import tempfile
 import torch
-import torch.autograd as autograd
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
+import traceback
 
 class DeepLearningAgent:
     """

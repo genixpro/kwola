@@ -19,13 +19,9 @@
 #
 
 
-from mongoengine import *
-import datetime
-from .ExecutionTraceModel import ExecutionTrace
-from .errors.BaseError import BaseError
-import os.path
 from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
+from mongoengine import *
 
 class TrainingStep(Document):
     id = CustomIDField()

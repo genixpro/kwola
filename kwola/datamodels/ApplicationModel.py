@@ -18,11 +18,9 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from mongoengine import *
-import datetime
-import os.path
 from .id import CustomIDField
 from .utilities import saveObjectToDisk, loadObjectFromDisk
+from mongoengine import *
 
 
 class ApplicationModel(Document):

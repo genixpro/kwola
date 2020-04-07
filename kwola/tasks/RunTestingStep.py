@@ -19,22 +19,22 @@
 #
 
 
-from ..components.environments.WebEnvironment import WebEnvironment
-from ..datamodels.TestingStepModel import TestingStep
-from ..datamodels.ExecutionSessionModel import ExecutionSession
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
+from ..components.environments.WebEnvironment import WebEnvironment
 from ..components.TaskProcess import TaskProcess
 from ..config.config import Configuration
-import pickle
-from datetime import datetime
-import time
-import numpy
-import traceback
-import tempfile
-import os
-import multiprocessing
-import atexit
+from ..datamodels.ExecutionSessionModel import ExecutionSession
+from ..datamodels.TestingStepModel import TestingStep
 from .RunTrainingStep import addExecutionSessionToSampleCache
+from datetime import datetime
+import atexit
+import multiprocessing
+import numpy
+import os
+import pickle
+import tempfile
+import time
+import traceback
 
 
 def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):

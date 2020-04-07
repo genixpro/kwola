@@ -19,31 +19,24 @@
 #
 
 
+from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
-from ..datamodels.actions.ClickTapAction import ClickTapAction
+from ..components.ManagedTaskSubprocess import ManagedTaskSubprocess
+from ..config.config import Configuration
+from ..datamodels.id import generateNewUUID
 from ..datamodels.TestingStepModel import TestingStep
 from ..datamodels.TrainingSequenceModel import TrainingSequence
 from ..datamodels.TrainingStepModel import TrainingStep
-from ..components.agents.DeepLearningAgent import DeepLearningAgent
-from .RunTrainingStep import runTrainingStep
-from ..config.config import Configuration
-from .RunTestingStep import runTestingStep
+from concurrent.futures import as_completed, wait
 from concurrent.futures import ThreadPoolExecutor
-import mongoengine
-from concurrent.futures import ProcessPoolExecutor, as_completed, wait
-from ..components.ManagedTaskSubprocess import ManagedTaskSubprocess
-import time
-import torch.cuda
+from datetime import datetime
 import multiprocessing
-import psutil
-import subprocess
 import os
 import os.path
+import time
+import torch.cuda
 import traceback
-from ..datamodels.id import generateNewUUID
-from datetime import datetime
-import atexit
-import bson
+
 
 def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
     testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)))
