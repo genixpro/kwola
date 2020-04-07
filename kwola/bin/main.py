@@ -72,10 +72,10 @@ def getConfigurationDirFromCommandLineArgs():
                     'large'
                 ]).ask()  # returns value of selection
 
-            email = questionary.text("What is the email/username to use for testing (blank disables this action)?").ask()
-            password = questionary.text("What is the password to use for testing (blank disables this action)?").ask()
-            name = questionary.text("What human name / short text to use for testing (blank disables this action)?").ask()
-            paragraph = questionary.text("What is paragraph / long text to use (blank disables this action)?").ask()
+            email = questionary.text("What is the email/username you want to use (blank disables this action)?").ask()
+            password = questionary.text("What is the password you want to use (blank disables this action)?").ask()
+            name = questionary.text("What is the human name / short text you want to use (blank disables this action)?").ask()
+            paragraph = questionary.text("What is the paragraph / long text you want to use (blank disables this action)?").ask()
 
             commandChoices = [
                 "Enable random number command?",
