@@ -9,7 +9,7 @@
   "advantage_convolution_stride": 1,
   "batch_size": 16,
   "batches_per_iteration": 8,
-  "data_compress_level": 0,
+  "data_compress_level": 5,
   "data_serialization_method": "pickle",
   "discounted_future_reward_convolution_kernel_size": 3,
   "discounted_future_reward_convolution_padding": 1,
