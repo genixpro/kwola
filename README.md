@@ -41,7 +41,13 @@ For example, I run the following on Linux with Chrome 80:
 
 Alternatively you can also install chromedriver just to your Python virtual environment.
 
-5) [optional] Nvidia Drivers & Cuda
+5) Ffmpeg
+
+You must install ffmpeg as it is used to compress the videos of Kwola interacting with the client program.
+
+Please go to this url: https://www.ffmpeg.org/download.html to get instructions on how to install ffmpeg.
+
+6) [optional] Nvidia Drivers & Cuda
 
 How you install NVIDIA Drivers depends on your operating system. You only need to install NVIDIA drivers if you 
 are using GPUs. Using GPUs is recommended but optional, and you can do test runs with just the CPU.
@@ -55,7 +61,7 @@ Ubuntu: https://linuxconfig.org/how-to-install-the-nvidia-drivers-on-ubuntu-18-0
 
 Fedora: https://www.if-not-true-then-false.com/2015/fedora-nvidia-guide/
 
-6) [optional] Docker
+7) [optional] Docker
 
 Go here and follow the instructions to install Docker: https://docs.docker.com/install/
 
