@@ -350,12 +350,12 @@ class WebEnvironmentSession:
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
                     if self.config['web_session_print_every_action']:
-                        print(datetime.now(), "Clicking", action.x, action.y, action.source, flush=True)
+                        print(datetime.now(), f"[{os.getpid()}]", "Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.click(on_element=element)
                     actionChain.pause(uiReactionWaitTime)
                 elif action.times == 2:
                     if self.config['web_session_print_every_action']:
-                        print(datetime.now(), "Double Clicking", action.x, action.y, action.source, flush=True)
+                        print(datetime.now(), f"[{os.getpid()}]", "Double Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.double_click(on_element=element)
                     actionChain.pause(uiReactionWaitTime)
 
@@ -363,7 +363,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), "Right Clicking", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "Right Clicking", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
@@ -372,7 +372,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
@@ -383,30 +383,30 @@ class WebEnvironmentSession:
 
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), "Clearing field at", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "Clearing field at", action.x, action.y, action.source, flush=True)
                 element.clear()
 
             if isinstance(action, WaitAction):
-                print(datetime.now(), "Waiting for ", action.time, "at", action.x, action.y, action.source)
+                print(datetime.now(), f"[{os.getpid()}]", "Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except AttributeError as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
 
@@ -418,9 +418,9 @@ class WebEnvironmentSession:
             msg, source, lineno, colno, stack = tuple(exception)
             executionTrace.errorsDetected.append(ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno))
 
-            print(datetime.now(), "Error detected in client application:")
-            print(datetime.now(), f"{msg} at line {lineno} column {colno} in {source}")
-            print(datetime.now(), str(stack), flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", "Error detected in client application:")
+            print(datetime.now(), f"[{os.getpid()}]", f"{msg} at line {lineno} column {colno} in {source}")
+            print(datetime.now(), f"[{os.getpid()}]", str(stack), flush=True)
 
             hasher = hashlib.md5()
             hasher.update(stack)

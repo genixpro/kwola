@@ -22,6 +22,7 @@
 from datetime import datetime
 from mitmproxy.script import concurrent
 import hashlib
+import os
 import os.path
 import subprocess
 
@@ -97,7 +98,7 @@ class JSRewriteProxy:
                 result = subprocess.run(['babel','-f', filename, '--plugins', 'babel-plugin-kwola'], input=bytes(flow.response.data.content), capture_output=True)
 
                 if result.returncode != 0:
-                    print(datetime.now(), f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most likely this is because Babel thinks your javascript has invalid syntax.")
+                    print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most likely this is because Babel thinks your javascript has invalid syntax.")
                     # print(result.stdout)
                     # print(result.stderr)
                 else:

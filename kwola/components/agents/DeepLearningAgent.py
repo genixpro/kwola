@@ -590,7 +590,7 @@ class DeepLearningAgent:
                         source = "weighted_random"
                         samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
                     except ValueError:
-                        print(datetime.now(), "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
+                        print(datetime.now(), f"[{os.getpid()}]", "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
                         # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
                         # So instead we just pick an action randomly.
                         actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, samplePixelActionMap)
@@ -1157,10 +1157,10 @@ class DeepLearningAgent:
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
-            print(datetime.now(), "Completed debug image", fileName, flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", "Completed debug image", fileName, flush=True)
         except Exception:
             traceback.print_exc()
-            print(datetime.now(), "Failed to create debug image!", flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", "Failed to create debug image!", flush=True)
 
     def createRewardPixelMask(self, processedImage, x, y):
         # We use flood-segmentation on the original image to select which pixels we will update reward values for.
@@ -1249,8 +1249,8 @@ class DeepLearningAgent:
         frameMean = numpy.mean(numpy.reshape(rewardSequences, newshape=[-1]))
         frameStd = numpy.std(numpy.reshape(rewardSequences, newshape=[-1]))
 
-        print(datetime.now(), f"Reward baselines: Total reward per testing sequence: {cumulativeMean} +- std({cumulativeStd})")
-        print(datetime.now(), f"                  Reward per frame: {frameMean} +- std({frameStd})")
+        print(datetime.now(), f"[{os.getpid()}]", f"Reward baselines: Total reward per testing sequence: {cumulativeMean} +- std({cumulativeStd})")
+        print(datetime.now(), f"[{os.getpid()}]", f"                  Reward per frame: {frameMean} +- std({frameStd})")
 
         return trainingRewardNormalizer
 
@@ -1656,23 +1656,23 @@ class DeepLearningAgent:
         if numpy.count_nonzero(numpy.isnan([totalLoss.data.item() for totalLoss in totalLosses])) == 0:
             self.optimizer.step()
         else:
-            print(datetime.now(), "ERROR! NaN detected in loss calculation. Skipping optimization step.")
+            print(datetime.now(), f"[{os.getpid()}]", "ERROR! NaN detected in loss calculation. Skipping optimization step.")
             for batchIndex, batchResult in batchResultTensors:
                 presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
                 advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
                 targetHomogenizationLoss, predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
                 totalSampleLosses, batch = batchResult
 
-                print(datetime.now(), "Batch", batchIndex)
-                print(datetime.now(), "presentRewardLoss", float(presentRewardLoss.data.item()))
-                print(datetime.now(), "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
-                print(datetime.now(), "stateValueLoss", float(stateValueLoss.data.item()))
-                print(datetime.now(), "advantageLoss", float(advantageLoss.data.item()))
-                print(datetime.now(), "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
-                print(datetime.now(), "tracePredictionLoss", float(tracePredictionLoss.data.item()))
-                print(datetime.now(), "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
-                print(datetime.now(), "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
-                print(datetime.now(), "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", "Batch", batchIndex)
+                print(datetime.now(), f"[{os.getpid()}]", "presentRewardLoss", float(presentRewardLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "stateValueLoss", float(stateValueLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "advantageLoss", float(advantageLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "tracePredictionLoss", float(tracePredictionLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
+                print(datetime.now(), f"[{os.getpid()}]", "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
 
             return
 

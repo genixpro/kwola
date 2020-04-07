@@ -86,7 +86,7 @@ def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId,
 
 
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
-    print(datetime.now(), "Starting New Testing Sequence", flush=True)
+    print(datetime.now(), f"[{os.getpid()}]", "Starting New Testing Sequence", flush=True)
 
     returnValue = {}
 
@@ -168,7 +168,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             os.unlink(resultFileName)
 
             if stepsRemaining % config['testing_print_every'] == 0:
-                print(datetime.now(), f"Finished {step + 1} testing actions.", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Finished {step + 1} testing actions.", flush=True)
 
             step += 1
 
@@ -217,7 +217,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             subProcessCommandQueue.put("quit")
             subProcess.join()
 
-        print(datetime.now(), f"Creating movies for the execution sessions of this testing sequence.", flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", f"Creating movies for the execution sessions of this testing sequence.", flush=True)
         videoPaths = environment.createMovies()
 
         kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
@@ -229,11 +229,11 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         totalRewards = []
         for session in executionSessions:
-            print(datetime.now(), f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
             session.saveToDisk(config)
             totalRewards.append(session.totalReward)
 
-        print(datetime.now(), f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
 
         testStep.bugsFound = len(uniqueErrors)
         testStep.errors = uniqueErrors
@@ -266,7 +266,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         del environment
 
         for session in executionSessions:
-            print(datetime.now(), f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
             addExecutionSessionToSampleCache(session.id, config)
 
         if debugVideoSubprocess1 is not None:
@@ -276,10 +276,10 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
     except Exception as e:
         traceback.print_exc()
-        print(datetime.now(), "Unhandled exception occurred during testing sequence", flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", "Unhandled exception occurred during testing sequence", flush=True)
 
     # This print statement will trigger the parent manager process to kill this process.
-    print(datetime.now(), "Finished Running Testing Sequence!", flush=True)
+    print(datetime.now(), f"[{os.getpid()}]", "Finished Running Testing Sequence!", flush=True)
 
     return returnValue
 

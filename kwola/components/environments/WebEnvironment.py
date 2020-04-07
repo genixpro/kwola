@@ -27,9 +27,11 @@ from mitmproxy.tools.dump import DumpMaster
 from threading import Thread
 import asyncio
 import concurrent.futures
+from datetime import datetime
 import numpy as np
 import socket
 import time
+import os
 
 
 class WebEnvironment:
@@ -45,6 +47,8 @@ class WebEnvironment:
 
         def createSession(number):
             return WebEnvironmentSession(config, number, self.proxyPort, self.pathTracer)
+
+        print(datetime.now(), f"[{os.getpid()}]", f"Starting up {config['web_session_parallel_execution_sessions']} parallel browser sessions to interact with the client application.")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
             sessionCount = config['web_session_parallel_execution_sessions']

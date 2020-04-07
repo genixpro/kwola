@@ -23,6 +23,7 @@ from .LockedFile import LockedFile
 from datetime import datetime
 import gzip
 import json
+import os
 import os.path
 import pickle
 
@@ -89,19 +90,19 @@ def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True)
 
         if object is None:
             if printErrorOnFailure:
-                print(datetime.now(), "Error: Failed to load object. File not found:", pickleFileName, gzipPickleFileName, jsonFileName, gzipJsonFileName, flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", "Error: Failed to load object. File not found:", pickleFileName, gzipPickleFileName, jsonFileName, gzipJsonFileName, flush=True)
             return None
 
         return object
     except json.JSONDecodeError:
         if printErrorOnFailure:
-            print(datetime.now(), f"Error: Failed to load object {id}. Bad JSON. Usually implies the file failed to write. "
+            print(datetime.now(), f"[{os.getpid()}]", f"Error: Failed to load object {id}. Bad JSON. Usually implies the file failed to write. "
                                   "Sometimes this occurs if you kill the process while it is running. If this occurs "
                                   "during normal operations without interruption, that would indicate a bug.", flush=True)
         return
     except EOFError:
         if printErrorOnFailure:
-            print(datetime.now(), f"Error: Failed to load object {id}. Bad pickle file. Usually implies the file failed to write. "
+            print(datetime.now(), f"[{os.getpid()}]", f"Error: Failed to load object {id}. Bad pickle file. Usually implies the file failed to write. "
                                   "Sometimes this occurs if you kill the process while it is running. If this occurs "
                                   "during normal operations without interruption, that would indicate a bug.", flush=True)
         return
