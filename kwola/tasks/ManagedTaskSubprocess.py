@@ -56,7 +56,7 @@ class ManagedTaskSubprocess:
 
         self.output = ''
 
-        self.monitorTimeoutProcess = threading.Thread(target=lambda: self.timeoutMonitoringThread())
+        self.monitorTimeoutProcess = threading.Thread(target=lambda: self.timeoutMonitoringThread(), daemon=True)
 
     def __del__(self):
         self.process.terminate()

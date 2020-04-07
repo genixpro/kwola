@@ -39,6 +39,7 @@ import os
 import os.path
 import os.path
 import scipy.signal
+import scipy.special
 import shutil
 import skimage
 import skimage.color
@@ -939,8 +940,6 @@ class DeepLearningAgent:
                 rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
                 rewardChartAxes.set_yticklabels(["" for n in range(2)])
                 rewardChartAxes.set_title("Net Present Reward")
-
-                # ax.grid()
                 rewardChartFigure.tight_layout()
 
                 rewardChartAxes.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
@@ -1042,7 +1041,6 @@ class DeepLearningAgent:
                                             })
 
                     totalRewardPredictions = numpy.array((outputs['presentRewards'] + outputs['discountFutureRewards']).data)
-                    # stateValuePredictions = numpy.array((outputs['stateValues']).data)
                     advantagePredictions = numpy.array((outputs['advantage']).data)
                     actionProbabilities = numpy.array((outputs['actionProbabilities']).data)
                     stateValue = numpy.array((outputs['stateValues'][0]).data)

@@ -122,7 +122,7 @@ class TraceNet(torch.nn.Module):
                 padding=self.config['present_reward_convolution_padding'],
                 bias=False
             ),
-            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.discountedFutureRewardConvolution = torch.nn.Sequential(
@@ -144,7 +144,7 @@ class TraceNet(torch.nn.Module):
                 padding=self.config['discounted_future_reward_convolution_padding'],
                 bias=False
             ),
-            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.actorConvolution = torch.nn.Sequential(
@@ -166,7 +166,7 @@ class TraceNet(torch.nn.Module):
                 padding=self.config['actor_convolution_padding'],
                 bias=False
             ),
-            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.advantageConvolution = torch.nn.Sequential(
@@ -188,11 +188,11 @@ class TraceNet(torch.nn.Module):
                 padding=self.config['advantage_convolution_padding'],
                 bias=False
             ),
-            torch.torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
+            torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
         self.pixelFeatureMapUpsampler = torch.nn.Sequential(
-            torch.torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
+            torch.nn.Upsample(scale_factor=8, mode='bilinear', align_corners=False)
         )
 
         if self.config['enable_trace_prediction_loss']:
