@@ -21,7 +21,7 @@
 
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
-from ..components.TaskProcess import TaskProcess
+from ..tasks.TaskProcess import TaskProcess
 from ..config.config import Configuration
 from ..datamodels.ExecutionSessionModel import ExecutionSession
 from ..datamodels.TestingStepModel import TestingStep

@@ -19,7 +19,7 @@
 #
 
 
-from ..components.TaskProcess import TaskProcess
+from ..tasks.TaskProcess import TaskProcess
 from datetime import datetime
 import atexit
 import json

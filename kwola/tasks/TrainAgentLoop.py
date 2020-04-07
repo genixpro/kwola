@@ -21,7 +21,7 @@
 
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
-from ..components.ManagedTaskSubprocess import ManagedTaskSubprocess
+from ..tasks.ManagedTaskSubprocess import ManagedTaskSubprocess
 from ..config.config import Configuration
 from ..datamodels.id import generateNewUUID
 from ..datamodels.TestingStepModel import TestingStep
