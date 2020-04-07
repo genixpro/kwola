@@ -449,10 +449,14 @@ def printMovingAverageLosses(config, trainingStep):
     print(datetime.now(), f"[{os.getpid()}]", "Moving Average State Value Loss:", averageStateValueLoss, flush=True)
     print(datetime.now(), f"[{os.getpid()}]", "Moving Average Advantage Loss:", averageAdvantageLoss, flush=True)
     print(datetime.now(), f"[{os.getpid()}]", "Moving Average Action Probability Loss:", averageActionProbabilityLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
+    if config['enable_trace_prediction_loss']:
+        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
+    if config['enable_execution_feature_prediction_loss']:
+        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
+    if config['enable_homogenization_loss']:
+        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
+    if config['enable_cursor_prediction_loss']:
+        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
     if config['enable_loss_balancing']:
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Raw Loss:", averageTotalLoss, flush=True)
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Rebalanced Loss:", averageTotalRebalancedLoss, flush=True)
