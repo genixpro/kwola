@@ -175,6 +175,9 @@ def trainAgent(configDir):
 
     config = Configuration(configDir)
 
+    # Create the bugs directory. This is just temporary
+    config.getKwolaUserDataDirectory("bugs")
+
     # Load and save the agent to make sure all training subprocesses are synced
     environment = WebEnvironment(config=config, sessionLimit=1)
     agent = DeepLearningAgent(config=config, whichGpu=None)
