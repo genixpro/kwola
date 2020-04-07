@@ -808,6 +808,13 @@ class DeepLearningAgent:
             bottomSize = 250
             leftSize = 100
             rightSize = 1250
+            if len(self.actionsSorted) > 4:
+                rightSize += 250
+            if len(self.actionsSorted) > 8:
+                rightSize += 250
+            if len(self.actionsSorted) > 12:
+                rightSize += 250
+
             topMargin = 25
 
             imageHeight = rawImage.shape[0]
@@ -931,7 +938,7 @@ class DeepLearningAgent:
 
                 xCoords = numpy.array(range(len(presentRewards)))
 
-                rewardChartAxes.set_ylim(ymin=-2.0, ymax=15.0)
+                rewardChartAxes.set_ylim(ymin=-0.3, ymax=2.0)
 
                 rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
@@ -963,9 +970,12 @@ class DeepLearningAgent:
             def addRightSideDebugCharts(plotImage, rawImage, trace):
                 chartTopMargin = 75
 
-                neededFigures = 4 + len(self.actionsSorted) * 3
+                neededFigures = 3 + len(self.actionsSorted) * 3
 
-                squareSize = int(numpy.sqrt(neededFigures)) + 1
+                squareSize = int(numpy.sqrt(neededFigures))
+
+                if (squareSize * squareSize) < neededFigures:
+                    squareSize += 1
 
                 numColumns = squareSize
                 numRows = squareSize
