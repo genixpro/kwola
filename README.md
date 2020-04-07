@@ -92,8 +92,6 @@ Make sure to replace the URL with the url pointing to the website you want to st
 must be a complete, fully validated url containing the http:// part and everything. Also for now, its
 easiest just to run it from within the Kwola directory.
 
-`[user@localhost]$ cd kwola`
-
 `[user@localhost]$ kwola http://yoururl.com/`
 
 Kwola will now start testing your application! Its that easy. Kwola will create a directory to hold
