@@ -159,5 +159,5 @@
   "web_session_max_startup_workers": 8,
   "web_session_parallel_execution_sessions": 12,
   "web_session_print_every_action": false,
-  "web_session_print_every_action_failure": true
+  "web_session_print_every_action_failure": false
 }
