@@ -59,7 +59,7 @@
   "present_reward_convolution_kernel_size": 3,
   "present_reward_convolution_padding": 1,
   "present_reward_convolution_stride": 1,
-  "print_cache_hit_rate": true,
+  "print_cache_hit_rate": false,
   "print_cache_hit_rate_moving_average_length": 100,
   "print_loss_iterations": 10,
   "print_loss_moving_average_length": 50,
