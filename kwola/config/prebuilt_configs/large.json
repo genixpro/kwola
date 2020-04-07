@@ -2,7 +2,7 @@
   "actor_convolution_kernel_size": 3,
   "actor_convolution_padding": 1,
   "actor_convolution_stride": 1,
-  "additional_features_stamp_depth_size": 10,
+  "additional_features_stamp_depth_size": 20,
   "additional_features_stamp_edge_size": 3,
   "advantage_convolution_kernel_size": 3,
   "advantage_convolution_padding": 1,
