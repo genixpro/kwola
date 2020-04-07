@@ -81,7 +81,7 @@ class JSRewriteProxy:
         fileHash = hasher.hexdigest()
         fileName = flow.request.path.split("/")[-1]
         try:
-            if '.js' in fileName:
+            if '.js' in fileName and not ".json" in fileName:
                 cached = self.memoryCache.get(fileHash)
                 if cached is None:
                     cached = self.findInCache(fileHash, fileName)
