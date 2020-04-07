@@ -53,7 +53,6 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
         else:
             inferenceBatchFileName = message
 
-
         with open(inferenceBatchFileName, 'rb') as file:
             step, images, envActionMaps, additionalFeatures, lastActions = pickle.load(file)
 
@@ -214,7 +213,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             del traces
             print("", end="", sep="", flush=True)
 
-
         for subProcessCommandQueue, subProcessResultQueue, subProcess in subProcesses:
             subProcessCommandQueue.put("quit")
             subProcess.join()
@@ -289,4 +287,3 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 if __name__ == "__main__":
     task = TaskProcess(runTestingStep)
     task.run()
-

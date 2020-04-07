@@ -37,6 +37,7 @@ class WebEnvironment:
         This class represents web / browser based environments. It will boot up a headless browser and use it to communicate
         with the software.
     """
+
     def __init__(self, config, sessionLimit=None):
         self.config = config
 
@@ -99,10 +100,8 @@ class WebEnvironment:
     def screenshotSize(self):
         return self.sessions[0].screenshotSize()
 
-
     def branchFeatureSize(self):
         return self.sessions[0].branchFeatureSize()
-
 
     def getImages(self):
         imageFutures = []
@@ -116,7 +115,6 @@ class WebEnvironment:
             imageFuture.result() for imageFuture in imageFutures
         ]
         return images
-
 
     def getActionMaps(self):
         actionMapFutures = []
@@ -139,7 +137,6 @@ class WebEnvironment:
 
         return np.array(tabFeatures)
 
-
     def getExecutionTraceFeatures(self):
         tabFeatures = [
             tab.getExecutionTraceFeature()
@@ -148,10 +145,8 @@ class WebEnvironment:
 
         return np.array(tabFeatures)
 
-
     def numberParallelSessions(self):
         return len(self.sessions)
-
 
     def runActions(self, actions, executionSessionIds):
         """
@@ -172,7 +167,6 @@ class WebEnvironment:
             resultFuture.result() for resultFuture in resultFutures
         ]
         return results
-
 
     def createMovies(self):
         moviePaths = [

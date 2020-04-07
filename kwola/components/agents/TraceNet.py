@@ -21,6 +21,7 @@
 
 import torch
 
+
 class TraceNet(torch.nn.Module):
     def __init__(self, config, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
         super(TraceNet, self).__init__()
@@ -46,9 +47,9 @@ class TraceNet(torch.nn.Module):
             torch.nn.Conv2d(
                 in_channels=1,
                 out_channels=self.config['layer_1_num_kernels'],
-                kernel_size=self.config['layer_1_kernel_size'], 
-                stride=self.config['layer_1_stride'], 
-                dilation=self.config['layer_1_dilation'], 
+                kernel_size=self.config['layer_1_kernel_size'],
+                stride=self.config['layer_1_stride'],
+                dilation=self.config['layer_1_dilation'],
                 padding=self.config['layer_1_padding']
             ),
             torch.nn.ELU(),
@@ -220,7 +221,7 @@ class TraceNet(torch.nn.Module):
                 ),
                 torch.nn.Sigmoid()
             )
-        
+
         self.actionSoftmax = torch.nn.Softmax(dim=1)
 
         self.numActions = numActions
@@ -317,7 +318,7 @@ class TraceNet(torch.nn.Module):
 
             forwardFeaturesForAuxillaryLosses = []
             for sampleIndex, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
-                featuresForAuxillaryLosses = mergedPixelFeatureMap[sampleIndex, :, int(action_y/8), int(action_x/8)].unsqueeze(0)
+                featuresForAuxillaryLosses = mergedPixelFeatureMap[sampleIndex, :, int(action_y / 8), int(action_x / 8)].unsqueeze(0)
                 forwardFeaturesForAuxillaryLosses.append(featuresForAuxillaryLosses)
 
             joinedFeatures = torch.cat(forwardFeaturesForAuxillaryLosses, dim=0)
@@ -332,8 +333,3 @@ class TraceNet(torch.nn.Module):
                 outputDict['pixelFeatureMap'] = self.pixelFeatureMapUpsampler(mergedPixelFeatureMap)
 
         return outputDict
-
-
-    def feature_size(self):
-        return self.features(torch.zeros(1, *self.imageInputShape)).view(1, -1).size(1)
-

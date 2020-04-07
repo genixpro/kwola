@@ -81,8 +81,6 @@ def runRandomInitialization(config, trainingSequence):
     print(datetime.now(), "Random initialization completed", flush=True)
 
 
-
-
 def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber):
     try:
         process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
@@ -123,7 +121,6 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
     testingStep = TestingStep.loadFromDisk(testingStep.id, config)
     trainingSequence.testingSteps.append(testingStep)
     trainingSequence.saveToDisk(config)
-
 
 
 def runMainTrainingLoop(config, trainingSequence):
@@ -197,4 +194,3 @@ def trainAgent(configDir):
     trainingSequence.status = "completed"
     trainingSequence.endTime = datetime.now()
     trainingSequence.saveToDisk(config)
-

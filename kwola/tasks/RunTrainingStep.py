@@ -216,6 +216,7 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
         subProcessCommandQueue.put(("batch", {}))
         return 1.0
 
+
 def loadAllTestingSteps(config):
     testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
 
@@ -255,7 +256,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
         # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
         executionSessionIds = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=int(config['training_max_initialization_workers']/config['training_batch_prep_subprocesses'])) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=int(config['training_max_initialization_workers'] / config['training_batch_prep_subprocesses'])) as executor:
             executionSessionFutures = []
             for testStepIndex, testStep in enumerate(testingSteps):
                 if testStepIndex % config['training_batch_prep_subprocesses'] == subprocessIndex:
@@ -269,7 +270,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
         executionTraceWeightDatas = []
         executionTraceWeightDataIdMap = {}
-        with concurrent.futures.ProcessPoolExecutor(max_workers=int(config['training_max_initialization_workers']/config['training_batch_prep_subprocesses'])) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=int(config['training_max_initialization_workers'] / config['training_batch_prep_subprocesses'])) as executor:
             executionTraceFutures = []
             for session in executionSessions:
                 for traceId in session.executionTraces[:-1]:
@@ -306,7 +307,6 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         print(datetime.now(), "Finished initialization for batch preparation sub process.", flush=True)
 
-
         processPool = multiprocessing.pool.Pool(processes=config['training_initial_batch_prep_workers'])
         backgroundTraceSaveProcessPool = multiprocessing.pool.Pool(processes=config['training_background_trace_save_workers'])
         executionTraceSaveFutures = {}
@@ -339,7 +339,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     if batchCount % config['training_reset_workers_every_n_batches'] == (config['training_reset_workers_every_n_batches'] - 1):
                         needToResetPool = True
 
-                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, config, executionTraceWeightDatas, executionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue)
+                    future = threadExecutor.submit(prepareAndLoadSingleBatchForSubprocess, config, executionTraceWeightDatas, executionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue,
+                                                   subProcessBatchResultQueue)
                     cacheRateFutures.append(future)
                     currentProcessPoolFutures.append(future)
 
@@ -472,6 +473,7 @@ def loadExecutionTrace(traceId, configDir):
     trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True)
     return pickle.dumps(trace)
 
+
 def loadExecutionTraceWeightData(traceId, sessionId, configDir):
     config = Configuration(configDir)
 
@@ -489,6 +491,7 @@ def loadExecutionTraceWeightData(traceId, sessionId, configDir):
 
     return pickle.dumps(data)
 
+
 def saveExecutionTraceWeightData(traceWeightData, configDir):
     config = Configuration(configDir)
 
@@ -504,7 +507,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
     if gpu is not None:
         for subprocessIndex in range(10):
             try:
-                torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator",)
+                torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator", )
                 break
             except RuntimeError:
                 time.sleep(1)
@@ -563,7 +566,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessBatchResultQueue = multiprocessing.Queue()
 
-            createRewardNormalizer = config['enable_reward_normalization'] and bool(subprocessIndex==0 and (gpu == 0 or gpu is None))
+            createRewardNormalizer = config['enable_reward_normalization'] and bool(subprocessIndex == 0 and (gpu == 0 or gpu is None))
 
             subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer, subprocessIndex))
             subProcess.start()
@@ -641,10 +644,10 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                 if results is not None:
                     for result, batch in zip(results, batches):
                         totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
-                            stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
-                            executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
-                            totalLoss, totalRebalancedLoss, batchReward, \
-                            sampleRewardLosses = result
+                        stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
+                        executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
+                        totalLoss, totalRebalancedLoss, batchReward, \
+                        sampleRewardLosses = result
 
                         trainingStep.presentRewardLosses.append(presentRewardLoss)
                         trainingStep.discountedFutureRewardLosses.append(discountedFutureRewardLoss)
@@ -669,14 +672,14 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
 
                 trainingStep.numberOfIterationsCompleted += 1
 
-                if trainingStep.numberOfIterationsCompleted % config['print_loss_iterations'] == (config['print_loss_iterations']-1):
+                if trainingStep.numberOfIterationsCompleted % config['print_loss_iterations'] == (config['print_loss_iterations'] - 1):
                     if gpu is None or gpu == 0:
                         print(datetime.now(), "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
                         printMovingAverageLosses(config, trainingStep)
                         if config['print_cache_hit_rate']:
                             print(datetime.now(), f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-config['print_cache_hit_rate_moving_average_length']:]):.0f}%", flush=True)
 
-                if trainingStep.numberOfIterationsCompleted % config['iterations_between_db_saves'] == (config['iterations_between_db_saves']-1):
+                if trainingStep.numberOfIterationsCompleted % config['iterations_between_db_saves'] == (config['iterations_between_db_saves'] - 1):
                     if gpu is None or gpu == 0:
                         trainingStep.saveToDisk(config)
 

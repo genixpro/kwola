@@ -23,7 +23,6 @@ from ..tasks import TrainAgentLoop
 from .main import getConfigurationDirFromCommandLineArgs
 
 
-
 def main():
     """
         This is the entry point for the Kwola secondary command, kwola_train_agent.
@@ -32,5 +31,3 @@ def main():
     """
     configDir = getConfigurationDirFromCommandLineArgs()
     TrainAgentLoop.trainAgent(configDir)
-
-

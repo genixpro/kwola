@@ -134,5 +134,3 @@ def main():
     """
     configDir = getConfigurationDirFromCommandLineArgs()
     TrainAgentLoop.trainAgent(configDir)
-
-

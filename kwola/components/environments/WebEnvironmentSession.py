@@ -44,11 +44,11 @@ import tempfile
 import time
 
 
-
 class WebEnvironmentSession:
     """
         This class represents a single tab in the web environment.
     """
+
     def __init__(self, config, tabNumber, proxyPort, pathTracer):
         self.config = config
         self.targetURL = config['url']
@@ -116,7 +116,6 @@ class WebEnvironmentSession:
 
         self.exceptionHashes = set()
 
-
     def __del__(self):
         self.shutdown()
 
@@ -135,7 +134,6 @@ class WebEnvironmentSession:
         if self.driver:
             self.driver.quit()
         self.driver = None
-
 
     def addScreenshot(self):
         fileName = f"kwola-screenshot-{self.frameNumber:05d}.png"
@@ -161,12 +159,10 @@ class WebEnvironmentSession:
     def movieFilePath(self):
         return os.path.join(self.screenshotDirectory, self.movieFileName())
 
-
     def createMovie(self):
         subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         return self.movieFilePath()
-
 
     def extractBranchTrace(self):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
@@ -177,7 +173,6 @@ class WebEnvironmentSession:
         result = self.driver.execute_script(injected_javascript)
 
         return result
-
 
     def extractExceptions(self):
         # The JavaScript that we want to inject. This will extract out the exceptions
@@ -190,10 +185,8 @@ class WebEnvironmentSession:
 
         return result
 
-
     def branchFeatureSize(self):
         return len(self.lastCumulativeBranchExecutionVector)
-
 
     def computeCumulativeBranchExecutionVector(self, branchTrace):
         cumulativeBranchExecutionVector = np.array([])
@@ -204,7 +197,6 @@ class WebEnvironmentSession:
                 cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.array(counterVector)])
 
         return cumulativeBranchExecutionVector
-
 
     def getActionMaps(self):
         elementActionMaps = self.driver.execute_script("""
@@ -326,7 +318,6 @@ class WebEnvironmentSession:
 
         actionMaps = [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
         return actionMaps
-
 
     def runAction(self, action, executionSessionId):
         executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
@@ -500,18 +491,15 @@ class WebEnvironmentSession:
         rect = self.driver.get_window_rect()
         return rect
 
-
     def getImage(self):
         image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
 
-        image = numpy.flip(image[:, :, :3], axis=2)# OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
+        image = numpy.flip(image[:, :, :3], axis=2)  # OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
 
         return image
 
-
     def getBranchFeature(self):
         return numpy.minimum(self.lastCumulativeBranchExecutionVector, numpy.ones_like(self.lastCumulativeBranchExecutionVector))
-
 
     def getExecutionTraceFeature(self):
         return self.decayingExecutionTrace
