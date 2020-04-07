@@ -19,13 +19,11 @@
 #
 
 
-from mitmproxy import ctx
-import subprocess
-import io
 from datetime import datetime
 from mitmproxy.script import concurrent
 import hashlib
 import os.path
+import subprocess
 
 
 class JSRewriteProxy:

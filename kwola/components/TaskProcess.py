@@ -19,9 +19,9 @@
 #
 
 
-import sys
-import json
 from datetime import datetime
+import json
+import sys
 
 class TaskProcess:
     """

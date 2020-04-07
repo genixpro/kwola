@@ -19,15 +19,15 @@
 #
 
 
-import subprocess
-import psutil
-import atexit
-import time
-import json
-import threading
-from datetime import datetime
-import os
 from ..components.TaskProcess import TaskProcess
+from datetime import datetime
+import atexit
+import json
+import os
+import psutil
+import subprocess
+import threading
+import time
 
 
 class ManagedTaskSubprocess:
