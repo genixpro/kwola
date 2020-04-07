@@ -511,7 +511,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
     if gpu is not None:
         for subprocessIndex in range(10):
             try:
-                torch.distributed.init_process_group(backend="gloo", world_size=2, rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator", )
+                torch.distributed.init_process_group(backend="gloo", world_size=torch.cuda.device_count(), rank=gpu, init_method="file:///tmp/kwola_distributed_coordinator", )
                 break
             except RuntimeError:
                 time.sleep(1)
