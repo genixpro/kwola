@@ -111,7 +111,9 @@ class WebEnvironmentSession:
         self.screenshotHashes.add(screenHash)
         self.lastScreenshotHash = screenHash
 
-        self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(self.extractBranchTrace())
+        initialBranchTrace = self.extractBranchTrace()
+        self.branchTraceAcceptedFileNames = list(initialBranchTrace.keys())
+        self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(initialBranchTrace)
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
         self.exceptionHashes = set()
@@ -192,7 +194,7 @@ class WebEnvironmentSession:
         cumulativeBranchExecutionVector = np.array([])
 
         for fileName in sorted(branchTrace.keys()):
-            if fileName in self.lastBranchTrace:
+            if fileName in self.branchTraceAcceptedFileNames:
                 counterVector = branchTrace[fileName]
                 cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.array(counterVector)])
 
