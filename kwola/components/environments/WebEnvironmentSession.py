@@ -19,38 +19,29 @@
 #
 
 
-from selenium import webdriver
-from selenium.webdriver.common.proxy import Proxy, ProxyType
-from selenium.webdriver.chrome.options import Options
-import time
-import traceback
-import numpy as np
-from mitmproxy.tools.dump import DumpMaster
-from ...components.proxy.JSRewriteProxy import JSRewriteProxy
-from ...components.proxy.PathTracer import PathTracer
+from ...datamodels.ActionMapModel import ActionMap
+from ...datamodels.actions.ClearFieldAction import ClearFieldAction
 from ...datamodels.actions.ClickTapAction import ClickTapAction
 from ...datamodels.actions.RightClickAction import RightClickAction
-from ...datamodels.actions.ClearFieldAction import ClearFieldAction
 from ...datamodels.actions.TypeAction import TypeAction
 from ...datamodels.actions.WaitAction import WaitAction
-from ...datamodels.ActionMapModel import ActionMap
-from ...datamodels.ExecutionTraceModel import ExecutionTrace
 from ...datamodels.errors.ExceptionError import ExceptionError
-import selenium.common.exceptions
+from ...datamodels.ExecutionTraceModel import ExecutionTrace
+from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
-import tempfile
-import skimage.io
-import subprocess
+from selenium.webdriver.common.proxy import Proxy, ProxyType
+import cv2
+import hashlib
+import numpy
+import numpy as np
 import os
 import os.path
-from datetime import datetime
-import hashlib
-import cv2
-import numpy
-from threading import Thread
-import asyncio
-import socket
-from contextlib import closing
+import selenium.common.exceptions
+import subprocess
+import tempfile
+import time
 
 
 

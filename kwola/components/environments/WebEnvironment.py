@@ -19,17 +19,17 @@
 #
 
 
-import time
-import numpy as np
-from mitmproxy.tools.dump import DumpMaster
 from ...components.proxy.JSRewriteProxy import JSRewriteProxy
 from ...components.proxy.PathTracer import PathTracer
+from .WebEnvironmentSession import WebEnvironmentSession
+from contextlib import closing
+from mitmproxy.tools.dump import DumpMaster
 from threading import Thread
 import asyncio
 import concurrent.futures
+import numpy as np
 import socket
-from contextlib import closing
-from .WebEnvironmentSession import WebEnvironmentSession
+import time
 
 
 class WebEnvironment:
