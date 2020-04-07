@@ -125,14 +125,6 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
 
 
 def runMainTrainingLoop(config, trainingSequence):
-    # Load and save the agent to make sure all training subprocesses are synced
-    environment = WebEnvironment(config=config, sessionLimit=1)
-    agent = DeepLearningAgent(config=config, whichGpu=None)
-    agent.initialize(environment.branchFeatureSize())
-    agent.load()
-    agent.save()
-    del environment, agent
-
     stepsCompleted = 0
 
     stepStartTime = datetime.now()
@@ -182,6 +174,14 @@ def trainAgent(configDir):
     multiprocessing.set_start_method('spawn')
 
     config = Configuration(configDir)
+
+    # Load and save the agent to make sure all training subprocesses are synced
+    environment = WebEnvironment(config=config, sessionLimit=1)
+    agent = DeepLearningAgent(config=config, whichGpu=None)
+    agent.initialize(environment.branchFeatureSize())
+    agent.load()
+    agent.save()
+    del environment, agent
 
     trainingSequence = TrainingSequence(id=CustomIDField.generateNewUUID(TrainingSequence, config))
 
