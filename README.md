@@ -89,8 +89,7 @@ Usage
 
 Running Kwola is very straightforward. To initiate a Kwola testing session, run the following command. 
 Make sure to replace the URL with the url pointing to the website you want to start testing. The URL
-must be a complete, fully validated url containing the http:// part and everything. Also for now, its
-easiest just to run it from within the Kwola directory.
+must be a complete, fully validated url containing the http:// part and everything.
 
 `[user@localhost]$ kwola http://yoururl.com/`
 
