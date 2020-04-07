@@ -43,9 +43,9 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.0.7',
+    version='0.0.8',
     description='Kwola makes an AI powered tooling for finding bugs in software',
-    long_description="",
+    long_description=open("README.md", "rt").read(),
     classifiers=[
         'Programming Language :: Python',
         'Framework :: Pyramid',
