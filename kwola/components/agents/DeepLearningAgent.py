@@ -1121,7 +1121,7 @@ class DeepLearningAgent:
                 stampImageWidth = self.config['additional_features_stamp_edge_size'] * self.config['additional_features_stamp_edge_size']
                 stampImageHeight = self.config['additional_features_stamp_depth_size']
 
-                stampIm = stampAxes.imshow(numpy.array(stamp.data[0]).reshape([stampImageWidth, stampImageHeight]), cmap=greyColorMap, interpolation="nearest", vmin=-1.0, vmax=5.0)
+                stampIm = stampAxes.imshow(numpy.array(stamp.data[0]).reshape([stampImageWidth, stampImageHeight]), cmap=greyColorMap, interpolation="nearest", vmin=-2.5, vmax=2.5)
                 mainFigure.colorbar(stampIm, ax=stampAxes, orientation='vertical')
                 stampAxes.set_title("Memory Stamp")
 
