@@ -962,8 +962,13 @@ class DeepLearningAgent:
 
             def addRightSideDebugCharts(plotImage, rawImage, trace):
                 chartTopMargin = 75
-                numColumns = 4
-                numRows = 4
+
+                neededFigures = 4 + len(self.actionsSorted) * 3
+
+                squareSize = int(numpy.sqrt(neededFigures)) + 1
+
+                numColumns = squareSize
+                numRows = squareSize
 
                 mainColorMap = plt.get_cmap('inferno')
                 greyColorMap = plt.get_cmap('gray')
