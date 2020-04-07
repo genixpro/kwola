@@ -20,7 +20,7 @@
 
 
 from ..config.config import Configuration
-from ..datamodels.id import generateNewUUID
+from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..tasks import RunTestingStep
 from .main import getConfigurationDirFromCommandLineArgs
@@ -33,7 +33,7 @@ def main():
     configDir = getConfigurationDirFromCommandLineArgs()
     config = Configuration(configDir)
 
-    testingStep = TestingStep(id=generateNewUUID(TestingStep, config))
+    testingStep = TestingStep(id=CustomIDField.generateNewUUID(TestingStep, config))
     testingStep.saveToDisk(config)
 
     RunTestingStep.runTestingStep(configDir, str(testingStep.id))

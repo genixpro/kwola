@@ -20,7 +20,7 @@
 
 
 from ..config.config import Configuration
-from ..datamodels.id import generateNewUUID
+from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TrainingStepModel import TrainingStep
 from ..tasks import RunTrainingStep
 from .main import getConfigurationDirFromCommandLineArgs
@@ -33,7 +33,7 @@ def main():
     configDir = getConfigurationDirFromCommandLineArgs()
     config = Configuration(configDir)
 
-    trainingStep = TrainingStep(id=generateNewUUID(TrainingStep, config))
+    trainingStep = TrainingStep(id=CustomIDField.generateNewUUID(TrainingStep, config))
     trainingStep.saveToDisk(config)
 
     RunTrainingStep.runTrainingStep(configDir, str(trainingStep.id), 0)

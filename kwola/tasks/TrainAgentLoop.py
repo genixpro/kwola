@@ -23,7 +23,7 @@ from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.ManagedTaskSubprocess import ManagedTaskSubprocess
 from ..config.config import Configuration
-from ..datamodels.id import generateNewUUID
+from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..datamodels.TrainingSequenceModel import TrainingSequence
 from ..datamodels.TrainingStepModel import TrainingStep
@@ -182,7 +182,7 @@ def trainAgent(configDir):
 
     config = Configuration(configDir)
 
-    trainingSequence = TrainingSequence(id=generateNewUUID(TrainingSequence, config))
+    trainingSequence = TrainingSequence(id=CustomIDField.generateNewUUID(TrainingSequence, config))
 
     trainingSequence.startTime = datetime.now()
     trainingSequence.status = "running"

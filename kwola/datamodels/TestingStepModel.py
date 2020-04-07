@@ -20,8 +20,8 @@
 
 
 from .errors.BaseError import BaseError
-from .id import CustomIDField
-from .utilities import saveObjectToDisk, loadObjectFromDisk
+from .CustomIDField import CustomIDField
+from .DiskUtilities import saveObjectToDisk, loadObjectFromDisk
 from mongoengine import *
 import datetime
 

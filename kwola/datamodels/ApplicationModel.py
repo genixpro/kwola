@@ -18,8 +18,8 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from .id import CustomIDField
-from .utilities import saveObjectToDisk, loadObjectFromDisk
+from .CustomIDField import CustomIDField
+from .DiskUtilities import saveObjectToDisk, loadObjectFromDisk
 from mongoengine import *
 
 

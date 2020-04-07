@@ -37,14 +37,13 @@ class CustomIDField(mongoengine.fields.StringField):
     def to_python(self, value):
         return str(value)
 
-
-
-def generateNewUUID(modelClass, config, minimumLength=4):
-    currentLength = minimumLength
-    id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
-    while modelClass.loadFromDisk(id, config) is not None:
-        currentLength += 4
+    @staticmethod
+    def generateNewUUID(modelClass, config, minimumLength=4):
+        currentLength = minimumLength
         id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
+        while modelClass.loadFromDisk(id, config) is not None:
+            currentLength += 4
+            id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
 
-    return id
+        return id
 

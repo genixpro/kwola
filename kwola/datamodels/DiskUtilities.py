@@ -19,7 +19,7 @@
 #
 
 
-from .lockedfile import LockedFile
+from .LockedFile import LockedFile
 from datetime import datetime
 import gzip
 import json
