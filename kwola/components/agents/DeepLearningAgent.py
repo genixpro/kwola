@@ -56,7 +56,9 @@ import traceback
 
 class DeepLearningAgent:
     """
-        This class represents a deep learning agent, which uses reinforcement learning to make the automated testing more effective
+        This class represents a deep learning agent, which is an agent that uses deep learning in order to learn how
+        to use an application given to it. This class is tightly coupled with the WebEnvironment and
+        WebEnvironmentSession classes.
     """
 
     def __init__(self, config, whichGpu="all"):
@@ -208,6 +210,15 @@ class DeepLearningAgent:
         self.actionsSorted = sorted(self.actions.keys())
 
     def randomString(self, chars, len):
+        """
+            Generates a random string.
+
+            Just a utility function.
+
+            :param chars: A string containing possible characters to select from.
+            :param len: The number of characters to put into the generated string.
+            :return:
+        """
         base = ""
         for n in range(len):
             base += str(random.choice(chars))
@@ -215,9 +226,8 @@ class DeepLearningAgent:
 
     def load(self):
         """
-            Loads the agent from db / disk
-
-            :return:
+            Loads the agent from db / disk. The agent will be loaded from the Kwola configuration
+            directory.
         """
 
         if os.path.exists(self.modelPath):
@@ -236,9 +246,11 @@ class DeepLearningAgent:
 
     def save(self, saveName=""):
         """
-            Saves the agent to the db / disk.
+            Saves the agent to disk. By default, you will save the agent into the primary slot, which is the
+            default one loaded when you call DeepLearningAgent.load(). If you provide a saveName, then the agent
+            will be saved with filenames prefixed with that.
 
-            :return:
+            :param saveName: A string containing the prefix for the model file names when the model is saved.
         """
 
         if saveName:
@@ -249,9 +261,11 @@ class DeepLearningAgent:
 
     def initialize(self, branchFeatureSize):
         """
-        Initialize the agent.
+            Initialiazes the deep learning agent.
 
-        :return:
+            :param branchFeatureSize: This should be the number of code branches that are being traced. It should be the
+                                      length of the return value from WebEnvironment.getBranchFeature.
+
         """
         if self.whichGpu == "all":
             device_ids = [torch.device(f'cuda:{n}') for n in range(2)]
@@ -286,9 +300,22 @@ class DeepLearningAgent:
                                       )
 
     def updateTargetNetwork(self):
+        """
+            This method is used during training to update the target network. The target network is a second
+            copy of the neural network that is used during training to predict future rewards. It is only updated
+            every few hundred iterations, in order to provide a more stable target.
+        """
         self.targetNetwork.load_state_dict(self.model.state_dict())
 
     def processImages(self, images):
+        """
+            This method will process a given numpy array of raw images and prepare them to be processed inside the
+            neural network.
+
+            :param images: A numpy array, with dimensions [batch_size, height, width, channels]
+
+            :return: A new numpy array containing the resulting processed images, with dimensions [batch_size, channels, height, width]
+        """
         convertedImageFutures = []
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -304,6 +331,18 @@ class DeepLearningAgent:
 
 
     def createPixelActionMap(self, actionMaps, height, width):
+        """
+            This method generates the pixel action map. The pixel action map is basically an image, containing
+            either a 1 or a 0 on a pixel by pixel basis for each action that the agent is able to perform. A 1
+            on a given pixel indicates that the action is able to be performed on that pixel, and a 0 indicates
+            that the action is not able to be performed.
+
+            :param actionMaps: This must be a list of kwola.datamodels.ActionMapModel instances.
+            :param height: The height of the image for which this action map is being generated.
+            :param width: The width of the image for which this action map is being generated.
+
+            :return: A numpy array, with the dimensions [# actions, height, width]
+        """
         pixelActionMap = numpy.zeros([len(self.actionsSorted), height, width], dtype=numpy.uint8)
 
         for element in actionMaps:
@@ -348,6 +387,14 @@ class DeepLearningAgent:
         return pixelActionMap
 
     def getActionMapsIntersectingWithAction(self, action, actionMaps):
+        """
+            This method will filter a list of action maps you provide it, returning only the ones that appear
+            to intersect with the given action.
+
+            :param action: This should be a kwola.datamodels.actions.BaseAction instance, or one of its derived classes.
+            :param actionMaps: This must be a list of kwola.datamodels.ActionMapModel instances.
+            :return:
+        """
         selected = []
         for actionMap in actionMaps:
             if actionMap.left <= action.x <= actionMap.right and actionMap.top <= action.y <= actionMap.bottom:
@@ -357,8 +404,25 @@ class DeepLearningAgent:
 
     def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, recentActions, shouldBeRandom=False):
         """
-            Return the next best action predicted by the agent.
+            This is the main prediction / inference function for the agent. This function will decide what is the next
+            best action to take, given a particular state.
 
+            :param stepNumber: This is an integer indicating what step the agent is on from the beginning of the
+                               execution session.
+            :param rawImages: This is a numpy array containing the raw image objects. There should be a single raw
+                              image for each sub environment being predicted on at the same time.
+            :param envActionMaps: This is an array of arrays. The outer array contains a list for each of the sub
+                                  environments being inferenced for. The inner list should just be a list of
+                                  kwola.datamodels.ActionMapModel instances.
+            :param additionalFeatures: This should be a numpy array containing the additional features vector,
+                                        one for each sub environment.
+            :param recentActions:  This should be a list of lists. The outer list should contain a list for each sub
+                                   environment. The inner list should be a list of kwola.datamodels.actions.BaseAction
+                                   instances, indicating which actions have been performed on the model since the model
+                                   last discovered new code branches. Note it does not contain all recent actions, the
+                                   name is a bit of a misnomer. Need to refactor.
+            :param shouldBeRandom: Whether or not the actions should be selected entirely randomly, or should use them
+                                   predictions of the machine learning algorithm.
             :return:
         """
         processedImages = self.processImages(rawImages)

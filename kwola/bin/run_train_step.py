@@ -27,6 +27,9 @@ from .main import getConfigurationDirFromCommandLineArgs
 
 
 def main():
+    """
+        This is the entry point for the Kwola secondary command, kwola_run_train_step.
+    """
     configDir = getConfigurationDirFromCommandLineArgs()
     config = Configuration(configDir)
 

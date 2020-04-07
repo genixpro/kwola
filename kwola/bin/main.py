@@ -27,6 +27,13 @@ import sys
 
 
 def getConfigurationDirFromCommandLineArgs():
+    """
+        This function is responsible for parsing the command line arguments and returning a directory containing a
+        Kwola configuration. If none exists, a new Kwola configuration will be created.
+
+        :return: A string containing the directory name with the configuration.
+    """
+
     commandArgs = sys.argv[1:]
 
     cantStartMessage = """"
@@ -121,6 +128,10 @@ def getConfigurationDirFromCommandLineArgs():
 
 
 def main():
+    """
+        This is the entry point for the main Kwola application, the console command "kwola".
+        All it does is start a training loop.
+    """
     configDir = getConfigurationDirFromCommandLineArgs()
     TrainAgentLoop.trainAgent(configDir)
 
