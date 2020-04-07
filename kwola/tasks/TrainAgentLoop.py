@@ -188,10 +188,12 @@ def trainAgent(configDir):
     trainingSequence.startTime = datetime.now()
     trainingSequence.status = "running"
     trainingSequence.trainingStepsCompleted = 0
+    trainingSequence.saveToDisk(config)
 
     testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
     if len(testingSteps) == 0:
         runRandomInitialization(config, trainingSequence)
+        trainingSequence.saveToDisk(config)
 
     runMainTrainingLoop(config, trainingSequence)
 
