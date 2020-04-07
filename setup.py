@@ -25,13 +25,25 @@ from setuptools import setup, find_packages
 
 here = os.path.abspath(os.path.dirname(__file__))
 
-with open('requirements.txt', 'rt') as f:
-    requires = f.readlines()
-
+requirements = [
+    "mitmproxy",
+    "mongoengine",
+    "numpy",
+    "opencv-python",
+    "pandas",
+    "psutil",
+    "questionary",
+    "requests",
+    "scikit-image",
+    "scikit-learn",
+    "scipy",
+    "selenium",
+    "torch"
+]
 
 setup(
     name='kwola',
-    version='0.0.5',
+    version='0.0.7',
     description='Kwola makes an AI powered tooling for finding bugs in software',
     long_description="",
     classifiers=[
@@ -42,7 +54,7 @@ setup(
     author_email='',
     url='',
     keywords='torch pytorch artificial intelligence',
-    packages=['kwola'],
+    packages=find_packages(),
     include_package_data=True,
     zip_safe=False,
     extras_require={
@@ -52,7 +64,7 @@ setup(
             'config/prebuilt_configs/*.json'
         ]
     },
-    install_requires=requires,
+    install_requires=requirements,
     entry_points={
         'console_scripts': [
             'kwola = kwola.bin.main:main',
@@ -62,4 +74,3 @@ setup(
         ]
     }
 )
-
