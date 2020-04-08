@@ -16,7 +16,8 @@ Dependencies
 
 1) Python
 
-Please go to https://www.python.org/downloads/ to download and install Python.
+Please go to https://www.python.org/downloads/ to download and install Python. You should also install the Python development headers,
+as some of our Python dependencies compile C / C++ code into Python modules.
 
 2) NodeJS
 
@@ -49,7 +50,29 @@ You must install ffmpeg as it is used to compress the videos of Kwola interactin
 
 Please go to this url: https://www.ffmpeg.org/download.html to get instructions on how to install ffmpeg.
 
-6) [optional] Nvidia Drivers & Cuda
+6) [linux / macOS] 
+
+You need to install a c++ compiler, as it is used by some of the Python dependencies to compile highly 
+efficient code.
+
+On Ubuntu, you can run:
+
+`[user@localhost]$ sudo apt-get install build-essential`
+
+On Fedora, you can run:
+
+`[user@localhost]$ sudo dnf install gcc-c++`
+
+On macOS, you must install XCode to get the compiler.
+
+7) [windows] Visual Studio
+
+Install visual studio community edition (or basically any version of visual studio) if you are using Windows.
+
+Visual Studio is needed for the C++ compiler, used by some of our Python dependencies.
+Go here for the download instructions: https://visualstudio.microsoft.com/downloads/
+
+8) [optional] Nvidia Drivers & Cuda
 
 How you install NVIDIA Drivers depends on your operating system. You only need to install NVIDIA drivers if you 
 are using GPUs. Using GPUs is recommended but optional, and you can do test runs with just the CPU.
@@ -63,7 +86,7 @@ Ubuntu: https://linuxconfig.org/how-to-install-the-nvidia-drivers-on-ubuntu-18-0
 
 Fedora: https://www.if-not-true-then-false.com/2015/fedora-nvidia-guide/
 
-7) [optional] Docker
+9) [optional] Docker
 
 Go here and follow the instructions to install Docker: https://docs.docker.com/install/
 
@@ -72,9 +95,17 @@ Docker not required for Kwola to operate but is used in some of the examples.
 Installation Instructions
 -------------------------
 
+Create a virtual environment. Doing this is not 100% necessary, you can install Kwola globally,
+but there is a much higher likelihood of a package version conflict. Installing inside the virtual
+environment is the most reliable way to run Kwola.
+
+`[user@localhost]$ python3 -m venv venv`
+
+`[user@localhost]$ source venv/bin/activate`
+
 Install Kwola using pip.
 
-`[user@localhost]$ sudo pip3 install kwola`
+`[user@localhost]$ pip3 install kwola`
 
 Install babel-cli and the Kwola babel plugin globally. This makes it easier for the code to access the babel binary.
 
@@ -82,7 +113,13 @@ Install babel-cli and the Kwola babel plugin globally. This makes it easier for 
 
 `[user@localhost]$ sudo npm install babel-plugin-kwola -g`
 
-And that's it! 
+If you have any issues, particularly issues with running testing sequences, try installing the babel plugin locally 
+as well, in the same folder that you run the Kwola executable. We are still sorting out precisely how all of this is
+done.
+
+`[user@localhost]$ npm install babel-plugin-kwola`
+
+That's it! Kwola should not be installed.
 
 Usage
 =====
