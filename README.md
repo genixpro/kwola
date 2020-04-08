@@ -50,7 +50,7 @@ You must install ffmpeg as it is used to compress the videos of Kwola interactin
 
 Please go to this url: https://www.ffmpeg.org/download.html to get instructions on how to install ffmpeg.
 
-6) [linux / macOS] 
+6) [linux / macOS] C & C++ Compiler
 
 You need to install a c++ compiler, as it is used by some of the Python dependencies to compile highly 
 efficient code.
