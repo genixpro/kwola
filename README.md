@@ -119,7 +119,7 @@ done.
 
 `[user@localhost]$ npm install babel-plugin-kwola`
 
-That's it! Kwola should not be installed.
+That's it! Kwola should now be installed.
 
 Usage
 =====
