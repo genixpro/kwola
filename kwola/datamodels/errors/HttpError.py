@@ -38,8 +38,11 @@ class HttpError(BaseError):
 
     def computeHash(self):
         hasher = hashlib.md5()
-        hasher.update(self.path)
-        hasher.update(self.statusCode)
-        hasher.update(self.message)
+        hasher.update(bytes(self.path, "utf8"))
+        hasher.update(bytes(str(self.statusCode), "utf8"))
+        hasher.update(bytes(self.message, "utf8"))
 
         return hasher.hexdigest()
+
+    def generateErrorDescription(self):
+        return f"Error {self.statusCode} at {self.path}: {self.message}"

@@ -41,9 +41,10 @@ class ExceptionError(BaseError):
 
     def computeHash(self):
         hasher = hashlib.md5()
-        hasher.update(self.stacktrace)
+        hasher.update(bytes(self.stacktrace, "utf8"))
 
         return hasher.hexdigest()
 
 
-
+    def generateErrorDescription(self):
+        return self.stacktrace

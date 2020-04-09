@@ -24,6 +24,8 @@ from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.TaskProcess import TaskProcess
 from ..config.config import Configuration
 from ..datamodels.ExecutionSessionModel import ExecutionSession
+from ..datamodels.BugModel import BugModel
+from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from .RunTrainingStep import addExecutionSessionToSampleCache
 from datetime import datetime
@@ -85,6 +87,23 @@ def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId,
     del agent
 
 
+def loadAllBugs(config):
+    bugsDir = config.getKwolaUserDataDirectory("bugs")
+
+    bugs = []
+
+    for fileName in os.listdir(bugsDir):
+        if ".lock" not in fileName and ".txt" not in fileName:
+            bugId = fileName
+            bugId = bugId.replace(".json", "")
+            bugId = bugId.replace(".gz", "")
+            bugId = bugId.replace(".pickle", "")
+
+            bugs.append(BugModel.loadFromDisk(bugId, config))
+
+    return bugs
+
+
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
     print(datetime.now(), f"[{os.getpid()}]", "Starting New Testing Sequence", flush=True)
 
@@ -124,8 +143,13 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         for session in executionSessions:
             session.saveToDisk(config)
 
-        errorHashes = set()
-        uniqueErrors = []
+        allKnownErrorHashes = set()
+        newErrorsThisTestingStep = []
+
+        bugs = loadAllBugs(config)
+        for bug in bugs:
+            hash = bug.error.computeHash()
+            allKnownErrorHashes.add(hash)
 
         step = 0
 
@@ -185,9 +209,9 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 for error in trace.errorsDetected:
                     hash = error.computeHash()
 
-                    if hash not in errorHashes:
-                        errorHashes.add(hash)
-                        uniqueErrors.append(error)
+                    if hash not in allKnownErrorHashes:
+                        allKnownErrorHashes.add(hash)
+                        newErrorsThisTestingStep.append(error)
 
             if config['testing_reset_agent_period'] == 1 or stepsRemaining % config['testing_reset_agent_period'] == (config['testing_reset_agent_period'] - 1):
                 subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses.pop(0)
@@ -235,8 +259,26 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         print(datetime.now(), f"[{os.getpid()}]", f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
 
-        testStep.bugsFound = len(uniqueErrors)
-        testStep.errors = uniqueErrors
+        testStep.bugsFound = len(newErrorsThisTestingStep)
+        testStep.errors = newErrorsThisTestingStep
+
+        print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
+        for errorIndex, error in enumerate(newErrorsThisTestingStep):
+            bug = BugModel()
+            bug.id = CustomIDField.generateNewUUID(BugModel, config)
+            bug.testingStepId = testStep.id
+            bug.error = error
+            bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
+
+            bugTextFile = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")
+            with open(bugTextFile, "wt") as file:
+                file.write(bug.generateBugText())
+
+            print(datetime.now(), f"[{os.getpid()}]", f"")
+            print(datetime.now(), f"[{os.getpid()}]", f"Bug #{errorIndex + 1}:")
+            print(datetime.now(), f"[{os.getpid()}]", bug.generateBugText(), flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", f"")
+
 
         testStep.status = "completed"
 

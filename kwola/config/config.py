@@ -36,6 +36,19 @@ class Configuration:
 
         data = json.load(open(self.configFileName, "rt"))
 
+        if 'profile' not in data:
+            data['profile'] = 'medium'
+
+        # If there are any configuration values that exist in the prebuilt config
+        # that we don't see in the loaded configuration file, then we add in
+        # those keys with the default values taken from the prebuilt config.
+        # This allows people to continue running existing runs even if we add
+        # new configuration keys in subsequent releases.
+        prebuiltConfigData = Configuration.getPrebuiltConfigData(data['profile'])
+        for key, value in prebuiltConfigData.items():
+            if key not in data:
+                data[key] = value
+
         for key, value in data.items():
             setattr(self, key, value)
 
@@ -91,7 +104,7 @@ class Configuration:
                 os.mkdir(dirname)
 
                 with open(os.path.join(dirname, "kwola.json"), "wt") as configFile:
-                    prebuildConfigData = json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
+                    prebuildConfigData = Configuration.getPrebuiltConfigData(prebuild)
                     for key, value in configArgs.items():
                         prebuildConfigData[key] = value
                     configFile.write(json.dumps(prebuildConfigData, indent=4))
@@ -112,4 +125,8 @@ class Configuration:
             r'(?:/?|[/?]\S+)$', re.IGNORECASE)
 
         return re.match(regex, url) is not None
+
+    @staticmethod
+    def getPrebuiltConfigData(prebuild):
+        return json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
 

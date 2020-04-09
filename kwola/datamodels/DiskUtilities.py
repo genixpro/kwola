@@ -29,9 +29,17 @@ import pickle
 
 
 
-def saveObjectToDisk(targetObject, folder, config):
-    if config.data_serialization_method == "pickle":
-        if config.data_compress_level == 0:
+def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, overrideCompression=None):
+    saveFormat = config.data_serialization_method
+    if overrideSaveFormat is not None:
+        saveFormat = overrideSaveFormat
+
+    compression = config.data_compress_level
+    if overrideCompression is not None:
+        compression = overrideCompression
+
+    if saveFormat == "pickle":
+        if compression == 0:
             fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".pickle")
             with LockedFile(fileName, 'wb') as f:
                 pickle.dump(targetObject, f)
@@ -39,17 +47,17 @@ def saveObjectToDisk(targetObject, folder, config):
             fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".pickle.gz")
             with LockedFile(fileName, 'wb') as f:
                 data = pickle.dumps(targetObject)
-                f.write(gzip.compress(data, compresslevel=config.data_compress_level))
+                f.write(gzip.compress(data, compresslevel=compression))
 
-    elif config.data_serialization_method == "json":
-        if config.data_compress_level == 0:
+    elif saveFormat == "json":
+        if compression == 0:
             fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".json")
             with LockedFile(fileName, 'wt') as f:
                 f.write(targetObject.to_json(indent=4))
         else:
             fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".json.gz")
             with LockedFile(fileName, 'wb') as f:
-                f.write(gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=config.data_compress_level))
+                f.write(gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression))
 
 
 

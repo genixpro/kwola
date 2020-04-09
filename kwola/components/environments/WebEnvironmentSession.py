@@ -26,6 +26,7 @@ from ...datamodels.actions.RightClickAction import RightClickAction
 from ...datamodels.actions.TypeAction import TypeAction
 from ...datamodels.actions.WaitAction import WaitAction
 from ...datamodels.errors.ExceptionError import ExceptionError
+from ...datamodels.errors.LogError import LogError
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
 from datetime import datetime
 from selenium import webdriver
@@ -116,7 +117,7 @@ class WebEnvironmentSession:
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(initialBranchTrace)
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
-        self.exceptionHashes = set()
+        self.errorHashes = set()
 
     def __del__(self):
         self.shutdown()
@@ -414,23 +415,37 @@ class WebEnvironmentSession:
 
         executionTrace.didActionSucceed = success
 
-        hadNewException = False
+        hadNewError = False
         exceptions = self.extractExceptions()
         for exception in exceptions:
             msg, source, lineno, colno, stack = tuple(exception)
-            executionTrace.errorsDetected.append(ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno))
+            error = ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
+            executionTrace.errorsDetected.append(error)
+            errorHash = error.computeHash()
 
-            print(datetime.now(), f"[{os.getpid()}]", "Error detected in client application:")
-            print(datetime.now(), f"[{os.getpid()}]", f"{msg} at line {lineno} column {colno} in {source}")
-            print(datetime.now(), f"[{os.getpid()}]", str(stack), flush=True)
+            if errorHash not in self.errorHashes:
+                print(datetime.now(), f"[{os.getpid()}]", "An unhandled exception was detected in client application:")
+                print(datetime.now(), f"[{os.getpid()}]", f"{msg} at line {lineno} column {colno} in {source}")
+                print(datetime.now(), f"[{os.getpid()}]", str(stack), flush=True)
 
-            hasher = hashlib.md5()
-            hasher.update(stack)
-            exceptionHash = hasher.hexdigest()
+                self.errorHashes.add(errorHash)
+                hadNewError = True
 
-            if exceptionHash not in self.exceptionHashes:
-                self.exceptionHashes.add(exceptionHash)
-                hadNewException = True
+        logEntries = self.driver.get_log('browser')[startLogCount:]
+        for log in logEntries:
+            if log['level'] == 'SEVERE':
+                message = str(log['message'])
+                message = message.replace("\\n", "\n")
+                error = LogError(message=message, logLevel=log['level'])
+                executionTrace.errorsDetected.append(error)
+                errorHash = error.computeHash()
+
+                if errorHash not in self.errorHashes:
+                    print(datetime.now(), f"[{os.getpid()}]", "A log error was detected in client application:")
+                    print(datetime.now(), f"[{os.getpid()}]", message, flush=True)
+
+                    self.errorHashes.add(errorHash)
+                    hadNewError = True
 
         screenHash = self.addScreenshot()
 
@@ -454,11 +469,11 @@ class WebEnvironmentSession:
         executionTrace.tabNumber = self.tabNumber
         executionTrace.frameNumber = self.frameNumber
 
-        executionTrace.logOutput = "\n".join([str(log) for log in self.driver.get_log('browser')][startLogCount:])
+        executionTrace.logOutput = "\n".join([str(log) for log in logEntries])
         executionTrace.finishURL = self.driver.current_url
 
         executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-        executionTrace.didNewErrorOccur = hadNewException
+        executionTrace.didNewErrorOccur = hadNewError
         executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
 
         executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
