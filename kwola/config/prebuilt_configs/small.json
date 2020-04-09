@@ -123,7 +123,7 @@
   "testing_print_every": 5,
   "testing_repeat_action_pixel_overlap_tolerance": 4,
   "testing_reset_agent_period": 1,
-  "testing_sequence_length": 10,
+  "testing_sequence_length": 100,
   "testing_sequences_in_parallel_per_training_step": 2,
   "testing_sequences_per_training_step": 2,
   "testing_subprocess_pool_size": 2,
