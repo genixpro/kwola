@@ -93,7 +93,7 @@ def loadAllBugs(config):
     bugs = []
 
     for fileName in os.listdir(bugsDir):
-        if ".lock" not in fileName and ".txt" not in fileName:
+        if ".lock" not in fileName and ".txt" not in fileName and ".mp4" not in fileName:
             bugId = fileName
             bugId = bugId.replace(".json", "")
             bugId = bugId.replace(".gz", "")
@@ -145,6 +145,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         allKnownErrorHashes = set()
         newErrorsThisTestingStep = []
+        newErrorOriginalExecutionSessionIds = []
 
         bugs = loadAllBugs(config)
         for bug in bugs:
@@ -212,6 +213,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                     if hash not in allKnownErrorHashes:
                         allKnownErrorHashes.add(hash)
                         newErrorsThisTestingStep.append(error)
+                        newErrorOriginalExecutionSessionIds.append(str(executionSession.id))
 
             if config['testing_reset_agent_period'] == 1 or stepsRemaining % config['testing_reset_agent_period'] == (config['testing_reset_agent_period'] - 1):
                 subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses.pop(0)
@@ -263,16 +265,22 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         testStep.errors = newErrorsThisTestingStep
 
         print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
-        for errorIndex, error in enumerate(newErrorsThisTestingStep):
+        for errorIndex, error, executionSessionId in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds):
             bug = BugModel()
             bug.id = CustomIDField.generateNewUUID(BugModel, config)
             bug.testingStepId = testStep.id
+            bug.executionSessionId = executionSessionId
             bug.error = error
             bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
 
             bugTextFile = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")
             with open(bugTextFile, "wt") as file:
                 file.write(bug.generateBugText())
+
+            bugVideoFilePath = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".mp4")
+            with open(os.path.join(kwolaVideoDirectory, f'{str(executionSessionId)}.mp4'), "rb") as origFile:
+                with open(bugVideoFilePath, 'wb') as cloneFile:
+                    cloneFile.write(origFile.read())
 
             print(datetime.now(), f"[{os.getpid()}]", f"")
             print(datetime.now(), f"[{os.getpid()}]", f"Bug #{errorIndex + 1}:")
