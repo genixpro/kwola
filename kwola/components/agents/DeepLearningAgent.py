@@ -1418,6 +1418,14 @@ class DeepLearningAgent:
             oneTensorLong = self.variableWrapperFunc(torch.LongTensor, [1])
             oneTensorFloat = self.variableWrapperFunc(torch.FloatTensor, [1])
             stateValueLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_state_value_weight']])
+            presentRewardLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_present_reward_weight']])
+            discountedFutureRewardLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_discounted_future_reward_weight']])
+            advantageLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_advantage_weight']])
+            actionProbabilityLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_action_probability_weight']])
+            executionFeatureLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_execution_feature_weight']])
+            executionTraceLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_execution_trace_weight']])
+            homogenizationLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_homogenization_weight']])
+            cursorPredictionLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_cursor_prediction_weight']])
             widthTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[3]])
             heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
             presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
@@ -1541,6 +1549,7 @@ class DeepLearningAgent:
                 discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
                 advantageLoss = advantageLossMap.pow(2).sum() / countPixelMask
                 actionProbabilityLoss = actionProbabilityLossMap.abs().sum()
+                stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2)
 
                 if self.config['enable_homogenization_loss']:
                     pixelFeatureImage = currentStateOutputs['pixelFeatureMap'][sampleIndex]
@@ -1550,34 +1559,38 @@ class DeepLearningAgent:
                     targetHomogenizationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).mean(axis=0)
                     targetDifferentiationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * (1.0 - rewardPixelMask)).pow(2).mean(axis=0)
                     targetHomogenizationLoss = torch.abs((targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (widthTensor * heightTensor - countPixelMask)))
+                    targetHomogenizationLoss = targetHomogenizationLoss * homogenizationLossWeightFloat
                     targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
+
+                presentRewardLoss = presentRewardLoss * presentRewardLossWeightFloat
+                discountedFutureRewardLoss = discountedFutureRewardLoss * discountedFutureRewardLossWeightFloat
+                advantageLoss = advantageLoss * advantageLossWeightFloat
+                actionProbabilityLoss = actionProbabilityLoss * actionProbabilityLossWeightFloat
+                stateValueLoss = stateValueLoss * stateValueLossWeightFloat
 
                 presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
                 discountedFutureRewardLosses.append(discountedFutureRewardLoss.unsqueeze(0))
                 advantageLosses.append(advantageLoss.unsqueeze(0))
                 actionProbabilityLosses.append(actionProbabilityLoss.unsqueeze(0))
-
-                stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2) * stateValueLossWeightFloat
                 stateValueLosses.append(stateValueLoss)
-
                 totalSampleLosses.append(presentRewardLoss + discountedFutureRewardLoss + advantageLoss + actionProbabilityLoss)
 
             extraLosses = []
 
             if self.config['enable_trace_prediction_loss']:
-                tracePredictionLoss = (currentStateOutputs['predictedTraces'] - futureBranchTracesTensor).abs().mean()
+                tracePredictionLoss = (currentStateOutputs['predictedTraces'] - futureBranchTracesTensor).abs().mean() * executionTraceLossWeightFloat
                 extraLosses.append(tracePredictionLoss.unsqueeze(0))
             else:
                 tracePredictionLoss = zeroTensor
 
             if self.config['enable_execution_feature_prediction_loss']:
-                predictedExecutionFeaturesLoss = (currentStateOutputs['predictedExecutionFeatures'] - executionFeaturesTensor).abs().mean()
+                predictedExecutionFeaturesLoss = (currentStateOutputs['predictedExecutionFeatures'] - executionFeaturesTensor).abs().mean() * executionFeatureLossWeightFloat
                 extraLosses.append(predictedExecutionFeaturesLoss.unsqueeze(0))
             else:
                 predictedExecutionFeaturesLoss = zeroTensor
 
             if self.config['enable_cursor_prediction_loss']:
-                predictedCursorLoss = (currentStateOutputs['predictedCursor'] - cursorsTensor).abs().mean()
+                predictedCursorLoss = (currentStateOutputs['predictedCursor'] - cursorsTensor).abs().mean() * cursorPredictionLossWeightFloat
                 extraLosses.append(predictedCursorLoss.unsqueeze(0))
             else:
                 predictedCursorLoss = zeroTensor
