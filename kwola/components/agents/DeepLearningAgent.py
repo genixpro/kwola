@@ -134,45 +134,50 @@ class DeepLearningAgent:
             "batchReward": []
         }
 
+        # By default, the click action is the only one
         self.actions = {
-            "click": lambda x, y: ClickTapAction(type="click", x=x, y=y, times=1),
-            "clear": lambda x, y: ClearFieldAction(type="clear", x=x, y=y),
+            "click": lambda x, y: ClickTapAction(type="click", x=x, y=y, times=1)
         }
 
         self.actionBaseWeights = [
-            config['random_weight_click'],
-            config['random_weight_clear']
+            config['random_weight_click']
         ]
 
         self.actionProbabilityBoostKeywords = [
-            [],
             []
         ]
+
+        hasTypingAction = False
 
         if config['email']:
             self.actions['typeEmail'] = lambda x, y: TypeAction(type="typeEmail", x=x, y=y, label="email", text=config['email'])
             self.actionBaseWeights.append(config['random_weight_type_email'])
             self.actionProbabilityBoostKeywords.append(["email", "user"])
+            hasTypingAction = True
 
         if config['password']:
             self.actions['typePassword'] = lambda x, y: TypeAction(type="typePassword", x=x, y=y, label="password", text=config['password'])
             self.actionBaseWeights.append(config['random_weight_type_password'])
             self.actionProbabilityBoostKeywords.append(["pass"])
+            hasTypingAction = True
 
         if config['name']:
             self.actions['typeName'] = lambda x, y: TypeAction(type="typeName", x=x, y=y, label="name", text=config['name'])
             self.actionBaseWeights.append(config['random_weight_type_name'])
             self.actionProbabilityBoostKeywords.append(["email", "user"])
+            hasTypingAction = True
 
         if config['paragraph']:
             self.actions['typeParagraph'] = lambda x, y: TypeAction(type="typeParagraph", x=x, y=y, label="paragraph", text=config['paragraph'])
             self.actionBaseWeights.append(config['random_weight_type_paragraph'])
             self.actionProbabilityBoostKeywords.append(["pass"])
+            hasTypingAction = True
 
         if config['enableRandomNumberCommand']:
             self.actions['typeNumber'] = lambda x, y: TypeAction(type="typeNumber", x=x, y=y, label="number", text=self.randomString('-.0123456789$%', random.randint(1, 5)))
             self.actionBaseWeights.append(config['random_weight_type_number'])
             self.actionProbabilityBoostKeywords.append(["num", "count", "int", "float"])
+            hasTypingAction = True
 
         if config['enableDoubleClickCommand']:
             self.actions['doubleClick'] = lambda x, y: ClickTapAction(type="double_click", x=x, y=y, times=2)
@@ -188,15 +193,23 @@ class DeepLearningAgent:
             self.actions['typeBrackets'] = lambda x, y: TypeAction(type="typeBrackets", x=x, y=y, label="brackets", text=self.randomString('{}[]()', random.randint(1, 3)))
             self.actionBaseWeights.append(config['random_weight_type_brackets'])
             self.actionProbabilityBoostKeywords.append([])
+            hasTypingAction = True
 
         if config['enableRandomMathCommand']:
             self.actions['typeMath'] = lambda x, y: TypeAction(type="typeMath", x=x, y=y, label="symbol", text=self.randomString('*=+<>', random.randint(1, 3)))
             self.actionBaseWeights.append(config['random_weight_type_math'])
             self.actionProbabilityBoostKeywords.append([])
+            hasTypingAction = True
 
         if config['enableRandomOtherSymbolCommand']:
             self.actions['typeOtherSymbol'] = lambda x, y: TypeAction(type="typeOtherSymbol", x=x, y=y, label="symbol", text=self.randomString('"\';:/?,!^&#@', random.randint(1, 3)))
             self.actionBaseWeights.append(config['random_weight_type_other_symbol'])
+            self.actionProbabilityBoostKeywords.append([])
+            hasTypingAction = True
+
+        if hasTypingAction:
+            self.actions['clear'] = lambda x, y: ClearFieldAction(type="clear", x=x, y=y)
+            self.actionBaseWeights.append(config['random_weight_clear'])
             self.actionProbabilityBoostKeywords.append([])
 
         self.elementBaseWeights = {
@@ -752,7 +765,7 @@ class DeepLearningAgent:
 
         return actionX, actionY, actionType
 
-    def createDebugVideoForExecutionSession(self, executionSession):
+    def createDebugVideoForExecutionSession(self, executionSession, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True):
         videoPath = self.config.getKwolaUserDataDirectory("videos")
 
         rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"))
@@ -781,7 +794,7 @@ class DeepLearningAgent:
             futures = []
             for trace, rawImage in zip(executionTraces, rawImages):
                 if trace is not None:
-                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory)
+                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart)
                     futures.append(future)
 
                     debugImageIndex += 2
@@ -800,20 +813,27 @@ class DeepLearningAgent:
 
         return videoData
 
-    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory):
+    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True):
         try:
             trace = ExecutionTrace.from_json(trace)
 
             topSize = 250
-            bottomSize = 250
+            bottomSize = 100
             leftSize = 100
-            rightSize = 1250
-            if len(self.actionsSorted) > 4:
-                rightSize += 250
-            if len(self.actionsSorted) > 8:
-                rightSize += 250
-            if len(self.actionsSorted) > 12:
-                rightSize += 250
+            rightSize = 100
+            if includeNeuralNetworkCharts:
+                rightSize += 1150
+
+                if len(self.actionsSorted) > 4:
+                    rightSize += 250
+                if len(self.actionsSorted) > 8:
+                    rightSize += 250
+                if len(self.actionsSorted) > 12:
+                    rightSize += 250
+
+            if includeNetPresentRewardChart:
+                bottomSize += 150
+
 
             topMargin = 25
 
@@ -1149,8 +1169,10 @@ class DeepLearningAgent:
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
             addCropViewToImage(newImage, trace)
-            addBottomRewardChartToImage(newImage, trace)
-            addRightSideDebugCharts(newImage, lastRawImage, trace)
+            if includeNetPresentRewardChart:
+                addBottomRewardChartToImage(newImage, trace)
+            if includeNeuralNetworkCharts:
+                addRightSideDebugCharts(newImage, lastRawImage, trace)
 
             fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
@@ -1160,8 +1182,10 @@ class DeepLearningAgent:
             addDebugTextToImage(newImage, trace)
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
-            addBottomRewardChartToImage(newImage, trace)
-            addRightSideDebugCharts(newImage, lastRawImage, trace)
+            if includeNetPresentRewardChart:
+                addBottomRewardChartToImage(newImage, trace)
+            if includeNeuralNetworkCharts:
+                addRightSideDebugCharts(newImage, lastRawImage, trace)
 
             fileName = f"kwola-screenshot-{debugImageIndex + 1:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)

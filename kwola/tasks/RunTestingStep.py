@@ -69,18 +69,18 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
         subProcessResultQueue.put(resultFileName)
 
 
-def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId, name=""):
+def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId, name="", includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, folder="debug_videos"):
     config = Configuration(configDir)
 
     agent = DeepLearningAgent(config, whichGpu=None)
     agent.initialize(branchFeatureSize)
     agent.load()
 
-    kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory("debug_videos")
+    kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory(folder)
 
     executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
 
-    videoData = agent.createDebugVideoForExecutionSession(executionSession)
+    videoData = agent.createDebugVideoForExecutionSession(executionSession, includeNeuralNetworkCharts=includeNeuralNetworkCharts, includeNetPresentRewardChart=includeNetPresentRewardChart)
     with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
         cloneFile.write(videoData)
 
@@ -264,6 +264,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         testStep.bugsFound = len(newErrorsThisTestingStep)
         testStep.errors = newErrorsThisTestingStep
 
+        debugVideoSubprocesses = []
+
         print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
         for errorIndex, error, executionSessionId in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds):
             bug = BugModel()
@@ -282,6 +284,11 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 with open(bugVideoFilePath, 'wb') as cloneFile:
                     cloneFile.write(origFile.read())
 
+            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), f"{bug.id}_bug", False, False, "bugs"))
+            debugVideoSubprocess.start()
+            atexit.register(lambda: debugVideoSubprocess.terminate())
+            debugVideoSubprocesses.append(debugVideoSubprocess)
+
             print(datetime.now(), f"[{os.getpid()}]", f"")
             print(datetime.now(), f"[{os.getpid()}]", f"Bug #{errorIndex + 1}:")
             print(datetime.now(), f"[{os.getpid()}]", bug.generateBugText(), flush=True)
@@ -295,21 +302,20 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         testStep.executionSessions = [session.id for session in executionSessions]
         testStep.saveToDisk(config)
 
-        debugVideoSubprocess1 = None
-        debugVideoSubprocess2 = None
-
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
-            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), "prediction"))
+            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), "prediction", True, True, "debug_videos"))
             debugVideoSubprocess1.start()
             atexit.register(lambda: debugVideoSubprocess1.terminate())
+            debugVideoSubprocesses.append(debugVideoSubprocess1)
 
             # Leave a gap between the two to reduce collision
             time.sleep(5)
 
-            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix"))
+            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, "debug_videos"))
             debugVideoSubprocess2.start()
             atexit.register(lambda: debugVideoSubprocess2.terminate())
+            debugVideoSubprocesses.append(debugVideoSubprocess2)
 
         environment.shutdown()
 
@@ -319,10 +325,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             print(datetime.now(), f"[{os.getpid()}]", f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
             addExecutionSessionToSampleCache(session.id, config)
 
-        if debugVideoSubprocess1 is not None:
-            debugVideoSubprocess1.join()
-        if debugVideoSubprocess2 is not None:
-            debugVideoSubprocess2.join()
+        for debugVideoSubprocess in debugVideoSubprocesses:
+            debugVideoSubprocess.join()
 
     except Exception as e:
         traceback.print_exc()

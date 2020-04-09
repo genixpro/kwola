@@ -111,8 +111,8 @@ def getConfigurationDirFromCommandLineArgs():
             needToChange = questionary.select(
                 "Do you want to tune any configuration settings in your Kwola run before proceeding?",
                 choices=[
-                    'yes',
-                    'no'
+                    'no',
+                    'yes'
                 ]).ask()  # returns value of selection
 
             if needToChange == "yes":
