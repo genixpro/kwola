@@ -765,7 +765,7 @@ class DeepLearningAgent:
 
         return actionX, actionY, actionType
 
-    def createDebugVideoForExecutionSession(self, executionSession, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True):
+    def createDebugVideoForExecutionSession(self, executionSession, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None):
         videoPath = self.config.getKwolaUserDataDirectory("videos")
 
         rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"))
@@ -794,7 +794,11 @@ class DeepLearningAgent:
             futures = []
             for trace, rawImage in zip(executionTraces, rawImages):
                 if trace is not None:
-                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart)
+                    hilight = False
+                    if hilightStepNumber is not None and hilightStepNumber == (trace.frameNumber - 1):
+                        hilight = True
+
+                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart, hilight)
                     futures.append(future)
 
                     debugImageIndex += 2
@@ -813,7 +817,7 @@ class DeepLearningAgent:
 
         return videoData
 
-    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True):
+    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilight=False):
         try:
             trace = ExecutionTrace.from_json(trace)
 
@@ -1165,6 +1169,8 @@ class DeepLearningAgent:
             extraHeight = topSize + bottomSize
 
             newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            if hilight:
+                newImage[:, :] = numpy.array([251, 187, 191])
             newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
@@ -1179,6 +1185,8 @@ class DeepLearningAgent:
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
             newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            if hilight:
+                newImage[:, :] = numpy.array([251, 187, 191])
             addDebugTextToImage(newImage, trace)
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage

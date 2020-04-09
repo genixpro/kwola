@@ -69,7 +69,7 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
         subProcessResultQueue.put(resultFileName)
 
 
-def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId, name="", includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, folder="debug_videos"):
+def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId, name="", includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None, folder="debug_videos"):
     config = Configuration(configDir)
 
     agent = DeepLearningAgent(config, whichGpu=None)
@@ -80,7 +80,7 @@ def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId,
 
     executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
 
-    videoData = agent.createDebugVideoForExecutionSession(executionSession, includeNeuralNetworkCharts=includeNeuralNetworkCharts, includeNetPresentRewardChart=includeNetPresentRewardChart)
+    videoData = agent.createDebugVideoForExecutionSession(executionSession, includeNeuralNetworkCharts=includeNeuralNetworkCharts, includeNetPresentRewardChart=includeNetPresentRewardChart, hilightStepNumber=hilightStepNumber)
     with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
         cloneFile.write(videoData)
 
@@ -146,6 +146,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         allKnownErrorHashes = set()
         newErrorsThisTestingStep = []
         newErrorOriginalExecutionSessionIds = []
+        newErrorOriginalStepNumbers = []
 
         bugs = loadAllBugs(config)
         for bug in bugs:
@@ -195,8 +196,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             if stepsRemaining % config['testing_print_every'] == 0:
                 print(datetime.now(), f"[{os.getpid()}]", f"Finished {step + 1} testing actions.", flush=True)
 
-            step += 1
-
             traces = environment.runActions(actions, [executionSession.id for executionSession in executionSessions])
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
                 trace.executionSessionId = str(executionSession.id)
@@ -214,6 +213,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                         allKnownErrorHashes.add(hash)
                         newErrorsThisTestingStep.append(error)
                         newErrorOriginalExecutionSessionIds.append(str(executionSession.id))
+                        newErrorOriginalStepNumbers.append(step)
 
             if config['testing_reset_agent_period'] == 1 or stepsRemaining % config['testing_reset_agent_period'] == (config['testing_reset_agent_period'] - 1):
                 subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses.pop(0)
@@ -236,6 +236,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
                 sampleRecentActions.append(action)
 
+            step += 1
             del traces
             print("", end="", sep="", flush=True)
 
@@ -267,11 +268,12 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         debugVideoSubprocesses = []
 
         print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
-        for errorIndex, error, executionSessionId in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds):
+        for errorIndex, error, executionSessionId, stepNumber in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds, newErrorOriginalStepNumbers):
             bug = BugModel()
             bug.id = CustomIDField.generateNewUUID(BugModel, config)
             bug.testingStepId = testStep.id
             bug.executionSessionId = executionSessionId
+            bug.stepNumber = stepNumber
             bug.error = error
             bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
 
@@ -284,7 +286,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 with open(bugVideoFilePath, 'wb') as cloneFile:
                     cloneFile.write(origFile.read())
 
-            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), f"{bug.id}_bug", False, False, "bugs"))
+            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
             debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)

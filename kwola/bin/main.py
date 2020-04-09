@@ -66,16 +66,30 @@ def getConfigurationDirFromCommandLineArgs():
             configName = questionary.select(
                 "Which configuration do you want to load for your model?",
                 choices=[
-                    'testing',
                     'small',
                     'medium',
-                    'large'
+                    'large',
+                    'testing'
                 ]).ask()  # returns value of selection
 
+            if configName is None:
+                exit(0)
+
             email = questionary.text("What is the email/username you want to use (blank disables this action)?").ask()
+            if email is None:
+                exit(0)
+
             password = questionary.text("What is the password you want to use (blank disables this action)?").ask()
+            if password is None:
+                exit(0)
+
             name = questionary.text("What is the human name / short text you want to use (blank disables this action)?").ask()
+            if name is None:
+                exit(0)
+
             paragraph = questionary.text("What is the paragraph / long text you want to use (blank disables this action)?").ask()
+            if paragraph is None:
+                exit(0)
 
             commandChoices = [
                 "Enable random number command?",
@@ -87,6 +101,8 @@ def getConfigurationDirFromCommandLineArgs():
             ]
 
             results = questionary.checkbox("Please select which commands you want to enable", choices=commandChoices).ask()
+            if results is None:
+                exit(0)
 
             enableRandomNumberCommand = bool(commandChoices[0] in results)
             enableRandomBracketCommand = bool(commandChoices[1] in results)
@@ -131,7 +147,9 @@ def getConfigurationDirFromCommandLineArgs():
             if ready == "no":
                 exit(0)
 
+            print(f"")
             print(f"Starting a fresh Kwola run in directory {configDir} targeting URL {url}")
+            print(f"", flush=True)
         else:
             print(cantStartMessage)
             exit(2)
