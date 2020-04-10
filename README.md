@@ -143,7 +143,7 @@ your terminal. If you want to restart the run, simply run kwola with no argument
 Or alternatively, you can run Kwola and give it a specific directory containing a Kwola run. This
 allows you to restart specific runs.
 
-`[user@localhost]$ kwola kwola_run_0`
+`[user@localhost]$ kwola kwola_run_1`
 
 For example, you can use Kwola with one of our example codebases if you have Docker installed:
 

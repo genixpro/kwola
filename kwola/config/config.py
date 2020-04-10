@@ -97,9 +97,9 @@ class Configuration:
 
     @staticmethod
     def createNewLocalKwolaConfigDir(prebuild, **configArgs):
-        n = 0
+        n = 1
         while True:
-            dirname = f"kwola_results_{n}"
+            dirname = f"kwola_run_{n}"
             if not os.path.exists(dirname):
                 os.mkdir(dirname)
 
