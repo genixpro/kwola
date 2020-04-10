@@ -372,7 +372,7 @@ class DeepLearningAgent:
                     actionTypes.append(self.actionsSorted.index("rightClick"))
 
             if element['canType']:
-                if "rightClick" in self.actionsSorted:
+                if "typeEmail" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("typeEmail"))
                 if "typePassword" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("typePassword"))
