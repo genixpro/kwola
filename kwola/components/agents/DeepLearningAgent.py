@@ -821,25 +821,26 @@ class DeepLearningAgent:
         try:
             trace = ExecutionTrace.from_json(trace)
 
-            topSize = 250
-            bottomSize = 100
-            leftSize = 100
-            rightSize = 100
+            topSize = self.config.debug_video_top_size
+            bottomSize = self.config.debug_video_bottom_size
+            leftSize = self.config.debug_video_left_size
+            rightSize = self.config.debug_video_right_size
             if includeNeuralNetworkCharts:
-                rightSize += 1150
+                rightSize += self.config.debug_video_neural_network_chart_right_size_addition
 
                 if len(self.actionsSorted) > 4:
-                    rightSize += 250
+                    rightSize += self.config.debug_video_neural_network_chart_right_size_addition_per_four_actions
                 if len(self.actionsSorted) > 8:
-                    rightSize += 250
+                    rightSize += self.config.debug_video_neural_network_chart_right_size_addition_per_four_actions
                 if len(self.actionsSorted) > 12:
-                    rightSize += 250
+                    rightSize += self.config.debug_video_neural_network_chart_right_size_addition_per_four_actions
 
             if includeNetPresentRewardChart:
-                bottomSize += 150
+                bottomSize += self.config.debug_video_bottom_reward_chart_height
 
+            chartDPI = self.config.debug_video_chart_dpi
 
-            topMargin = 25
+            debugVideoImageChannels = 3
 
             imageHeight = rawImage.shape[0]
             imageWidth = rawImage.shape[1]
@@ -848,26 +849,26 @@ class DeepLearningAgent:
             discountedFutureReward = discountedFutureRewards[trace.frameNumber - 1]
 
             def addDebugCircleToImage(image, trace):
-                targetCircleCoordsRadius30 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                           int(leftSize + trace.actionPerformed.x), 30,
+                targetCircleCoords1 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                           int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_1_radius,
                                                                            shape=[int(imageWidth + extraWidth),
                                                                                   int(imageHeight + extraHeight)])
-                targetCircleCoordsRadius20 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                           int(leftSize + trace.actionPerformed.x), 20,
+                targetCircleCoords2 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                           int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_2_radius,
                                                                            shape=[int(imageWidth + extraWidth),
                                                                                   int(imageHeight + extraHeight)])
-                targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                           int(leftSize + trace.actionPerformed.x), 10,
+                targetCircleCoords3 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                           int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_3_radius,
                                                                            shape=[int(imageWidth + extraWidth),
                                                                                   int(imageHeight + extraHeight)])
-                targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                          int(leftSize + trace.actionPerformed.x), 5,
+                targetCircleCoords4 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
+                                                                          int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_4_radius,
                                                                           shape=[int(imageWidth + extraWidth),
                                                                                  int(imageHeight + extraHeight)])
-                image[targetCircleCoordsRadius30] = [255, 0, 0]
-                image[targetCircleCoordsRadius20] = [255, 0, 0]
-                image[targetCircleCoordsRadius10] = [255, 0, 0]
-                image[targetCircleCoordsRadius5] = [255, 0, 0]
+                image[targetCircleCoords1] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
+                image[targetCircleCoords2] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
+                image[targetCircleCoords3] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
+                image[targetCircleCoords4] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
 
             def addCropViewToImage(image, trace):
                 imageCropWidth = imageWidth * self.config['model_image_downscale_ratio']
@@ -884,108 +885,115 @@ class DeepLearningAgent:
                 cropBottom = int(cropBottom / self.config['model_image_downscale_ratio'])
 
                 cropRectangle = skimage.draw.rectangle_perimeter((int(topSize + cropTop), int(leftSize + cropLeft)), (int(topSize + cropBottom), int(leftSize + cropRight)))
-                image[cropRectangle] = [255, 0, 0]
+                image[cropRectangle] = [self.config.debug_video_crop_box_color_r, self.config.debug_video_crop_box_color_g, self.config.debug_video_crop_box_color_b]
 
             def addDebugTextToImage(image, trace):
-                fontSize = 0.5
-                fontThickness = 1
+                fontSize = self.config.debug_video_text_font_size
+                fontThickness = self.config.debug_video_text_thickness
                 fontColor = (0, 0, 0)
 
+                topMargin = self.config.debug_video_text_top_margin
+
                 columnOneLeft = leftSize
-                columnTwoLeft = leftSize + 300
-                columnThreeLeft = leftSize + 550
-                lineOneTop = topMargin + 20
-                lineTwoTop = topMargin + 40
-                lineThreeTop = topMargin + 60
-                lineFourTop = topMargin + 80
-                lineFiveTop = topMargin + 100
-                lineSixTop = topMargin + 120
-                lineSevenTop = topMargin + 140
-                lineEightTop = topMargin + 160
-                lineNineTop = topMargin + 180
+                columnTwoLeft = leftSize + self.config.debug_video_text_column_two_left
+                columnThreeLeft = leftSize + self.config.debug_video_text_column_three_left
+                lineOneTop = topMargin + self.config.debug_video_text_line_height
+                lineTwoTop = topMargin + self.config.debug_video_text_line_height * 2
+                lineThreeTop = topMargin + self.config.debug_video_text_line_height * 3
+                lineFourTop = topMargin + self.config.debug_video_text_line_height * 4
+                lineFiveTop = topMargin + self.config.debug_video_text_line_height * 5
+                lineSixTop = topMargin + self.config.debug_video_text_line_height * 6
+                lineSevenTop = topMargin + self.config.debug_video_text_line_height * 7
+                lineEightTop = topMargin + self.config.debug_video_text_line_height * 8
+                lineNineTop = topMargin + self.config.debug_video_text_line_height * 9
 
-                cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize,
-                            fontColor, fontThickness, cv2.LINE_AA)
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                antiAliasingMode = cv2.LINE_AA
 
-                cv2.putText(image, f"{str(executionSessionId)}", (columnOneLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX,
-                            fontSize, fontColor, fontThickness, cv2.LINE_AA)
-                cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), cv2.FONT_HERSHEY_SIMPLEX,
-                            fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), font, fontSize,
+                            fontColor, fontThickness, antiAliasingMode)
+
+                cv2.putText(image, f"{str(executionSessionId)}", (columnOneLeft, lineTwoTop), font,
+                            fontSize, fontColor, fontThickness, antiAliasingMode)
+                cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), font,
+                            fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image,
                             f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}",
-                            (columnOneLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
-                            cv2.LINE_AA)
+                            (columnOneLeft, lineFourTop), font, fontSize, fontColor, fontThickness,
+                            antiAliasingMode)
                 cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"Override: {str(trace.actionPerformed.wasRepeatOverride)}", (columnOneLeft, lineNineTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), cv2.FONT_HERSHEY_SIMPLEX,
-                            fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), font,
+                            fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.3f}",
-                            (columnThreeLeft, lineTwoTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
-                            cv2.LINE_AA)
+                            (columnThreeLeft, lineTwoTop), font, fontSize, fontColor, fontThickness,
+                            antiAliasingMode)
                 cv2.putText(image, f"Present Reward: {(presentReward):.3f}", (columnThreeLeft, lineThreeTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%",
-                            (columnThreeLeft, lineFourTop), cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness,
-                            cv2.LINE_AA)
+                            (columnThreeLeft, lineFourTop), font, fontSize, fontColor, fontThickness,
+                            antiAliasingMode)
 
                 cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
                 cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop),
-                            cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 if trace.actionPerformed.predictedReward:
                     cv2.putText(image, f"Predicted Reward: {(trace.actionPerformed.predictedReward):.3f}", (columnThreeLeft, lineEightTop),
-                                cv2.FONT_HERSHEY_SIMPLEX, fontSize, fontColor, fontThickness, cv2.LINE_AA)
+                                font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
             def addBottomRewardChartToImage(image, trace):
-                rewardChartFigure = plt.figure(figsize=(imageWidth / 100, (bottomSize - 50) / 100), dpi=100)
+                rewardChartFigure = plt.figure(figsize=(imageWidth / chartDPI, (bottomSize - self.config.debug_video_bottom_reward_chart_bottom_margin) / chartDPI), dpi=chartDPI)
                 rewardChartAxes = rewardChartFigure.add_subplot(111)
 
                 xCoords = numpy.array(range(len(presentRewards)))
 
-                rewardChartAxes.set_ylim(ymin=-0.3, ymax=2.0)
+                rewardChartAxes.set_ylim(ymin=self.config.debug_video_reward_min_value, ymax=self.config.debug_video_reward_max_value)
 
                 rewardChartAxes.plot(xCoords, numpy.array(presentRewards) + numpy.array(discountedFutureRewards))
 
-                rewardChartAxes.set_xticks(range(0, len(presentRewards), 5))
-                rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), 5)])
-                rewardChartAxes.set_yticks(numpy.arange(0, 1, 1.0))
-                rewardChartAxes.set_yticklabels(["" for n in range(2)])
+                rewardChartAxes.set_xticks(range(0, len(presentRewards), self.config.debug_video_bottom_reward_chart_x_tick_spacing))
+                rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), self.config.debug_video_bottom_reward_chart_x_tick_spacing)])
+                rewardChartAxes.set_yticks([self.config.debug_video_reward_min_value, self.config.debug_video_reward_max_value])
+                rewardChartAxes.set_yticklabels([f"{self.config.debug_video_reward_min_value:.2f}", f"{self.config.debug_video_reward_max_value:.2f}"])
                 rewardChartAxes.set_title("Net Present Reward")
                 rewardChartFigure.tight_layout()
 
-                rewardChartAxes.set_xlim(xmin=trace.frameNumber - 20, xmax=trace.frameNumber + 20)
-                vline = rewardChartAxes.axvline(trace.frameNumber - 1, color='black', linewidth=2)
+                rewardChartHalfFrames = int(self.config['debug_video_bottom_reward_chart_frames'] / 2)
+
+                rewardChartAxes.set_xlim(xmin=trace.frameNumber - rewardChartHalfFrames, xmax=trace.frameNumber + rewardChartHalfFrames)
+                vline = rewardChartAxes.axvline(trace.frameNumber - 1, color='black', linewidth=self.config.debug_video_bottom_reward_chart_current_frame_line_width)
                 hline = rewardChartAxes.axhline(0, color='grey', linewidth=1)
 
                 # If we haven't already shown or saved the plot, then we need to
@@ -994,16 +1002,16 @@ class DeepLearningAgent:
 
                 # Now we can save it to a numpy array.
                 rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-                rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (3,))
+                rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (debugVideoImageChannels,))
 
-                image[topSize + imageHeight:-50, leftSize:-rightSize] = rewardChart
+                image[topSize + imageHeight:-self.config.debug_video_bottom_reward_chart_bottom_margin, leftSize:-rightSize] = rewardChart
 
                 vline.remove()
                 hline.remove()
                 plt.close(rewardChartFigure)
 
             def addRightSideDebugCharts(plotImage, rawImage, trace):
-                chartTopMargin = 75
+                chartTopMargin = self.config.debug_video_neural_network_chart_top_margin
 
                 neededFigures = 3 + len(self.actionsSorted) * 3
 
@@ -1021,7 +1029,7 @@ class DeepLearningAgent:
                 currentFig = 1
 
                 mainFigure = plt.figure(
-                    figsize=((rightSize) / 100, (imageHeight + bottomSize + topSize - chartTopMargin) / 100), dpi=100)
+                    figsize=((rightSize) / chartDPI, (imageHeight + bottomSize + topSize - chartTopMargin) / chartDPI), dpi=chartDPI)
 
                 rewardPredictionAxes = [
                     mainFigure.add_subplot(numColumns, numRows, actionIndex + currentFig)
@@ -1103,17 +1111,21 @@ class DeepLearningAgent:
                     actionX = int(actionX / self.config["model_image_downscale_ratio"])
                     actionY = int(actionY / self.config["model_image_downscale_ratio"])
 
-                    targetCircleCoordsRadius10 = skimage.draw.circle_perimeter(int(topSize + actionY),
-                                                                               int(leftSize + actionX), 10,
+                    targetCircleCoords1 = skimage.draw.circle_perimeter(int(topSize + actionY),
+                                                                               int(leftSize + actionX), self.config.debug_video_action_prediction_circle_1_radius,
                                                                                shape=[int(imageWidth + extraWidth),
                                                                                       int(imageHeight + extraHeight)])
 
-                    targetCircleCoordsRadius5 = skimage.draw.circle_perimeter(int(topSize + actionY),
-                                                                              int(leftSize + actionX), 5,
+                    targetCircleCoords2 = skimage.draw.circle_perimeter(int(topSize + actionY),
+                                                                              int(leftSize + actionX), self.config.debug_video_action_prediction_circle_2_radius,
                                                                               shape=[int(imageWidth + extraWidth),
                                                                                      int(imageHeight + extraHeight)])
-                    plotImage[targetCircleCoordsRadius10] = [0, 0, 255]
-                    plotImage[targetCircleCoordsRadius5] = [0, 0, 255]
+                    plotImage[targetCircleCoords1] = [self.config.debug_video_action_prediction_circle_color_r,
+                                                             self.config.debug_video_action_prediction_circle_color_g,
+                                                             self.config.debug_video_action_prediction_circle_color_b]
+                    plotImage[targetCircleCoords2] = [self.config.debug_video_action_prediction_circle_color_r,
+                                                             self.config.debug_video_action_prediction_circle_color_g,
+                                                             self.config.debug_video_action_prediction_circle_color_b]
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     maxValue = numpy.max(numpy.array(totalRewardPredictions[0][actionIndex]))
@@ -1121,9 +1133,9 @@ class DeepLearningAgent:
                     rewardPredictionAxes[actionIndex].set_xticks([])
                     rewardPredictionAxes[actionIndex].set_yticks([])
 
-                    rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (4, 4), numpy.max)
+                    rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (squareSize, squareSize), numpy.max)
 
-                    im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=-0.2, vmax=1.5)
+                    im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=self.config.debug_video_reward_min_value, vmax=self.config.debug_video_reward_max_value)
                     rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f} reward")
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
@@ -1133,9 +1145,9 @@ class DeepLearningAgent:
                     advantagePredictionAxes[actionIndex].set_xticks([])
                     advantagePredictionAxes[actionIndex].set_yticks([])
 
-                    advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (4, 4), numpy.max)
+                    advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (squareSize, squareSize), numpy.max)
 
-                    im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=-0.1, vmax=0.1)
+                    im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=self.config.debug_video_advantage_min_value, vmax=self.config.debug_video_advantage_max_value)
                     advantagePredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f} advantage")
                     mainFigure.colorbar(im, ax=advantagePredictionAxes[actionIndex], orientation='vertical')
 
@@ -1145,7 +1157,7 @@ class DeepLearningAgent:
                     actionProbabilityPredictionAxes[actionIndex].set_xticks([])
                     actionProbabilityPredictionAxes[actionIndex].set_yticks([])
 
-                    actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (4, 4), numpy.max)
+                    actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (squareSize, squareSize), numpy.max)
 
                     im = actionProbabilityPredictionAxes[actionIndex].imshow(actionProbabilityPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
                     actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f} prob")
@@ -1162,7 +1174,7 @@ class DeepLearningAgent:
 
                 stateValueAxes.set_xticks([])
                 stateValueAxes.set_yticks([])
-                stateValueIm = stateValueAxes.imshow([stateValue], cmap=mainColorMap, interpolation="nearest", vmin=-0.2, vmax=1.5)
+                stateValueIm = stateValueAxes.imshow([stateValue], cmap=mainColorMap, interpolation="nearest", vmin=self.config.debug_video_reward_min_value, vmax=self.config.debug_video_reward_max_value)
                 mainFigure.colorbar(stateValueIm, ax=stateValueAxes, orientation='vertical')
                 stateValueAxes.set_title(f"State Value {float(stateValue[0]):.3f}")
 
@@ -1172,16 +1184,16 @@ class DeepLearningAgent:
 
                 # Now we can save it to a numpy array and paste it into the image
                 mainChart = numpy.fromstring(mainFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-                mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (3,))
+                mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (debugVideoImageChannels,))
                 plotImage[chartTopMargin:, (-rightSize):] = mainChart
                 plt.close(mainFigure)
 
             extraWidth = leftSize + rightSize
             extraHeight = topSize + bottomSize
 
-            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
             if hilight:
-                newImage[:, :] = numpy.array([251, 187, 191])
+                newImage[:, :] = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
             newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
@@ -1195,9 +1207,9 @@ class DeepLearningAgent:
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
-            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, 3]) * 255
+            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
             if hilight:
-                newImage[:, :] = numpy.array([251, 187, 191])
+                newImage[:, :] = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
             addDebugTextToImage(newImage, trace)
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
