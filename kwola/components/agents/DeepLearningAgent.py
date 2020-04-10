@@ -870,7 +870,18 @@ class DeepLearningAgent:
                 image[targetCircleCoordsRadius5] = [255, 0, 0]
 
             def addCropViewToImage(image, trace):
-                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(trace.actionPerformed.x, trace.actionPerformed.y, imageWidth, imageHeight)
+                imageCropWidth = imageWidth * self.config['model_image_downscale_ratio']
+                imageCropHeight = imageHeight * self.config['model_image_downscale_ratio']
+
+                actionCropX = trace.actionPerformed.x * self.config['model_image_downscale_ratio']
+                actionCropY = trace.actionPerformed.y * self.config['model_image_downscale_ratio']
+
+                cropLeft, cropTop, cropRight, cropBottom = self.calculateTrainingCropPosition(actionCropX, actionCropY, imageCropWidth, imageCropHeight)
+
+                cropLeft = int(cropLeft / self.config['model_image_downscale_ratio'])
+                cropTop = int(cropTop / self.config['model_image_downscale_ratio'])
+                cropRight = int(cropRight / self.config['model_image_downscale_ratio'])
+                cropBottom = int(cropBottom / self.config['model_image_downscale_ratio'])
 
                 cropRectangle = skimage.draw.rectangle_perimeter((int(topSize + cropTop), int(leftSize + cropLeft)), (int(topSize + cropBottom), int(leftSize + cropRight)))
                 image[cropRectangle] = [255, 0, 0]
