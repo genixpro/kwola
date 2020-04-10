@@ -621,6 +621,22 @@ class DeepLearningAgent:
         return [action[1] for action in sortedActions]
 
     def getRandomAction(self, sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap):
+        """
+        This function is used to decide on a totally random action. It uses a somewhat fancy mechanism that involves weighting
+        all of the actions it has available to it based on their html element type. It also will down weight any actions that
+        have been performed recently. Therefore algorithm is incentivized to explore just like the core neural network, its
+        just done using heuristics.
+
+        :param sampleActionRecentActionCounts: This is a list of integers, the same size as sampleActionMaps, that contains the count
+                                               of the number of times that action map has been clicked on the recent actions list.
+                                               Technically speaking, the recent actions list only contains actions since the last
+                                               time the neural network discovered new functionality.
+        :param sampleActionMaps: This is the list of action maps that are currently available for this environment.
+        :param pixelActionMap: This is the pixel action map as prepared by the createPixelActionMap function.
+
+        :return: A tuple containing three values of types (int, int, string). The first two integers are the x,y coordinates and the
+                 string is what action should be performed at those coordinates.
+        """
         width = pixelActionMap.shape[2]
         height = pixelActionMap.shape[1]
 
@@ -662,6 +678,14 @@ class DeepLearningAgent:
 
     @staticmethod
     def computePresentRewards(executionTraces, config):
+        """
+            This method is used to compute the present reward values for a list of execution traces
+
+            :param executionTraces: This is a list of ExecutionTrace objects. They should all be from the same ExecutionSession and should be in order.
+            :param config: An instance of the global configuration object.
+            :return: A list of float values. The list will be the same length as the list of executionTraces passed in, and will contain a single reward
+                     value for each execution trace.
+        """
 
         # First compute the present reward at each time step
         presentRewards = []
@@ -723,6 +747,20 @@ class DeepLearningAgent:
 
     @staticmethod
     def computeDiscountedFutureRewards(executionTraces, config):
+        """
+            This method is used to compute the discounted future rewards for a sequence of execution traces.
+            These are basically the sum of the present rewards except discounted backwards in time by the
+            discount rate given in the configuration file. Although not technically used as labels for training,
+            these are used in the debug videos just to illustrate what you would expect the predicted discunted
+            reward value to be at each time step.
+
+            :param executionTraces: This is a list of ExecutionTrace objects. They should all be from the same ExecutionSession and should be in order.
+            :param config: An instance of the global configuration object.
+            :return: A list of float values. The list will be the same length as the list of executionTraces passed in, and will contain a single
+                     discounted future reward value for each execution trace.
+        """
+
+
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, config)
 
@@ -741,6 +779,13 @@ class DeepLearningAgent:
 
     @staticmethod
     def readVideoFrames(videoFilePath):
+        """
+        This method reads a given video file into a numpy array of images that can then be further manipulated
+
+        :param videoFilePath: This is a path to the video file on the local hard drive.
+        :return: A list containing numpy arrays, a single numpy array for each frame in the video.
+        """
+
         cap = cv2.VideoCapture(videoFilePath)
 
         rawImages = []
@@ -756,6 +801,14 @@ class DeepLearningAgent:
         return rawImages
 
     def getActionInfoTensorsFromRewardMap(self, rewardMapTensor):
+        """
+        This method is used to take a reward image and return back the x,y coordinates and the action type of the highest
+        reward position within that reward image.
+
+        :param rewardMapTensor: A pytorch Tensor in the shape [# of actions, height, width]
+
+        :return: A tuple containing three values, (x, y, actionTypeIndex), all of them being pytorch scalar tensors.
+        """
         width = rewardMapTensor.shape[2]
         height = rewardMapTensor.shape[1]
 
@@ -766,6 +819,18 @@ class DeepLearningAgent:
         return actionX, actionY, actionType
 
     def createDebugVideoForExecutionSession(self, executionSession, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None):
+        """
+            This method is used to generate a debug video for the given execution session.
+
+            :param executionSession: This is an ExecutionSession object.
+            :param includeNeuralNetworkCharts: Whether or not the debug video should contain neural network charts on the right hand side.
+                                               These are optional because they require significantly more CPU power to generate.
+            :param includeNetPresentRewardChart: Whether or not there should be a net present reward chart at the bottom of the deug videos.
+                                                These can also require more CPU and memory to generate so they are strictly optional.
+            :param hilightStepNumber: If there is a specific frame within the video that should be hilighted, (e.g. if you are generating this debug video
+                                      for a bug), then this should be the frame index. A value of None indicates that no frame should be hilighted.
+            :return: Nothing is returned from this function.
+        """
         videoPath = self.config.getKwolaUserDataDirectory("videos")
 
         rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"))
