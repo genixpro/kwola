@@ -691,10 +691,7 @@ class DeepLearningAgent:
 
                 # Here we make use of the lambda functions that were prepared in the constructor,
                 # which map the action string to a function which creates the action object.
-                action = self.actions[self.actionsSorted[actionType]](
-                    int(actionX / modelDownscale),
-                    int(actionY / modelDownscale)
-                )
+                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = "random"
                 action.predictedReward = None
                 action.wasRepeatOverride = False
@@ -769,9 +766,14 @@ class DeepLearningAgent:
                     # Get the reward that was predicted for this action
                     samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
 
+                    # Adjust the x, y coordinates by the downscale ration so that we get x,y coordinates
+                    # on the original, unscaled image
+                    actionX = int(actionX / self.config['model_image_downscale_ratio'])
+                    actionY = int(actionY / self.config['model_image_downscale_ratio'])
+
                     # Here we create an action object using the lambdas. We aren't creating the final action object,
                     # since we do one last check below to ensure this isn't an exact repeat action.
-                    potentialAction = self.actions[self.actionsSorted[actionType]](int(actionX / self.config['model_image_downscale_ratio']), int(actionY / self.config['model_image_downscale_ratio']))
+                    potentialAction = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                     potentialActionMaps = self.getActionMapsIntersectingWithAction(potentialAction, sampleActionMaps)
 
                     # If the network is predicting the same action as it did within the recent turns list, down to the exact pixels
@@ -829,6 +831,12 @@ class DeepLearningAgent:
 
                         source = "weighted_random"
                         samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
+
+                        # Adjust the x, y coordinates by the downscale ration so that we get x,y coordinates
+                        # on the original, unscaled image
+                        actionX = int(actionX / self.config['model_image_downscale_ratio'])
+                        actionY = int(actionY / self.config['model_image_downscale_ratio'])
+
                     except ValueError:
                         # If there is any problem, just override back to a fully random action without predictions involved
                         print(datetime.now(), f"[{os.getpid()}]", "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
@@ -841,7 +849,7 @@ class DeepLearningAgent:
                 # Here we take advantage of the lambda functions prepared in the constructor. We get the lambda function
                 # that is associated with the action type we have selected, and use it to prepare the kwola.datamodels.actions.BaseAction
                 # object.
-                action = self.actions[self.actionsSorted[actionType]](int(actionX / self.config['model_image_downscale_ratio']), int(actionY / self.config['model_image_downscale_ratio']))
+                action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = source
                 action.predictedReward = samplePredictedReward
                 action.actionMapsAvailable = sampleActionMaps
@@ -876,23 +884,42 @@ class DeepLearningAgent:
         :return: A tuple containing three values of types (int, int, string). The first two integers are the x,y coordinates and the
                  string is what action should be performed at those coordinates.
         """
+        # Setup the image width and height as function level variables for convenience
         width = pixelActionMap.shape[2]
         height = pixelActionMap.shape[1]
 
+        # Here we are assigning a weight for each of the action maps available to the network to choose from.
+        # The weights for the action maps are based on what type of HTML element that action map is representing.
         actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, self.elementBaseWeights['other']) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)
 
+        # Use the softmax function to rescale all the weights into probabilities, and then use those probabilities to
+        # choose a random action map from the list.
         chosenActionMapIndex = numpy.random.choice(range(len(sampleActionMaps)), p=scipy.special.softmax(actionMapWeights))
         chosenActionMap = sampleActionMaps[chosenActionMapIndex]
 
+        # Here we choose a random x,y coordinate from within the bounds of the action map.
+        # We also have to compensate for the image downscaling here, since we need to lookup
+        # the possible actions on the downscaled pixel action map
         actionX = random.randint(max(0, int(min(width - 1, chosenActionMap.left * self.config['model_image_downscale_ratio']))),
                                  max(0, int(min(chosenActionMap.right * self.config['model_image_downscale_ratio'] - 1, width - 1))))
         actionY = random.randint(max(0, int(min(height - 1, chosenActionMap.top * self.config['model_image_downscale_ratio']))),
                                  max(0, int(min(chosenActionMap.bottom * self.config['model_image_downscale_ratio'] - 1, height - 1))))
 
+        # Get the list of actions that are allowed at the chosen coordinates
         possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
         possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+        # Create a list containing a weight for each of the possible actions.
+        # The base weights are set in the configuration file and help bias the algroithm towards clicking and away
+        # from typing, since there are significantly more typing actions then clicking ones
         possibleActionWeights = [self.actionBaseWeights[actionIndex] for actionIndex in possibleActionIndexes]
 
+        # Now for each of the possible actions, we have to determine if there were any detected keywords
+        # on the html element that would warrant this action getting a higher probability for this element.
+        # This is used to help the random action selection bias towards performing the correct actions.
+        # e.g. this is used to increase the likelihood of typing in the password in a field that looks
+        # like it should receive the password, or the likelihood of typing in the email on an email input.
+        # Its not that we don't want to try other inputs on those boxes, it just helps if its more common
+        # to do it correctly, as it increases the likelihood of finding subsequent code paths
         possibleActionBoosts = []
         for actionIndex in possibleActionIndexes:
             boostKeywords = self.actionProbabilityBoostKeywords[actionIndex]
@@ -908,12 +935,15 @@ class DeepLearningAgent:
             else:
                 possibleActionBoosts.append(1.0)
 
+        # Now we run the weights for each of the actions through a softmax and use numpy to make a final decision on
+        # what action we should perform at the given pixel
         try:
             actionType = numpy.random.choice(possibleActionIndexes, p=scipy.special.softmax(numpy.array(possibleActionWeights) * numpy.array(possibleActionBoosts)))
         except ValueError:
+            # If something went wrong, well this is very unusual. So we choose a totally random action at large.
             actionType = random.choice(range(len(self.actionsSorted)))
 
-        return actionX, actionY, actionType
+        return int(actionX / self.config['model_image_downscale_ratio']), int(actionY / self.config['model_image_downscale_ratio']), actionType
 
     @staticmethod
     def computePresentRewards(executionTraces, config):
@@ -926,9 +956,13 @@ class DeepLearningAgent:
                      value for each execution trace.
         """
 
-        # First compute the present reward at each time step
+        # We iterate the execution traces and calculate a present reward value for each one
         presentRewards = []
         for trace in executionTraces:
+            # The present reward starts at 0, and depends entirely
+            # on the features of the execution trace. There is a reward
+            # attached to each of the features on the execution trace
+            # object, which all get summed together here.
             tracePresentReward = 0.0
 
             if trace.didActionSucceed:
@@ -999,11 +1033,17 @@ class DeepLearningAgent:
                      discounted future reward value for each execution trace.
         """
 
-
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, config)
 
         # Now compute the discounted reward
+        # The easiest way to do this is to just reverse
+        # the list, since we are computing values that are
+        # based on the future of each trace. On this reversed
+        # list, we compute what is effectively an exponential
+        # decaying sum - constantly decaying whats already
+        # there and adding in the present reward for the frames
+        # moving forward.
         discountedFutureRewards = []
         presentRewards.reverse()
         current = 0
@@ -1012,6 +1052,8 @@ class DeepLearningAgent:
             discountedFutureRewards.append(current)
             current += reward
 
+        # We just have to reverse the list again once we are doing and
+        # we get a result in the same order as the original list.
         discountedFutureRewards.reverse()
 
         return discountedFutureRewards
@@ -1025,18 +1067,23 @@ class DeepLearningAgent:
         :return: A list containing numpy arrays, a single numpy array for each frame in the video.
         """
 
+        # Use OpenCV to read the video file. The extra big dependency here is annoying but I haven't dug deeply
+        # into other libraries that can load videos into numpy arrays
         cap = cv2.VideoCapture(videoFilePath)
 
         rawImages = []
 
+        # We basically just keep looping until we have loaded all of the frames.
         while (cap.isOpened()):
             ret, rawImage = cap.read()
             if ret:
-                rawImage = numpy.flip(rawImage, axis=2)  # OpenCV reads everything in BGR format for some reason so flip to RGB
+                # OpenCV reads everything in BGR format for some reason so flip to RGB
+                rawImage = numpy.flip(rawImage, axis=2)
                 rawImages.append(rawImage)
             else:
                 break
 
+        # Return the list of frames
         return rawImages
 
     def getActionInfoTensorsFromRewardMap(self, rewardMapTensor):
@@ -1051,6 +1098,11 @@ class DeepLearningAgent:
         width = rewardMapTensor.shape[2]
         height = rewardMapTensor.shape[1]
 
+        # Basically, what we are doing here is determining the indices of the maximum value one dimension at a time
+        # This code is meant to work no matter what ordering the underlying tensors are being stored in, which I'm
+        # unsure of. So instead, we just reshape to the first dimension, use argmax to determine the max value there,
+        # then home into the subsequent dimensions and repeat the process to determine all of the indices leading to
+        # the maximum value in the whole tensor.
         actionType = rewardMapTensor.reshape([len(self.actionsSorted), width * height]).max(dim=1)[0].argmax(0)
         actionY = rewardMapTensor[actionType].max(dim=1)[0].argmax(0)
         actionX = rewardMapTensor[actionType, actionY].argmax(0)
@@ -1610,9 +1662,12 @@ class DeepLearningAgent:
             cropWidth = self.config['training_next_step_crop_width']
             cropHeight = self.config['training_next_step_crop_height']
 
+        # Find the left and top positions that are centered on the given center coordinates
         cropLeft = centerX - cropWidth / 2
         cropTop = centerY - cropHeight / 2
 
+        # Here we make sure that the left and top positions actually fit within the image, and we adjust them
+        # so that the cropped image stays within the bounds of the overall image
         cropLeft = max(0, cropLeft)
         cropLeft = min(imageWidth - cropWidth, cropLeft)
         cropLeft = int(cropLeft)
@@ -1621,9 +1676,11 @@ class DeepLearningAgent:
         cropTop = min(imageHeight - cropHeight, cropTop)
         cropTop = int(cropTop)
 
+        # Right and bottom coordinates are a cinch once we know left and top
         cropRight = int(cropLeft + cropWidth)
         cropBottom = int(cropTop + cropHeight)
 
+        # Return a tuple with all of the bounds
         return (cropLeft, cropTop, cropRight, cropBottom)
 
 
