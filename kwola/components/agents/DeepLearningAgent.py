@@ -1873,11 +1873,21 @@ class DeepLearningAgent:
                         sampleLosses
                     )
         """
+        # Create some variables here to hold loss tensors and results for each batch
         totalLosses = []
         batchResultTensors = []
+
+        # Zero out all of the gradients. We want to do this here because we are about to do
+        # multiple backward passes before we use the optimizer to update the network parameters.
+        # Therefore we zero it beforehand so we can accumulate the gradients from multiple
+        # batches.
         self.optimizer.zero_grad()
 
         for batch in batches:
+            # Here we create torch tensors out of literally all possible data we will need to do any calculations.
+            # The reason its done all upfront like this is because this allows the code to pipeline the data it
+            # is sending into the GPU. This ensures that all of the GPU calculations are done without any interruptions
+            # due to the python coding needing to send data to the GPU
             rewardPixelMasks = self.variableWrapperFunc(torch.IntTensor, batch['rewardPixelMasks'])
             pixelActionMaps = self.variableWrapperFunc(torch.IntTensor, batch['pixelActionMaps'])
             nextStatePixelActionMaps = self.variableWrapperFunc(torch.IntTensor, batch['nextPixelActionMaps'])
@@ -1906,6 +1916,7 @@ class DeepLearningAgent:
             nextAdditionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextAdditionalFeatures']))
             nextStepNumbers = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextStepNumbers']))
 
+            # Only create the following tensors if the loss is actually enabled for them
             if self.config['enable_trace_prediction_loss']:
                 futureBranchTracesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['futureBranchTraces'])
             else:
@@ -1921,6 +1932,8 @@ class DeepLearningAgent:
             else:
                 cursorsTensor = None
 
+            # Run the current images & states through the neural network and get
+            # all of the various predictions
             currentStateOutputs = self.modelParallel({
                 "image": processedImagesTensor,
                 "additionalFeature": additionalFeaturesTensor,
@@ -1937,6 +1950,8 @@ class DeepLearningAgent:
                 "computeRewards": True
             })
 
+            # Here we just create some convenient local variables for each of the outputs
+            # from the neural network
             presentRewardPredictions = currentStateOutputs['presentRewards']
             discountedFutureRewardPredictions = currentStateOutputs['discountFutureRewards']
             stateValuePredictions = currentStateOutputs['stateValues']
@@ -1944,6 +1959,10 @@ class DeepLearningAgent:
             actionProbabilityPredictions = currentStateOutputs['actionProbabilities']
 
             with torch.no_grad():
+                # Here we use the target network to get the predictions made on the next state.
+                # This is part of a key mechanism in Q-learning, which is to calculate the discounted
+                # reward value for my current action assuming that I take the best possible action
+                # on the next step.
                 nextStateOutputs = self.targetNetwork({
                     "image": nextProcessedImagesTensor,
                     "additionalFeature": nextAdditionalFeaturesTensor,
@@ -1957,9 +1976,12 @@ class DeepLearningAgent:
                     "computeRewards": True
                 })
 
+                # Again create some convenient local variables for the outputs from the target network.
                 nextStatePresentRewardPredictions = nextStateOutputs['presentRewards']
                 nextStateDiscountedFutureRewardPredictions = nextStateOutputs['discountFutureRewards']
 
+            # Here we create a bunch of lists to store the loss tensors for each of the samples within the batch.
+            # We process each sample separately just because it makes the math more straightforward
             totalSampleLosses = []
             stateValueLosses = []
             advantageLosses = []
@@ -1968,33 +1990,56 @@ class DeepLearningAgent:
             targetHomogenizationLosses = []
             discountedFutureRewardLosses = []
 
+            # Here we just zip together all of the various data for each sample in this batch, so that we can iterate
+            # over all of it at the same time and process each sample in the batch separately
             zippedValues = zip(range(len(presentRewardPredictions)), presentRewardPredictions, discountedFutureRewardPredictions,
                                nextStatePresentRewardPredictions, nextStateDiscountedFutureRewardPredictions,
                                rewardPixelMasks, presentRewardsTensor, stateValuePredictions, advantagePredictions,
                                batch['actionTypes'], batch['actionXs'], batch['actionYs'],
                                pixelActionMaps, actionProbabilityPredictions, batch['processedImages'])
 
+            # Here we are just iterating over all of the relevant data and tensors for each sample in the batch
             for sampleIndex, presentRewardImage, discountedFutureRewardImage, \
                 nextStatePresentRewardImage, nextStateDiscountedFutureRewardImage, \
                 rewardPixelMask, presentReward, stateValuePrediction, advantageImage, \
                 actionType, actionX, actionY, pixelActionMap, actionProbabilityImage, processedImage in zippedValues:
 
+                # Here, we fetch out the reward and advantage images associated with the action that the AI actually
+                # took in the trace. We then multiply by the reward pixel mask. This gives us a reward image that only
+                # has values in the area covering the HTML element the algorithm actually touched with its action
+                # at this step.
                 presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
                 discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
                 advantageMasked = advantageImage[self.actionsSorted.index(actionType)] * rewardPixelMask
 
-                nextStatePresentRewardsMasked = nextStatePresentRewardImage
-                nextStateDiscountedFutureRewardsMasked = nextStateDiscountedFutureRewardImage
-                nextStateBestPossibleTotalReward = torch.max(nextStatePresentRewardsMasked + nextStateDiscountedFutureRewardsMasked)
-
+                # Here, we compute the best possible action we can take in the subsequent step from this one, and what is
+                # its reward. This gives us the value for the discounted future reward, e.g. what is the reward that
+                # the action we took in this sequence, could lead to in the future.
+                nextStateBestPossibleTotalReward = torch.max(nextStatePresentRewardImage + nextStateDiscountedFutureRewardImage)
                 discountedFutureReward = nextStateBestPossibleTotalReward * discountRate
 
-                torchBatchPresentRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * presentReward * rewardPixelMask
-                torchBatchDiscountedFutureRewards = torch.ones_like(discountedFutureRewardImage[self.actionsSorted.index(actionType)]) * discountedFutureReward * rewardPixelMask
+                # Here we are basically calculating the target images. E.g., this is what we want the neural network to be predicting as outputs.
+                # For the present reward, we want the neural network to predict the exact present reward value that we have for this execution trace.
+                # For the discounted future reward, we use the above calculated value which is based on the best possible action it could take
+                # in the next step after this one.
+                # In both cases, the image is constructed with the same mask that the reward images were masked with above. This ensures that we
+                # are only updating the values for the pixels of the html element the algo actually clicked on
+                targetPresentRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * presentReward * rewardPixelMask
+                targetDiscountedFutureRewards = torch.ones_like(discountedFutureRewardImage[self.actionsSorted.index(actionType)]) * discountedFutureReward * rewardPixelMask
 
+                # We basically do the same with the advantage to create the target advantage image, and again its multiplied by the same
+                # pixel mask. The difference with advantage is that the advantage is updated to be the difference between the predicted reward
+                # value for the action we took v.s. the average reward value no matter what action we take. E.g. its a measure of how much
+                # better a particular action is versus the average action.
                 targetAdvantage = ((presentReward.detach() + discountedFutureReward.detach()) - stateValuePrediction.detach())
                 targetAdvantageImage = torch.ones_like(advantageImage[self.actionsSorted.index(actionType)]) * targetAdvantage * rewardPixelMask
 
+                # Now to train the "actor" in the actor critic model, we have to do something different. Instead of
+                # training the actor to predict how much better / worse particular actions are versus other actions,
+                # now we just straight up train the actor to predict what is the best action it should take when its
+                # in a given state. Therefore, we use the advantage calculations to determine what is the best action
+                # to take. We then construct a target image which basically has a square of 1's on the location the
+                # AI should click and 0's everywhere else.
                 bestActionX, bestActionY, bestActionType = self.getActionInfoTensorsFromRewardMap(advantageImage.detach())
                 actionProbabilityTargetImage = torch.zeros_like(actionProbabilityImage)
                 bestLeft = torch.max(bestActionX - actionProbRewardSquareEdgeHalfSize, zeroTensor)
@@ -2010,17 +2055,25 @@ class DeepLearningAgent:
                 # The max here is just for safety, if any weird bugs happen we don't want any NaN values or division by zero
                 countPixelMask = torch.max(oneTensorLong, rewardPixelMask.sum())
 
-                presentRewardLossMap = (torchBatchPresentRewards - presentRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
-                discountedFutureRewardLossMap = (torchBatchDiscountedFutureRewards - discountedFutureRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
+                # Now here we create tensors which represent the different between the predictions of the neural network and
+                # our target values that were all calculated above.
+                presentRewardLossMap = (targetPresentRewards - presentRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
+                discountedFutureRewardLossMap = (targetDiscountedFutureRewards - discountedFutureRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
                 advantageLossMap = (targetAdvantageImage - advantageMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
                 actionProbabilityLossMap = (actionProbabilityTargetImage - actionProbabilityImage) * pixelActionMap
 
+                # Here we compute an average loss value for all pixels in the reward pixel mask.
                 presentRewardLoss = presentRewardLossMap.pow(2).sum() / countPixelMask
                 discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
                 advantageLoss = advantageLossMap.pow(2).sum() / countPixelMask
                 actionProbabilityLoss = actionProbabilityLossMap.abs().sum()
+                # Additionally, we calculate a loss for the 'state' value, which is the average value the neural network
+                # is expected to produce no matter what action it takes. We calculate a loss but the assumption is that
+                # the network could never actually calculate this perfectly accurately. It just serves as a barometer
+                # that allows us to calculate the advantage values.
                 stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2)
 
+                # Here we calculate the homogenization loss if it is enabled.
                 if self.config['enable_homogenization_loss']:
                     pixelFeatureImage = currentStateOutputs['pixelFeatureMap'][sampleIndex]
 
@@ -2032,12 +2085,16 @@ class DeepLearningAgent:
                     targetHomogenizationLoss = targetHomogenizationLoss * homogenizationLossWeightFloat
                     targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
 
+                # Now we multiply each of the various losses by their weights. These weights are just
+                # used to balance the losses against each other, since they have varying absolute magnitudes and
+                # varying importance
                 presentRewardLoss = presentRewardLoss * presentRewardLossWeightFloat
                 discountedFutureRewardLoss = discountedFutureRewardLoss * discountedFutureRewardLossWeightFloat
                 advantageLoss = advantageLoss * advantageLossWeightFloat
                 actionProbabilityLoss = actionProbabilityLoss * actionProbabilityLossWeightFloat
                 stateValueLoss = stateValueLoss * stateValueLossWeightFloat
 
+                # Now we add a scalar tensor for each of the loss values into the lists
                 presentRewardLosses.append(presentRewardLoss.unsqueeze(0))
                 discountedFutureRewardLosses.append(discountedFutureRewardLoss.unsqueeze(0))
                 advantageLosses.append(advantageLoss.unsqueeze(0))
@@ -2047,45 +2104,61 @@ class DeepLearningAgent:
 
             extraLosses = []
 
+            # If the trace prediction loss is enabled, then we calculate it and add it to the list of extra losses.
+            # These extra or secondary losses are just here to help stabilize / regularize the neural network and
+            # help it to train faster.
             if self.config['enable_trace_prediction_loss']:
                 tracePredictionLoss = (currentStateOutputs['predictedTraces'] - futureBranchTracesTensor).abs().mean() * executionTraceLossWeightFloat
                 extraLosses.append(tracePredictionLoss.unsqueeze(0))
             else:
                 tracePredictionLoss = zeroTensor
 
+            # If the execution feature prediction is enabled, then we calculate the loss for it and add it to the list of extra losses.
             if self.config['enable_execution_feature_prediction_loss']:
                 predictedExecutionFeaturesLoss = (currentStateOutputs['predictedExecutionFeatures'] - executionFeaturesTensor).abs().mean() * executionFeatureLossWeightFloat
                 extraLosses.append(predictedExecutionFeaturesLoss.unsqueeze(0))
             else:
                 predictedExecutionFeaturesLoss = zeroTensor
 
+            # If the cursor prediction is enabled, then we calculate the loss for it and add it to the list of extra losses.
             if self.config['enable_cursor_prediction_loss']:
                 predictedCursorLoss = (currentStateOutputs['predictedCursor'] - cursorsTensor).abs().mean() * cursorPredictionLossWeightFloat
                 extraLosses.append(predictedCursorLoss.unsqueeze(0))
             else:
                 predictedCursorLoss = zeroTensor
 
+            # Here we calculate the mean value for all of the losses across all of the various samples
             presentRewardLoss = torch.mean(torch.cat(presentRewardLosses))
             discountedFutureRewardLoss = torch.mean(torch.cat(discountedFutureRewardLosses))
             stateValueLoss = torch.mean(torch.cat(stateValueLosses))
             advantageLoss = torch.mean(torch.cat(advantageLosses))
             actionProbabilityLoss = torch.mean(torch.cat(actionProbabilityLosses))
+
+            # This is the final, total loss for all different loss functions across all the different samples
             totalRewardLoss = presentRewardLoss + discountedFutureRewardLoss + stateValueLoss + advantageLoss + actionProbabilityLoss
 
+            # Add in the average homogenization loss if that is enabled
             if self.config['enable_homogenization_loss']:
                 targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
                 extraLosses.append(targetHomogenizationLoss.unsqueeze(0))
             else:
                 targetHomogenizationLoss = zeroTensor
 
+            # We do a check here because if there are no extra loss functions, then
+            # torch will give us an error saying we are concatenating and summing an
+            # empty tensor, which is true.
             if len(extraLosses) > 0:
                 totalLoss = totalRewardLoss + torch.sum(torch.cat(extraLosses))
             else:
                 totalLoss = totalRewardLoss
 
-            totalRebalancedLoss = None
+            totalRebalancedLoss = 0
 
+            # Do the backward pass. This will accumulate gradient values for all of the
+            # parameters in the neural network
             totalLoss.backward()
+
+            # Add the total loss for this batch to the list of batch losses.
             totalLosses.append(totalLoss)
 
             batchResultTensors.append((
@@ -2107,8 +2180,13 @@ class DeepLearningAgent:
 
         # Put a check in so that we don't do the optimizer step if there are NaNs in the loss
         if numpy.count_nonzero(numpy.isnan([totalLoss.data.item() for totalLoss in totalLosses])) == 0:
+            # Now we use the optimizer to update all of the parameters of the neural network.
+            # The optimizer will update based on all of the accumulated gradients from the loops above.
             self.optimizer.step()
         else:
+            # This else statement should only happen if there is a significant error in the neural network
+            # itself that is leading to NaN values in the results. So here, we print out all of the loss
+            # values for all of the batchs to help you track down where the error is.
             print(datetime.now(), f"[{os.getpid()}]", "ERROR! NaN detected in loss calculation. Skipping optimization step.")
             for batchIndex, batchResult in batchResultTensors:
                 presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
@@ -2131,12 +2209,17 @@ class DeepLearningAgent:
 
         batchResults = []
 
+        # Now, we have to loop back over all of the batches, and prepare the result arrays we are going
+        # to provide as return values
         for batchResult in batchResultTensors:
             presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
             advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
             targetHomogenizationLoss, predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
             totalSampleLosses, batch = batchResult
 
+            # We cast all of the torch tensors into Python float objects.
+            # In the process, the tensors will all get moved from the GPU
+            # into the CPU.
             totalRewardLoss = float(totalRewardLoss.data.item())
             presentRewardLoss = float(presentRewardLoss.data.item())
             discountedFutureRewardLoss = float(discountedFutureRewardLoss.data.item())
@@ -2153,10 +2236,15 @@ class DeepLearningAgent:
             else:
                 totalRebalancedLoss = 0
 
+            # Calculate the total present reward in the batch
             batchReward = float(numpy.sum(batch['presentRewards']))
 
+            # Create a list which has the reward losses broken down by sample, instead of by loss type.
+            # This is used in other code to prioritize which samples get trained on by selecting the
+            # ones with the highest loss values more often then the ones with lower loss values.
             sampleLosses = [tensor.data.item() for tensor in totalSampleLosses]
 
+            # Accumulate the giant tuple of values into the results list.
             batchResults.append((totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss,
                                  predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleLosses))
         return batchResults
@@ -2172,11 +2260,14 @@ class DeepLearningAgent:
             :param config: The global configuration object
             :return: A new numpy array, in the shape [1, height, width] containing the processed image data.
         """
+        # Create local variables for convenince
         width = rawImage.shape[1]
         height = rawImage.shape[0]
 
+        # Convert the RGB image into greyscale
         grey = skimage.color.rgb2gray(rawImage[:, :, :3])
 
+        # Compute what the size of the image should look like after downscaling.
         shrunkWidth = int(width * config['model_image_downscale_ratio'])
         shrunkHeight = int(height * config['model_image_downscale_ratio'])
 
@@ -2191,12 +2282,15 @@ class DeepLearningAgent:
         if (shrunkHeight % 8) > 0:
             shrunkHeight += 8 - (shrunkHeight % 8)
 
+        # Resize the image to the selected width and height
         shrunk = skimage.transform.resize(grey, (shrunkHeight, shrunkWidth), anti_aliasing=True)
 
-        # Convert to grey-scale image
+        # Convert to a numpy array.
         processedImage = numpy.array([shrunk])
 
-        # Round the float values down to 0. This minimizes some the error introduced by the video codecs
+        # Round the float values down to 0. This minimizes the range of possible values
+        # and can help make the runs more reproducible even in light of error due to the
+        # video codec.
         processedImage = numpy.around(processedImage, decimals=2)
 
         return processedImage
