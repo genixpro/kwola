@@ -296,7 +296,8 @@ class DeepLearningAgent:
             # The target network is a copy of the primary neural network
             # That is used to predict the future reward values, serving as a target
             # for the updates made to the main model.
-            self.targetNetwork.load_state_dict(stateDict)
+            if self.targetNetwork is not None:
+                self.targetNetwork.load_state_dict(stateDict)
 
     def save(self, saveName=""):
         """
@@ -624,6 +625,7 @@ class DeepLearningAgent:
 
             traceList.reverse()
             sampleRecentActions.reverse()
+            recentActions.append(sampleRecentActions)
 
         # Declare function level width and height variables for convenience.
         width = processedImages.shape[3]
@@ -1264,7 +1266,7 @@ class DeepLearningAgent:
 
             def addDebugTextToImage(image, trace):
                 fontSize = self.config.debug_video_text_font_size
-                fontThickness = self.config.debug_video_text_thickness
+                fontThickness = int(self.config.debug_video_text_thickness)
                 fontColor = (0, 0, 0)
 
                 topMargin = self.config.debug_video_text_top_margin

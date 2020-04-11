@@ -277,7 +277,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 with open(bugVideoFilePath, 'wb') as cloneFile:
                     cloneFile.write(origFile.read())
 
-            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
+            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
             debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)

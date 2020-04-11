@@ -475,7 +475,7 @@ def saveExecutionTraceWeightData(traceWeightData, configDir):
 
     weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceWeightData['id'] + ".json")
 
-    with open(weightFile, "rw") as f:
+    with open(weightFile, "wt") as f:
         json.dump(f, traceWeightData)
 
 
