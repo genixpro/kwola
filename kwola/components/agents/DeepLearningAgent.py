@@ -533,30 +533,49 @@ class DeepLearningAgent:
         """
         modelDownscale = self.config['model_image_downscale_ratio']
 
+        # Create variables to build up the filtered list of action maps
         filteredSampleActionMaps = []
         filteredSampleActionRecentActionCounts = []
+
+        # Iterate through each of the action maps
         for map in sampleActionMaps:
             # Check to see if the map is out of the screen
             if (map.top * modelDownscale) > height or (map.bottom * modelDownscale) < 0 or (map.left * modelDownscale) > width or (map.right * modelDownscale) < 0:
-                # skip this action map, don't add it to the filtered list
+                # If so, skip this action map, don't add it to the filtered list
                 continue
 
+            # If the action map is on the screen, then now we count how many times we see an action on the recent actions list which
+            # overlaps with this action-map. The overlap logic is handled in map.doesOverlapWith, and its a bit of an approximate,
+            # heuristic match. Technically there is no way in html to determine if an HTML element now is the same as the HTML element
+            # we saw a few frames ago. So instead we do this approximate match that checks to see of the left, right, top and bottom bounds
+            # line up, and whether its the same element type with the same properties. If all these things are true, then we assume its the
+            # same action map.
             count = 0
             for recentAction in sampleRecentActions:
                 for recentActionMap in self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable):
                     if map.doesOverlapWith(recentActionMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
                         count += 1
                         break
+
+            # We only add the action map to the list of filtered action maps if we have seen few actions on the recent actions list that
+            # appear to be the same action. Basically, this whole giant mechanism is here just to prevent he algorithm from repeatedly
+            # doing the same thing over and over and over again, which it is prone to do sometimes when it is stuck. This mechanism
+            # forces the algorithm to explore.
             if count < self.config['testing_max_repeat_action_maps_without_new_branches']:
                 filteredSampleActionMaps.append(map)
                 filteredSampleActionRecentActionCounts.append(count)
 
+        # Now we have a special check here. If there are literally no action maps that survived the filtering, then the algorithm
+        # is in a pretty dire position. It has completely exhausted all of the actions available to it and nothing has lead to new
+        # code being executed. In this instance, we have no choice but to just return the full list of action maps unfiltered, since
+        # we can not return an empty list with 0 actions.
         if len(filteredSampleActionMaps) > 0:
             sampleActionMaps = filteredSampleActionMaps
             sampleActionRecentActionCounts = filteredSampleActionRecentActionCounts
         else:
             sampleActionRecentActionCounts = [1] * len(sampleActionMaps)
 
+        # Return a tuple
         return sampleActionMaps, sampleActionRecentActionCounts
 
 
@@ -582,9 +601,17 @@ class DeepLearningAgent:
                                    predictions of the machine learning algorithm.
             :return:
         """
+        # Process all of the images
         processedImages = self.processImages(rawImages)
         actions = []
 
+        # Here we have a pretty important mechanism. The name "recentActions" is a bit of a misnomer,
+        # and we should probably come up with a new variable name. Basically, what we are doing here
+        # is coming up with the list of actions since the last time the algorithm got the big reward -
+        # which is triggering new branches of the code to be executed. We can see whether the algorithm
+        # is stuck and is performing a lot of actions to find the next reward, or whether it is performing
+        # effectively to trigger all of the code to get executed. The "recentActions" is thus a list
+        # of all the actions it has tried since the last time it has triggered new code to be executed.
         recentActions = []
         for traceList in pastExecutionTraces:
             sampleRecentActions = []
@@ -598,9 +625,16 @@ class DeepLearningAgent:
             traceList.reverse()
             sampleRecentActions.reverse()
 
+        # Declare function level width and height variables for convenience.
         width = processedImages.shape[3]
         height = processedImages.shape[2]
 
+        # Here we set up a bunch of arrays to store the samples that we want to process.
+        # This can get a bit convoluted but basically what we are doing here is separating
+        # which of the sub-environments we want to process through the neural network,
+        # and which ones can just have a random action generated for them. These lists
+        # hold all the data required for the sub-environments we are going to process through
+        # the neural network
         batchSampleIndexes = []
         imageBatch = []
         additionalFeatureVectorBatch = []
@@ -613,13 +647,36 @@ class DeepLearningAgent:
         modelDownscale = self.config['model_image_downscale_ratio']
 
         for sampleIndex, image, additionalFeatureVector, sampleActionMaps, sampleRecentActions in zip(range(len(processedImages)), processedImages, additionalFeatures, envActionMaps, recentActions):
+            # Ok here is a very important mechanism. Technically what is being calculated below is the "epsilon" value from classical
+            # Q-learning. I'm just giving it a different name which suits my style. The "epsilon" is just the probability that the
+            # algorithm will choose a random action instead of the prediction. In our situation, we have two values, because we have
+            # both a pure random and a weighted random mechanism.
+            # Usually, the epsilon would be given a sliding exponential curve, starting at a value indicating lots of random actions,
+            # and steadily sliding to a value indicating mostly using the prediction. This is not suitable for Kwola for a few reasons,
+            # one of them being that Kwola is focused on online learning, and so we want Kwola to be able to adapt to unpredictable changes in
+            # the environment. So instead, what we do here is we run multiple different probabilities in parallel. Say you are running 12 execution
+            # sessions in parallel. What we do is we give a range of epsilon values, from ones close to 0, indicating to use the predictions,
+            # to ones close to 1, indicating use mostly random actions. This means we are always running a range of epsilon values at the same time.
+            # Additionally, we change the epsilon value along the sequence too. The logic here is that, in our use case, the neural network tends
+            # to find lots of new branches of code early on, but then have a harder and harder time as the sequence progresses. Therefore its predictions
+            # are more accurate and valuable at the start, and towards the end it needs to explore more to tease out those last few branches of the
+            # code.
+            # Therefore we make the following two equations which basically combine these two mechanisms to compute the epsilon values for the
+            # algorithm.
             randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.config['testing_sequence_length']))
             weightedRandomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.config['testing_sequence_length']))
 
+            # Filter the action maps to reduce instances where the algorithm is repeating itself over and over again.
             sampleActionMaps, sampleActionRecentActionCounts = self.filterActionMapsToPreventRepeatActions(sampleActionMaps, sampleRecentActions, width, height)
+
+            # Create the pixel action map, which is basically a pixel by pixel representation of what actions are available to the algorithm.
             pixelActionMap = self.createPixelActionMap(sampleActionMaps, height, width)
 
+            # Here is where the algorithm decides whether it will use a random action here
+            # or make use of the predictions of the neural network
             if random.random() > randomActionProbability and not shouldBeRandom:
+                # We will make use of the predictions of the neural network.
+                # Add this sample to all of the lists that will be processed later
                 batchSampleIndexes.append(sampleIndex)
                 imageBatch.append(image)
                 additionalFeatureVectorBatch.append(additionalFeatureVector)
@@ -629,8 +686,11 @@ class DeepLearningAgent:
                 epsilonsPerSample.append(weightedRandomActionProbability)
                 recentActionsCountsBatch.append(sampleActionRecentActionCounts)
             else:
+                # We will generate a pure random action for this sample. In that case, we just do it, generating the random action
                 actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap)
 
+                # Here we make use of the lambda functions that were prepared in the constructor,
+                # which map the action string to a function which creates the action object.
                 action = self.actions[self.actionsSorted[actionType]](
                     int(actionX / modelDownscale),
                     int(actionY / modelDownscale)
@@ -639,17 +699,33 @@ class DeepLearningAgent:
                 action.predictedReward = None
                 action.wasRepeatOverride = False
                 action.actionMapsAvailable = sampleActionMaps
+
+                # Its probably important to recognize what is happening here. Since we are processing the samples bound for the neural network
+                # separately from the samples that we generate random actions for, we will need some way of reassembling all of the results
+                # back into a list in the same order as the original list. Therefore, when we add an action to this actions list,
+                # we add it along with the index of the sample, so that we can later sort the actions list by that sample index and restore
+                # the original ordering.
                 actions.append((sampleIndex, action))
 
+        # Special catch here on the if statement. We dont need to perform any calculations
+        # through the neural network if literally all the actions chosen were random. This
+        # doesn't happen very often but in rare circumstances it can and we prepare for that here.
         if len(imageBatch) > 0:
+            # Create torch tensors out of the numpy arrays, effectively preparing the data for input into the neural network.
             imageTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(imageBatch))
             additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(additionalFeatureVectorBatch))
             pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor, pixelActionMapsBatch)
             stepNumberTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array([stepNumber] * len(imageBatch)))
 
+            # Here we set torch not to calculate any gradients. Technically we don't do the backward step anyhow, but
+            # adding this line helps reduce memory usage I think
             with torch.no_grad():
+                # Put the model in evaluation model. If you don't do this, the BatchNormalization layers will act in weird
+                # ways that alter depending on the size of the batch here, which is inherently random. Putting the model
+                # in evaluation mode ensures nice, clean, consistent, reproducible runs.
                 self.model.eval()
 
+                # Here we go! Here we are now finally putting data into the neural network and processing it.
                 outputs = self.modelParallel({
                     "image": imageTensor,
                     "additionalFeature": additionalFeatureTensor,
@@ -663,12 +739,17 @@ class DeepLearningAgent:
                     "computeAdvantageValues": True
                 })
 
+                # Here we move the tensors into the CPU. Technically this is only needed if you are doing testing using your
+                # GPU, but you can run the same code either way so we do it here to be safe.
                 actionProbabilities = outputs['actionProbabilities'].cpu()
-                # actionProbabilities = outputs['advantage'].cpu()
+                advantageValues = outputs['advantage'].cpu()
 
-            for sampleIndex, sampleEpsilon, sampleActionProbs, sampleRecentActions, sampleActionMaps, sampleActionRecentActionCounts, samplePixelActionMap in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities,
+            # Now we iterate over all of the data and results for each of the sub environments
+            for sampleIndex, sampleEpsilon, sampleActionProbs, sampleAdvantageValues, sampleRecentActions, sampleActionMaps, sampleActionRecentActionCounts, samplePixelActionMap in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, advantageValues,
                                                                                                                                                                   recentActionsBatch, actionMapsBatch, recentActionsCountsBatch,
                                                                                                                                                                   pixelActionMapsBatch):
+                # Here is where we determine whether the algorithm will use the predicted best action from the neural network,
+                # or do a weighted random selection using the outputs
                 weighted = bool(random.random() < sampleEpsilon)
                 override = False
                 source = None
@@ -679,13 +760,17 @@ class DeepLearningAgent:
                 if not weighted:
                     source = "prediction"
 
+                    # Get the coordinates and action type index of the action which has the highest probability
                     actionX, actionY, actionType = self.getActionInfoTensorsFromRewardMap(sampleActionProbs)
                     actionX = actionX.data.item()
                     actionY = actionY.data.item()
                     actionType = actionType.data.item()
 
+                    # Get the reward that was predicted for this action
                     samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
 
+                    # Here we create an action object using the lambdas. We aren't creating the final action object,
+                    # since we do one last check below to ensure this isn't an exact repeat action.
                     potentialAction = self.actions[self.actionsSorted[actionType]](int(actionX / self.config['model_image_downscale_ratio']), int(actionY / self.config['model_image_downscale_ratio']))
                     potentialActionMaps = self.getActionMapsIntersectingWithAction(potentialAction, sampleActionMaps)
 
@@ -716,18 +801,26 @@ class DeepLearningAgent:
                             override = True
                             break
 
+                # Here we are doing a weighted random action.
                 if weighted:
-                    reshaped = numpy.array(sampleActionProbs.data).reshape([len(self.actionsSorted) * height * width])
+                    # Here, we prepare the array that will contain the probability for each of the possible actions.
+                    # We use advantage values instead of the action probabilities here because the action probabilities
+                    # tend to be very narrowly focused - assigning almost all of the probability to the same handful of
+                    # pixels. The advantage values give provide a better way of weighting the various pixels.
+                    reshaped = numpy.array(sampleAdvantageValues.data).reshape([len(self.actionsSorted) * height * width])
+                    # Here we resize the array so that it adds up to 1.
                     reshapedSum = numpy.sum(reshaped)
                     if reshapedSum > 0:
                         reshaped = reshaped / reshapedSum
 
                     try:
+                        # Choose the random action. What we get back is an index for that action in the original array
                         actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
 
+                        # Now we do a clever trick here to recover the x,y coordinates of the action and the index
+                        # of the action type
                         newProbs = numpy.zeros([len(self.actionsSorted) * height * width])
                         newProbs[actionIndex] = 1
-
                         newProbs = newProbs.reshape([len(self.actionsSorted), height * width])
                         actionType = newProbs.max(axis=1).argmax(axis=0)
                         newProbs = newProbs.reshape([len(self.actionsSorted), height, width])
@@ -737,21 +830,33 @@ class DeepLearningAgent:
                         source = "weighted_random"
                         samplePredictedReward = sampleActionProbs[actionType, actionY, actionX].data.item()
                     except ValueError:
+                        # If there is any problem, just override back to a fully random action without predictions involved
                         print(datetime.now(), f"[{os.getpid()}]", "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
                         # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
                         # So instead we just pick an action randomly.
                         actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, samplePixelActionMap)
                         source = "random"
+                        override = True
 
+                # Here we take advantage of the lambda functions prepared in the constructor. We get the lambda function
+                # that is associated with the action type we have selected, and use it to prepare the kwola.datamodels.actions.BaseAction
+                # object.
                 action = self.actions[self.actionsSorted[actionType]](int(actionX / self.config['model_image_downscale_ratio']), int(actionY / self.config['model_image_downscale_ratio']))
                 action.source = source
                 action.predictedReward = samplePredictedReward
                 action.actionMapsAvailable = sampleActionMaps
                 action.wasRepeatOverride = override
+                # Here we append both the action and the original sample index. The original sample index
+                # is later used to recover the original ordering of the actions list
                 actions.append((sampleIndex, action))
 
+        # The actions list now contained tuples of (sampleIndex, action). Now we just need to use
+        # the sampleIndex to sort this list back into the original ordering of the samples.
+        # This ensures that the actions we return as a result are in the exact same order as the
+        # sub environments we received as input.
         sortedActions = sorted(actions, key=lambda row: row[0])
 
+        # We return a list composed of just the action objects, one for each sub environment.
         return [action[1] for action in sortedActions]
 
     def getRandomAction(self, sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap):
