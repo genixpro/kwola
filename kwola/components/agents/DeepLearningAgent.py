@@ -1427,7 +1427,19 @@ class DeepLearningAgent:
 
         return (cropLeft, cropTop, cropRight, cropBottom)
 
+
     def augmentProcessedImageForTraining(self, processedImage):
+        """
+            This method is used to apply augmentations to a given image prior to injecting it into the neural network.
+            These random augmentations are just used to improve the generalization power of the neural network.
+            You can call this function multiple times on the same processedImage and you will get different resulting
+            augmented images.
+
+            :param processedImage: This should be a numpy array containing the processed image data, as returned by
+                                   DeepLearningAgent.processRawImageParallel
+            :return: A new numpy array, with the same shape as the input processedImage, but now with data augmentations
+                     applied.
+        """
         # Add random noise
         augmentedImage = processedImage + numpy.random.normal(loc=0, scale=self.config['training_image_gaussian_noise_scale'], size=processedImage.shape)
 
@@ -1436,16 +1448,16 @@ class DeepLearningAgent:
 
         return augmentedImage
 
+
     def prepareBatchesForExecutionSession(self, executionSession):
         """
-            This function prepares samples so that can be fed to the neural network. It will return a single
-            batch containing all of the samples in this session. NOTE! It does not return a batch of the size
-            set in the config files. This must be done by surrounding code. This will return a batch containing
-            *all* samples in this execution session.
+            This function prepares individual samples so that they can be fed to the neural network. This method
+            produces a python generator object, and that generator will yield a single dictionary
+            object for each of the traces in the execution session. Each of those dictionaries will contain
+            a set of keys that are mapped to numpy arrays.
 
-            :param executionSession:
-            :param , trainingRewardNormalizer
-            :return:
+            :param executionSession: A kwola.datamodels.ExecutionSession object for the session being prepared.
+            :return: This method yields dictionaries containing a variety of keys mapped to numpy arrays.
         """
         processedImages = []
 
@@ -1548,10 +1560,34 @@ class DeepLearningAgent:
 
     def learnFromBatches(self, batches):
         """
-            Runs backprop on the neural network with the given batch.
+            Runs backprop on the neural network with the given set of batches.
+            Each of the batches will be processed separately, but only a single
+            optimizer step will be taken. Therefore it is possible to have a larger
+            effective batch size then what you can actually fit into memory,
+            simply by passing in multiple batches.
 
-            :param batches: A list of batches of image/action/output pairs. Should be the return value from prepareBatchesForTestingStep
-            :return:
+            :param batches: A list of batches. Each batch should be in the same
+                            structure as the return value of DeepLearningAgent.prepareBatchesForExecutionSession
+
+            :return: A list of tuples, containing a result object for each of the batches.
+                     The result tuples will contain all of the loss values in the following order:
+
+                    (
+                        totalRewardLoss,
+                        presentRewardLoss,
+                        discountedFutureRewardLoss,
+                        stateValueLoss,
+                        advantageLoss,
+                        actionProbabilityLoss,
+                        tracePredictionLoss,
+                        predictedExecutionFeaturesLoss,
+                        targetHomogenizationLoss,
+                        predictedCursorLoss,
+                        totalLoss,
+                        totalRebalancedLoss,
+                        batchReward,
+                        sampleLosses
+                    )
         """
         totalLosses = []
         batchResultTensors = []
@@ -1896,6 +1932,15 @@ class DeepLearningAgent:
 
     @staticmethod
     def processRawImageParallel(rawImage, config):
+        """
+            This method takes a raw image, in regular RGB format directly as taken from the screenshot
+            of the target application, and then processed it into the format that will be sent
+            into the neural network.
+
+            :param rawImage: A numpy array containing the original image being processed
+            :param config: The global configuration object
+            :return: A new numpy array, in the shape [1, height, width] containing the processed image data.
+        """
         width = rawImage.shape[1]
         height = rawImage.shape[0]
 
