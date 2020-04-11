@@ -56,11 +56,11 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
             inferenceBatchFileName = message
 
         with open(inferenceBatchFileName, 'rb') as file:
-            step, images, envActionMaps, additionalFeatures, lastActions = pickle.load(file)
+            step, images, envActionMaps, additionalFeatures, pastExecutionTraces = pickle.load(file)
 
         os.unlink(inferenceBatchFileName)
 
-        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures, lastActions, shouldBeRandom=shouldBeRandom)
+        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures, pastExecutionTraces, shouldBeRandom=shouldBeRandom)
 
         resultFileDescriptor, resultFileName = tempfile.mkstemp()
         with open(resultFileDescriptor, 'wb') as file:
@@ -166,8 +166,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
             subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
 
-        recentActions = [[] for n in range(environment.numberParallelSessions())]
-
         while stepsRemaining > 0:
             stepsRemaining -= 1
 
@@ -181,7 +179,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             fileDescriptor, inferenceBatchFileName = tempfile.mkstemp()
 
             with open(fileDescriptor, 'wb') as file:
-                pickle.dump((step, images, envActionMaps, additionalFeatures, recentActions), file)
+                pickle.dump((step, images, envActionMaps, additionalFeatures, executionSessionTraces), file)
 
             del images, envActionMaps, branchFeature, decayingExecutionTraceFeature, additionalFeatures
 
@@ -228,13 +226,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 atexit.register(lambda: subProcess.terminate())
 
                 subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
-
-            for sampleRecentActions, action, trace in zip(recentActions, actions, traces):
-                # Clear the recent actions list every time new branches of code get executed.
-                if trace.didNewBranchesExecute:
-                    sampleRecentActions.clear()
-
-                sampleRecentActions.append(action)
 
             step += 1
             del traces

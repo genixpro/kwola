@@ -415,7 +415,7 @@ class DeepLearningAgent:
 
         return selected
 
-    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, recentActions, shouldBeRandom=False):
+    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, pastExecutionTraces, shouldBeRandom=False):
         """
             This is the main prediction / inference function for the agent. This function will decide what is the next
             best action to take, given a particular state.
@@ -429,17 +429,28 @@ class DeepLearningAgent:
                                   kwola.datamodels.ActionMapModel instances.
             :param additionalFeatures: This should be a numpy array containing the additional features vector,
                                         one for each sub environment.
-            :param recentActions:  This should be a list of lists. The outer list should contain a list for each sub
-                                   environment. The inner list should be a list of kwola.datamodels.actions.BaseAction
-                                   instances, indicating which actions have been performed on the model since the model
-                                   last discovered new code branches. Note it does not contain all recent actions, the
-                                   name is a bit of a misnomer. Need to refactor.
+            :param pastExecutionTraces:  This should be a list of lists. The outer list should contain a list for each sub
+                                         environment. The inner list should be a list of kwola.datamodels.ExecutionTrace
+                                         instances, providing all of the execution traces leading up to the current state
             :param shouldBeRandom: Whether or not the actions should be selected entirely randomly, or should use them
                                    predictions of the machine learning algorithm.
             :return:
         """
         processedImages = self.processImages(rawImages)
         actions = []
+
+        recentActions = []
+        for traceList in pastExecutionTraces:
+            sampleRecentActions = []
+            traceList.reverse()
+            for trace in traceList:
+                if not trace.didNewBranchesExecute:
+                    sampleRecentActions.append(trace.actionPerformed)
+                else:
+                    break
+
+            traceList.reverse()
+            sampleRecentActions.reverse()
 
         width = processedImages.shape[3]
         height = processedImages.shape[2]
