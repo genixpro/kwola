@@ -44,7 +44,7 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
 
     agent = DeepLearningAgent(config, whichGpu=None)
 
-    agent.initialize(branchFeatureSize)
+    agent.initialize(branchFeatureSize, enableTraining=False)
     agent.load()
 
     while True:
@@ -73,7 +73,7 @@ def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId,
     config = Configuration(configDir)
 
     agent = DeepLearningAgent(config, whichGpu=None)
-    agent.initialize(branchFeatureSize)
+    agent.initialize(branchFeatureSize, enableTraining=False)
     agent.load()
 
     kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory(folder)

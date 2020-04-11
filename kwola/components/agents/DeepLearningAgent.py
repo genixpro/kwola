@@ -124,101 +124,124 @@ class DeepLearningAgent:
             "none"
         ]
 
-        # These functions are
-        self.trainingLosses = {
-            "totalRewardLoss": [],
-            "presentRewardLoss": [],
-            "discountedFutureRewardLoss": [],
-            "stateValueLoss": [],
-            "advantageLoss": [],
-            "actionProbabilityLoss": [],
-            "tracePredictionLoss": [],
-            "predictedExecutionFeaturesLoss": [],
-            "targetHomogenizationLoss": [],
-            "predictedCursorLoss": [],
-            "totalLoss": [],
-            "totalRebalancedLoss": [],
-            "batchReward": []
-        }
-
-        # By default, the click action is the only one
+        # This is a variable that maps the action name to a lambda which creates
+        # the actual action object which can be stored in the database.
+        # By default, we always have the click action enabled. It can never be
+        # disabled.
         self.actions = {
             "click": lambda x, y: ClickTapAction(type="click", x=x, y=y, times=1)
         }
 
+        # This variable stores the base weighting for each of the actions.
+        # These weights are used to pick which action to perform when
+        # we are using a randomly selected action
         self.actionBaseWeights = [
             config['random_weight_click']
         ]
 
+        # This variable is used to store a list of keywords that are associated with each action.
+        # This is used to help make sure that, on average, the randomly selected actions will put
+        # emails in email inputs and passwords in password inputs. We will analyze all the available
+        # data on the html element, e.g. its classes, attributes, id, name, etc.. to see if there is
+        # anything that matches one of these keywords. And if so, we give the probability of choosing
+        # that action on that element a significant boost
         self.actionProbabilityBoostKeywords = [
             []
         ]
 
+        # Keep track of whether there is a typing action, since if there is a typing
+        # action we also need the clear action to be able to clear anything already typed.
         hasTypingAction = False
 
+        # Only add in the email action if the user configured it
         if config['email']:
             self.actions['typeEmail'] = lambda x, y: TypeAction(type="typeEmail", x=x, y=y, label="email", text=config['email'])
             self.actionBaseWeights.append(config['random_weight_type_email'])
             self.actionProbabilityBoostKeywords.append(["email", "user"])
             hasTypingAction = True
 
+        # Only add in the password action if the user configured it
         if config['password']:
             self.actions['typePassword'] = lambda x, y: TypeAction(type="typePassword", x=x, y=y, label="password", text=config['password'])
             self.actionBaseWeights.append(config['random_weight_type_password'])
             self.actionProbabilityBoostKeywords.append(["pass"])
             hasTypingAction = True
 
+        # Only add in the name action if the user configured it
         if config['name']:
             self.actions['typeName'] = lambda x, y: TypeAction(type="typeName", x=x, y=y, label="name", text=config['name'])
             self.actionBaseWeights.append(config['random_weight_type_name'])
             self.actionProbabilityBoostKeywords.append(["email", "user"])
             hasTypingAction = True
 
+        # Only add in the paragraph action if the user configured it
         if config['paragraph']:
             self.actions['typeParagraph'] = lambda x, y: TypeAction(type="typeParagraph", x=x, y=y, label="paragraph", text=config['paragraph'])
             self.actionBaseWeights.append(config['random_weight_type_paragraph'])
             self.actionProbabilityBoostKeywords.append(["pass"])
             hasTypingAction = True
 
+        # Only add in the random number action if the user configured it
         if config['enableRandomNumberCommand']:
             self.actions['typeNumber'] = lambda x, y: TypeAction(type="typeNumber", x=x, y=y, label="number", text=self.randomString('-.0123456789$%', random.randint(1, 5)))
             self.actionBaseWeights.append(config['random_weight_type_number'])
             self.actionProbabilityBoostKeywords.append(["num", "count", "int", "float"])
             hasTypingAction = True
 
+        # Only add in the double click action if the user configured it
         if config['enableDoubleClickCommand']:
             self.actions['doubleClick'] = lambda x, y: ClickTapAction(type="double_click", x=x, y=y, times=2)
             self.actionBaseWeights.append(config['random_weight_double_click'])
             self.actionProbabilityBoostKeywords.append([])
 
+        # Only add in the right click action if the user configured it
         if config['enableRightClickCommand']:
             self.actions['rightClick'] = lambda x, y: RightClickAction(type="right_click", x=x, y=y)
             self.actionBaseWeights.append(config['random_weight_right_click'])
             self.actionProbabilityBoostKeywords.append([])
 
+        # Only add in the right click action if the user configured it
+        # This command basically types in a randomly chosen bracket of
+        # any type, curly or straight
         if config['enableRandomBracketCommand']:
             self.actions['typeBrackets'] = lambda x, y: TypeAction(type="typeBrackets", x=x, y=y, label="brackets", text=self.randomString('{}[]()', random.randint(1, 3)))
             self.actionBaseWeights.append(config['random_weight_type_brackets'])
             self.actionProbabilityBoostKeywords.append([])
             hasTypingAction = True
 
+        # Only add in the random math action if the user configured it
+        # This action basically types in equation related letters, like
+        # plus and minus
         if config['enableRandomMathCommand']:
-            self.actions['typeMath'] = lambda x, y: TypeAction(type="typeMath", x=x, y=y, label="symbol", text=self.randomString('*=+<>', random.randint(1, 3)))
+            self.actions['typeMath'] = lambda x, y: TypeAction(type="typeMath", x=x, y=y, label="symbol", text=self.randomString('*=+<>-', random.randint(1, 3)))
             self.actionBaseWeights.append(config['random_weight_type_math'])
             self.actionProbabilityBoostKeywords.append([])
             hasTypingAction = True
 
+        # Only add in the random other symbol action if the user configured it
+        # This action will basically type in random symbols sampled from the
+        # list of symbols not already covered by the random number, brackets
+        # and math commands
         if config['enableRandomOtherSymbolCommand']:
             self.actions['typeOtherSymbol'] = lambda x, y: TypeAction(type="typeOtherSymbol", x=x, y=y, label="symbol", text=self.randomString('"\';:/?,!^&#@', random.randint(1, 3)))
             self.actionBaseWeights.append(config['random_weight_type_other_symbol'])
             self.actionProbabilityBoostKeywords.append([])
             hasTypingAction = True
 
+        # If there was at least one typing action, then we add in the clear
+        # action as well. The clear action basically operates like the delete
+        # key but is slightly more useful for the AI since it just deletes
+        # everything in the input box all at once.
         if hasTypingAction:
             self.actions['clear'] = lambda x, y: ClearFieldAction(type="clear", x=x, y=y)
             self.actionBaseWeights.append(config['random_weight_clear'])
             self.actionProbabilityBoostKeywords.append([])
 
+        # This dictionary provides random weightings for each HTML element.
+        # We use this to focus the random action selection on interacting
+        # with input elements and buttons, and away from clicking on links
+        # which go to new pages, since that would erase any progress the
+        # algo has made on the current page.
         self.elementBaseWeights = {
             "a": config['random_html_element_a_weight'],
             "input": config['random_html_element_input_weight'],
@@ -230,6 +253,12 @@ class DeepLearningAgent:
             "other": config['random_html_element_other_weight']
         }
 
+        # Create the sorted list of action names. This sorted list is used to
+        # ensure is a consistent mapping between the action names and indexes
+        # Unfortunately keys in dictionary objects are unsorted and so may
+        # not be consistent from run to run if code is changed slightly.
+        # Therefore its important to maintain the sorted list which is always
+        # consistent as long as the action names haven't changed.
         self.actionsSorted = sorted(self.actions.keys())
 
     def randomString(self, chars, len):
@@ -253,17 +282,20 @@ class DeepLearningAgent:
             directory.
         """
 
+        # Only load the model if we actually see the file on disk.
         if os.path.exists(self.modelPath):
-            if self.whichGpu is None:
-                device = torch.device('cpu')
-                stateDict = torch.load(self.modelPath, map_location=device)
-            elif self.whichGpu != "all":
-                device = torch.device(f"cuda:{self.whichGpu}")
-                stateDict = torch.load(self.modelPath, map_location=device)
-            else:
-                stateDict = torch.load(self.modelPath)
+            # Depending on whether GPU is turned on, we try load the state dict
+            # directly into GPU / CUDA memory.
+            device = self.getTorchDevices()[0]
+            stateDict = torch.load(self.modelPath, map_location=device)
 
+            # Load the state dictionary into the model itself.
             self.model.load_state_dict(stateDict)
+
+            # Also load a copy of the state dictionary into our target network.
+            # The target network is a copy of the primary neural network
+            # That is used to predict the future reward values, serving as a target
+            # for the updates made to the main model.
             self.targetNetwork.load_state_dict(stateDict)
 
     def save(self, saveName=""):
@@ -280,45 +312,84 @@ class DeepLearningAgent:
 
         torch.save(self.model.state_dict(), self.modelPath + saveName)
 
-    def initialize(self, branchFeatureSize):
+    def getTorchDevices(self):
         """
-            Initialiazes the deep learning agent.
+            This method returns a list of torch device objects indicating which torch devices are
+            being used for this run.
+
+            :return: A list containing torch device objects
+        """
+
+        if self.whichGpu == "all":
+            # Use all available GPUs
+            device_ids = [torch.device(f'cuda:{n}') for n in range(torch.cuda.device_count())]
+        elif self.whichGpu is None:
+            # Only the GPU
+            device_ids = [torch.device('cpu')]
+        else:
+            # Use a specific GPU, ignore the others
+            device_ids = [torch.device(f'cuda:{self.whichGpu}')]
+
+        return device_ids
+
+    def initialize(self, branchFeatureSize, enableTraining=True):
+        """
+            Initializes the deep learning agent. This method is will actually create the neural network in memory.
+            Technically you can create a DeepLearningAgent and use some of its methods without initializing it,
+            but you will not be able to use the primary methods of nextBestActions or learnFromBatches. You must
+            initialize the neural network before calling either of those methods.
 
             :param branchFeatureSize: This should be the number of code branches that are being traced. It should be the
                                       length of the return value from WebEnvironment.getBranchFeature.
 
+            :param enableTraining: Indicates whether or not the agent should be initialized in training mode. Training mode
+                                   costs more RAM, so you should avoid it if you can.
+
         """
-        if self.whichGpu == "all":
-            device_ids = [torch.device(f'cuda:{n}') for n in range(2)]
-            output_device = device_ids[0]
-        elif self.whichGpu is None:
-            device_ids = None
-            output_device = None
-        else:
-            device_ids = [torch.device(f'cuda:{self.whichGpu}')]
-            output_device = device_ids[0]
+        devices = self.getTorchDevices()
+        outputDevice = devices[0]
 
+        # Create the primary torch model object
         self.model = TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
-        self.targetNetwork = TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
 
+        # If training is enabled, we also have to create the target network
+        if enableTraining:
+            self.targetNetwork = TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+        else:
+            self.targetNetwork = None
+
+        # If we are setup to use GPUs, then the models need to be moved over to the GPUs.
+        # Otherwise they can stay on the CPUs.
+        # We also create the DistributedDataParallel wrappers which are used to share the
+        # training across multiple separate GPU processes.
         if self.whichGpu == "all":
             self.model = self.model.cuda()
-            self.targetNetwork = self.targetNetwork.cuda()
-            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=device_ids, output_device=output_device)
+            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=devices, output_device=outputDevice)
+            if enableTraining:
+                self.targetNetwork = self.targetNetwork.cuda()
         elif self.whichGpu is None:
             self.model = self.model.cpu()
-            self.targetNetwork = self.targetNetwork.cpu()
             self.modelParallel = self.model
+            if enableTraining:
+                self.targetNetwork = self.targetNetwork.cpu()
         else:
-            self.model = self.model.cuda(device=device_ids[0])
-            self.targetNetwork = self.targetNetwork.cuda(device=device_ids[0])
-            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=device_ids, output_device=output_device)
+            self.model = self.model.cuda(device=devices[0])
+            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=devices, output_device=outputDevice)
+            if enableTraining:
+                self.targetNetwork = self.targetNetwork.cuda(device=devices[0])
 
-        self.optimizer = optim.Adamax(self.model.parameters(),
-                                      lr=self.config['training_learning_rate'],
-                                      betas=(self.config['training_gradient_exponential_moving_average_decay'],
-                                             self.config['training_gradient_squared_exponential_moving_average_decay'])
+        # We create the optimizer object if the system is in training mode.
+        # The optimizer is what actually updates the neural network parameters
+        # based on the calculated gradients.
+        if enableTraining:
+            self.optimizer = optim.Adamax(
+                                          self.model.parameters(),
+                                          lr=self.config['training_learning_rate'],
+                                          betas=(self.config['training_gradient_exponential_moving_average_decay'],
+                                                self.config['training_gradient_squared_exponential_moving_average_decay'])
                                       )
+        else:
+            self.optimizer = None
 
     def updateTargetNetwork(self):
         """
@@ -339,15 +410,20 @@ class DeepLearningAgent:
         """
         convertedImageFutures = []
 
+        # We try to do each of the images in parallel by using a thread pool executor. In practice only the C++ code
+        # within scikit-image will actually multithread due to Python's stupid global interpreter lock flaw.
+        # But that still gives us some gains here.
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for image in images:
                 convertedImageFuture = executor.submit(DeepLearningAgent.processRawImageParallel, image, self.config)
                 convertedImageFutures.append(convertedImageFuture)
 
+        # Fetch  out all the results from each of the threads
         convertedProcessedImages = [
             convertedImageFuture.result() for convertedImageFuture in convertedImageFutures
         ]
 
+        # Merge all the images into a single numpy array.
         return numpy.array(convertedProcessedImages)
 
     def createPixelActionMap(self, actionMaps, height, width):
@@ -363,21 +439,27 @@ class DeepLearningAgent:
 
             :return: A numpy array, with the dimensions [# actions, height, width]
         """
+        # Start with a blank numpy array with the correct shape
         pixelActionMap = numpy.zeros([len(self.actionsSorted), height, width], dtype=numpy.uint8)
 
+        # Iterate through each of the action maps
         for element in actionMaps:
             actionTypes = []
 
+            # If the element is clickable, add in the relevant actions (single and double click)
             if element['canClick']:
                 if "click" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("click"))
                 if "doubleClick" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("doubleClick"))
 
+            # Only a handful of elements have right click enabled, so this is treated seperately
+            # from the regular left click
             if element['canRightClick']:
                 if "rightClick" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("rightClick"))
 
+            # If the element is an input box, then we have to enable all of the typing actions
             if element['canType']:
                 if "typeEmail" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("typeEmail"))
@@ -398,6 +480,11 @@ class DeepLearningAgent:
                 if "clear" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("clear"))
 
+            # Here is the essential part. For each of the actions that are supported by this action
+            # element, we paint a rectangle of 1's on the pixel action map. Effectively, the pixel
+            # action map starts with all 0's for every pixel on the image, and then for every pixel
+            # containing within an action map, we set those actions to 1. This allows the model to
+            # know on a pixel by pixel basis what actions are possible to be executed on that pixel.
             for actionTypeIndex in actionTypes:
                 pixelActionMap[actionTypeIndex, int(element['top'] * self.config['model_image_downscale_ratio'])
                                                 :int(element['bottom'] * self.config['model_image_downscale_ratio']),

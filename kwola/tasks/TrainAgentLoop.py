@@ -181,7 +181,7 @@ def trainAgent(configDir):
     # Load and save the agent to make sure all training subprocesses are synced
     environment = WebEnvironment(config=config, sessionLimit=1)
     agent = DeepLearningAgent(config=config, whichGpu=None)
-    agent.initialize(environment.branchFeatureSize())
+    agent.initialize(environment.branchFeatureSize(), enableTraining=False)
     agent.load()
     agent.save()
     del environment, agent
