@@ -1719,9 +1719,16 @@ class DeepLearningAgent:
 
         executionTraces = []
 
+        # In this section, we load the video and all of the execution traces from the disk
+        # at the same time.
         videoPath = self.config.getKwolaUserDataDirectory("videos")
         for rawImage, traceId in zip(DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')), executionSession.executionTraces):
             trace = ExecutionTrace.loadFromDisk(traceId, self.config)
+            # Occasionally if your doing a lot of R&D and killing the code a lot,
+            # the software will save a broken file to disk. When this happens, you
+            # will not be able to load the object and get a None value. Here we just
+            # protect against this happening by skipping that frame and image entirely
+            # and moving onto the next one. Its not perfect but it works for now.
             if trace is not None:
                 processedImage = DeepLearningAgent.processRawImageParallel(rawImage, self.config)
                 processedImages.append(processedImage)
@@ -1731,6 +1738,16 @@ class DeepLearningAgent:
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
 
         # Create the decaying future execution trace for the prediction algorithm
+        # The decaying future execution trace is basically a vector that describes
+        # what is going to happen in the future. Its similar to the decaying branch
+        # trace that is fed as an input to the algorithm. The difference is this.
+        # The decaying branch trace shows what happened in the past, with the lines
+        # of code that get executed set to 1 in the vector and then decaying thereafter.
+        # The decaying future trace is exactly the same but in reverse - it provides
+        # what is going to happen next after this trace. The lines of code which
+        # execute immediately next are set to 1, and ones that execute further in the
+        # future have some decayed value based on the decay rate. What this does is
+        # provide an additional, highly supervised target for a secondary loss function.
         tracesReversed = list(copy.copy(executionTraces))
         tracesReversed.reverse()
         currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace)
@@ -1744,30 +1761,40 @@ class DeepLearningAgent:
 
         decayingFutureBranchTraces.reverse()
 
+        # Here we construct a list containing the 'next' traces, that is, for every execution traces,
+        # these are the execution traces and images that are immediately following.
         nextTraces = list(executionTraces)[1:]
         nextProcessedImages = list(processedImages)[1:]
 
+        # Iterate over each trace along with all of the required data to compute the batch for that trace
         for trace, nextTrace, processedImage, nextProcessedImage, presentReward, decayingFutureBranchTrace in zip(executionTraces, nextTraces, processedImages, nextProcessedImages, presentRewards, decayingFutureBranchTraces):
             width = processedImage.shape[2]
             height = processedImage.shape[1]
 
-            branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
-            decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
-            additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
+            # Construct the additional feature vector. This is basically composed of the decaying past branch trace,
+            # along with the cumulative branch vector containing all of the data
+            additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
-            nextBranchFeature = numpy.minimum(nextTrace.startCumulativeBranchExecutionTrace, numpy.ones_like(nextTrace.startCumulativeBranchExecutionTrace))
-            nextDecayingExecutionTraceFeature = numpy.array(nextTrace.startDecayingExecutionTrace)
-            nextAdditionalFeature = numpy.concatenate([nextBranchFeature, nextDecayingExecutionTraceFeature], axis=0)
+            # We do the same for the next trace
+            nextAdditionalFeature = self.prepareAdditionalFeaturesForTrace(nextTrace)
 
+            # Create the pixel action maps for both of the traces
             pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
             nextPixelActionMap = self.createPixelActionMap(nextTrace.actionMaps, height, width)
 
+            # Here we provide a supervised target based on the cursor. Effectively, this is a one-hot encoding of which
+            # cursor was found on the html element under the mouse for this trace
             cursorVector = [0] * len(self.cursors)
             if trace.cursor in self.cursors:
                 cursorVector[self.cursors.index(trace.cursor)] = 1
             else:
                 cursorVector[self.cursors.index("none")] = 1
 
+            # This is another target used as a secondary loss function. In this case, instead of having the neural network
+            # predict reward value directly, we instead of the neural network predict each of the component features that
+            # are used to calculate that reward value. Its believed that breaking this apart gives the neural network
+            # more insight into whats actually happening to drive these reward values, and hopefully makes it learn faster
+            # as a result.
             executionFeatures = [
                 trace.didActionSucceed,
                 trace.didErrorOccur,
@@ -1783,6 +1810,7 @@ class DeepLearningAgent:
                 trace.hadLogOutput,
             ]
 
+            # We compute the reward pixel mask based on where the action was performed.
             rewardPixelMask = self.createRewardPixelMask(processedImage,
                                                          int(trace.actionPerformed.x * self.config['model_image_downscale_ratio']),
                                                          int(trace.actionPerformed.y * self.config['model_image_downscale_ratio'])
