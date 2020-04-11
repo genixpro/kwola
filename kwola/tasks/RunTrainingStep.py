@@ -52,15 +52,9 @@ def addExecutionSessionToSampleCache(executionSessionId, config):
 
     sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
 
-    if config['enable_reward_normalization']:
-        with open(os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer"), "rb") as normalizerFile:
-            trainingRewardNormalizer = pickle.load(normalizerFile)
-    else:
-        trainingRewardNormalizer = None
-
     executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
 
-    batches = agent.prepareBatchesForExecutionSession(executionSession, trainingRewardNormalizer=trainingRewardNormalizer)
+    batches = agent.prepareBatchesForExecutionSession(executionSession)
 
     for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
         traceId = traceBatch['traceIds'][0]
@@ -241,7 +235,7 @@ def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
     trace.saveToDisk(config)
 
 
-def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer=True, subprocessIndex=0):
+def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex=0):
     try:
         config = Configuration(configDir)
 
@@ -283,26 +277,6 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     executionTraceWeightDataIdMap[str(traceWeightData['id'])] = traceWeightData
 
         print(datetime.now(), f"[{os.getpid()}]", f"Finished loading of weight datas for {len(executionTraceWeightDatas)} execution traces.", flush=True)
-
-        if config['enable_reward_normalization']:
-            rewardNormalizerPath = os.path.join(config.getKwolaUserDataDirectory("models"), "reward_normalizer")
-            if createRewardNormalizer:
-                print(datetime.now(), f"[{os.getpid()}]", "Starting creation of the reward normalizer.", flush=True)
-
-                trainingRewardNormalizer = DeepLearningAgent.createTrainingRewardNormalizer(random.sample(executionSessionIds, min(len(executionSessionIds), config['training_reward_normalizer_fit_population_size'])), configDir)
-
-                with open(rewardNormalizerPath, "wb") as normalizerFile:
-                    pickle.dump(trainingRewardNormalizer, normalizerFile)
-
-                del trainingRewardNormalizer
-                print(datetime.now(), f"[{os.getpid()}]", "Finished creation of the reward normalizer.", flush=True)
-            else:
-                # Wait for a reward normalizer to be created by another of the batch-prep sub-proccesses
-                while True:
-                    if os.path.exists(rewardNormalizerPath):
-                        break
-                    else:
-                        time.sleep(1)
 
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         print(datetime.now(), f"[{os.getpid()}]", "Finished initialization for batch preparation sub process.", flush=True)
@@ -570,9 +544,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessBatchResultQueue = multiprocessing.Queue()
 
-            createRewardNormalizer = config['enable_reward_normalization'] and bool(subprocessIndex == 0 and (gpu == 0 or gpu is None))
-
-            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, createRewardNormalizer, subprocessIndex))
+            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex))
             subProcess.start()
             atexit.register(lambda: subProcess.terminate())
 

@@ -1393,6 +1393,18 @@ class DeepLearningAgent:
 
 
     def calculateTrainingCropPosition(self, centerX, centerY, imageWidth, imageHeight, nextStepCrop=False):
+        """
+            This method is used to calculate the coordinates for cropping the image for use in training.
+
+            :param centerX: This is where the center of the cropped image should be
+            :param centerY: This is where the center of the cropped image should be
+            :param imageWidth: This is how large the original image is
+            :param imageHeight: This is how large the original image is
+            :param nextStepCrop: Whether we are cropping the regular image, or cropping the image used to do
+                                 the next step calculation.
+            :return: A tuple containing four integers representing the bounds of the crop, (left, top, right, bottom)
+        """
+
         cropWidth = self.config['training_crop_width']
         cropHeight = self.config['training_crop_height']
         if nextStepCrop:
@@ -1415,60 +1427,6 @@ class DeepLearningAgent:
 
         return (cropLeft, cropTop, cropRight, cropBottom)
 
-    @staticmethod
-    def computeTotalRewardsParallel(execusionSessionId, configDir):
-        config = Configuration(configDir)
-
-        session = ExecutionSession.loadFromDisk(execusionSessionId, config)
-
-        executionTraces = [ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True) for traceId in session.executionTraces]
-        executionTraces = [trace for trace in executionTraces if trace is not None]
-
-        presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, config)
-
-        return list(presentRewards)
-
-    @staticmethod
-    def createTrainingRewardNormalizer(execusionSessionIds, configDir):
-        config = Configuration(configDir)
-
-        rewardFutures = []
-
-        rewardSequences = []
-
-        cumulativeRewards = []
-
-        longest = 0
-        with concurrent.futures.ProcessPoolExecutor(max_workers=config['training_max_initialization_workers']) as executor:
-            for sessionId in execusionSessionIds:
-                rewardFutures.append(executor.submit(DeepLearningAgent.computeTotalRewardsParallel, str(sessionId), configDir))
-
-            for rewardFuture in concurrent.futures.as_completed(rewardFutures):
-                totalRewardSequence = rewardFuture.result()
-                rewardSequences.append(totalRewardSequence)
-                cumulativeRewards.append(numpy.sum(totalRewardSequence))
-                longest = max(longest, len(totalRewardSequence))
-
-        for totalRewardSequence in rewardSequences:
-            while len(totalRewardSequence) < longest:
-                # This isn't the greatest solution for handling execution sessions with different lengths, but it works
-                # for now when we pretty much always have execution sessions of the same length except when debugging.
-                totalRewardSequence.append(numpy.nan)
-
-        rewardSequences = numpy.array(rewardSequences)
-        trainingRewardNormalizer = sklearn.preprocessing.StandardScaler().fit(rewardSequences)
-
-        cumulativeMean = numpy.mean(cumulativeRewards)
-        cumulativeStd = numpy.std(cumulativeRewards)
-
-        frameMean = numpy.mean(numpy.reshape(rewardSequences, newshape=[-1]))
-        frameStd = numpy.std(numpy.reshape(rewardSequences, newshape=[-1]))
-
-        print(datetime.now(), f"[{os.getpid()}]", f"Reward baselines: Total reward per testing sequence: {cumulativeMean} +- std({cumulativeStd})")
-        print(datetime.now(), f"[{os.getpid()}]", f"                  Reward per frame: {frameMean} +- std({frameStd})")
-
-        return trainingRewardNormalizer
-
     def augmentProcessedImageForTraining(self, processedImage):
         # Add random noise
         augmentedImage = processedImage + numpy.random.normal(loc=0, scale=self.config['training_image_gaussian_noise_scale'], size=processedImage.shape)
@@ -1478,7 +1436,7 @@ class DeepLearningAgent:
 
         return augmentedImage
 
-    def prepareBatchesForExecutionSession(self, executionSession, trainingRewardNormalizer=None):
+    def prepareBatchesForExecutionSession(self, executionSession):
         """
             This function prepares samples so that can be fed to the neural network. It will return a single
             batch containing all of the samples in this session. NOTE! It does not return a batch of the size
@@ -1503,19 +1461,6 @@ class DeepLearningAgent:
 
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
-
-        # If there is a normalizer, use it to normalize the rewards
-        if trainingRewardNormalizer is not None:
-            if len(presentRewards) < len(trainingRewardNormalizer.mean_):
-                presentRewardsNormalizationInput = presentRewards + ([1] * (len(trainingRewardNormalizer.mean_) - len(presentRewards)))
-            else:
-                presentRewardsNormalizationInput = presentRewards
-
-            # Compute the total rewards and normalize
-            totalRewardsNormalizationInput = numpy.array([presentRewardsNormalizationInput])
-            normalizedTotalRewards = trainingRewardNormalizer.transform(totalRewardsNormalizationInput)[0]
-
-            presentRewards = normalizedTotalRewards[:len(presentRewards)]
 
         # Create the decaying future execution trace for the prediction algorithm
         tracesReversed = list(copy.copy(executionTraces))
