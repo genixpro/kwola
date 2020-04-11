@@ -57,7 +57,6 @@
   "enable_cursor_prediction_loss": true,
   "enable_execution_feature_prediction_loss": true,
   "enable_homogenization_loss": true,
-  "enable_loss_balancing": false,
   "enable_trace_prediction_loss": true,
   "future_execution_trace_decay_rate": 0.70,
   "iterations_between_db_saves": 5,

@@ -69,6 +69,8 @@ class DeepLearningAgent:
 
         self.whichGpu = whichGpu
 
+        # We create a method that will convert torch CPU tensors into
+        # torch CUDA tensors if this model is set in GPU mode.
         if self.whichGpu == "all":
             self.variableWrapperFunc = lambda t, x: t(x).cuda()
         elif self.whichGpu is None:
@@ -76,8 +78,12 @@ class DeepLearningAgent:
         else:
             self.variableWrapperFunc = lambda t, x: t(x).cuda(device=f"cuda:{self.whichGpu}")
 
+        # Fetch the folder that we will store the model parameters in
         self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
 
+        # This is just a generic list of known HTML cursors. Its pretty comprehensive,
+        # and is used for the cursor prediction, which is an additional loss that
+        # helps stabilize the neural network predictions
         self.cursors = [
             "alias",
             "all-scroll",
@@ -118,6 +124,7 @@ class DeepLearningAgent:
             "none"
         ]
 
+        # These functions are
         self.trainingLosses = {
             "totalRewardLoss": [],
             "presentRewardLoss": [],
@@ -1800,49 +1807,9 @@ class DeepLearningAgent:
                 totalLoss = totalRewardLoss
 
             totalRebalancedLoss = None
-            if not self.config['enable_loss_balancing']:
-                totalLoss.backward()
-                totalLosses.append(totalLoss)
-            else:
-                if len(self.trainingLosses['totalLoss']) > 2:
-                    averageStart = max(0, min(len(self.trainingLosses['totalRewardLoss']) - 1, self.config['loss_balancing_moving_average_period']))
 
-                    runningAverageRewardLoss = numpy.mean(self.trainingLosses['totalRewardLoss'][-averageStart:])
-                    runningAverageTracePredictionLoss = numpy.mean(self.trainingLosses['tracePredictionLoss'][-averageStart:])
-                    runningAverageExecutionFeaturesLoss = numpy.mean(self.trainingLosses['predictedExecutionFeaturesLoss'][-averageStart:])
-                    runningAverageHomogenizationLoss = numpy.mean(self.trainingLosses['targetHomogenizationLoss'][-averageStart:])
-                    runningAveragePredictedCursorLoss = numpy.mean(self.trainingLosses['predictedCursorLoss'][-averageStart:])
-
-                    tracePredictionAdustment = (runningAverageRewardLoss / (runningAverageTracePredictionLoss + 1e-6)) * self.config['loss_ratio_trace_prediction']
-                    executionFeaturesAdustment = (runningAverageRewardLoss / (runningAverageExecutionFeaturesLoss + 1e-6)) * self.config['loss_ratio_execution_features']
-                    homogenizationAdustment = (runningAverageRewardLoss / (runningAverageHomogenizationLoss + 1e-6)) * self.config['loss_ratio_homogenization']
-                    predictedCursorAdustment = (runningAverageRewardLoss / (runningAveragePredictedCursorLoss + 1e-6)) * self.config['loss_ratio_predicted_cursor']
-                else:
-                    tracePredictionAdustment = 1
-                    executionFeaturesAdustment = 1
-                    homogenizationAdustment = 1
-                    predictedCursorAdustment = 1
-
-                if not self.config['enable_trace_prediction_loss']:
-                    tracePredictionAdustment = 1
-
-                if not self.config['enable_execution_feature_prediction_loss']:
-                    executionFeaturesAdustment = 1
-
-                if not self.config['enable_cursor_prediction_loss']:
-                    predictedCursorAdustment = 1
-
-                if not self.config['enable_homogenization_loss']:
-                    homogenizationAdustment = 1
-
-                totalRebalancedLoss = totalRewardLoss + \
-                                      tracePredictionLoss * self.variableWrapperFunc(torch.FloatTensor, [tracePredictionAdustment]) + \
-                                      predictedExecutionFeaturesLoss * self.variableWrapperFunc(torch.FloatTensor, [executionFeaturesAdustment]) + \
-                                      targetHomogenizationLoss * self.variableWrapperFunc(torch.FloatTensor, [homogenizationAdustment]) + \
-                                      predictedCursorLoss * self.variableWrapperFunc(torch.FloatTensor, [predictedCursorAdustment])
-
-                totalRebalancedLoss.backward()
-                totalLosses.append(totalRebalancedLoss)
+            totalLoss.backward()
+            totalLosses.append(totalLoss)
 
             batchResultTensors.append((
                 presentRewardLoss,
@@ -1910,19 +1877,6 @@ class DeepLearningAgent:
                 totalRebalancedLoss = 0
 
             batchReward = float(numpy.sum(batch['presentRewards']))
-
-            self.trainingLosses["totalRewardLoss"].append(totalRewardLoss)
-            self.trainingLosses["presentRewardLoss"].append(presentRewardLoss)
-            self.trainingLosses["discountedFutureRewardLoss"].append(discountedFutureRewardLoss)
-            self.trainingLosses["stateValueLoss"].append(stateValueLoss)
-            self.trainingLosses["advantageLoss"].append(advantageLoss)
-            self.trainingLosses["actionProbabilityLoss"].append(actionProbabilityLoss)
-            self.trainingLosses["tracePredictionLoss"].append(tracePredictionLoss)
-            self.trainingLosses["predictedExecutionFeaturesLoss"].append(predictedExecutionFeaturesLoss)
-            self.trainingLosses["targetHomogenizationLoss"].append(targetHomogenizationLoss)
-            self.trainingLosses["predictedCursorLoss"].append(predictedCursorLoss)
-            self.trainingLosses["totalLoss"].append(totalLoss)
-            self.trainingLosses["totalRebalancedLoss"].append(totalRebalancedLoss)
 
             sampleLosses = [tensor.data.item() for tensor in totalSampleLosses]
 
