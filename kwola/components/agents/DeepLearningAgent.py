@@ -415,6 +415,58 @@ class DeepLearningAgent:
 
         return selected
 
+
+    def filterActionMapsToPreventRepeatActions(self, sampleActionMaps, sampleRecentActions, width, height):
+        """
+            This method is used to filter the list of available actions the agent can perform, based on the
+            actions its performed recently. Basically, if the agent has been performing the same action
+            over and over again without finding new code branches, then we need to take that action off the
+            list and force the agent to try something different. This acts as a sort of control mechanism
+            for the AI that forces it to explore more.
+
+            :param sampleActionMaps: This is a list of kwola.datamodels.ActionMapModel instances, containing the
+                                     list of all possible actions the AI can take at this time
+            :param sampleRecentActions: This is a list of kwola.datamodels.actions.BaseAction instances, containing
+                                        all of the actions that have been performed since the last time that
+                                        new code branches were discovered.
+            :param width: The width of the image. This is used to filter out action maps that are outside the bounds.
+            :param height: The height of the image. This is used to filter out action maps that are outside the bounds.
+            :return: A tuple with (sampleActionMaps, sampleActionRecentActionCounts).
+
+                    The first entry in the tuple is the new, filtered list of action maps. The second entry
+                    is the count of actions performed for each of the action maps that have been kept by the
+                    filter.
+        """
+        modelDownscale = self.config['model_image_downscale_ratio']
+
+        filteredSampleActionMaps = []
+        filteredSampleActionRecentActionCounts = []
+        for map in sampleActionMaps:
+            # Check to see if the map is out of the screen
+            if (map.top * modelDownscale) > height or (map.bottom * modelDownscale) < 0 or (map.left * modelDownscale) > width or (map.right * modelDownscale) < 0:
+                # skip this action map, don't add it to the filtered list
+                continue
+
+            count = 0
+            for recentAction in sampleRecentActions:
+                for recentActionMap in self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable):
+                    if map.doesOverlapWith(recentActionMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
+                        count += 1
+                        break
+            if count < self.config['testing_max_repeat_action_maps_without_new_branches']:
+                filteredSampleActionMaps.append(map)
+                filteredSampleActionRecentActionCounts.append(count)
+
+        if len(filteredSampleActionMaps) > 0:
+            sampleActionMaps = filteredSampleActionMaps
+            sampleActionRecentActionCounts = filteredSampleActionRecentActionCounts
+        else:
+            sampleActionRecentActionCounts = [1] * len(sampleActionMaps)
+
+        return sampleActionMaps, sampleActionRecentActionCounts
+
+
+
     def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, pastExecutionTraces, shouldBeRandom=False):
         """
             This is the main prediction / inference function for the agent. This function will decide what is the next
@@ -470,30 +522,7 @@ class DeepLearningAgent:
             randomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.config['testing_sequence_length']))
             weightedRandomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.50 * (1 + (stepNumber / self.config['testing_sequence_length']))
 
-            filteredSampleActionMaps = []
-            filteredSampleActionRecentActionCounts = []
-            for map in sampleActionMaps:
-                # Check to see if the map is out of the screen
-                if (map.top * modelDownscale) > height or (map.bottom * modelDownscale) < 0 or (map.left * modelDownscale) > width or (map.right * modelDownscale) < 0:
-                    # skip this action map, don't add it to the filtered list
-                    continue
-
-                count = 0
-                for recentAction in sampleRecentActions:
-                    for recentActionMap in self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable):
-                        if map.doesOverlapWith(recentActionMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
-                            count += 1
-                            break
-                if count < self.config['testing_max_repeat_action_maps_without_new_branches']:
-                    filteredSampleActionMaps.append(map)
-                    filteredSampleActionRecentActionCounts.append(count)
-
-            if len(filteredSampleActionMaps) > 0:
-                sampleActionMaps = filteredSampleActionMaps
-                sampleActionRecentActionCounts = filteredSampleActionRecentActionCounts
-            else:
-                sampleActionRecentActionCounts = [1] * len(sampleActionMaps)
-
+            sampleActionMaps, sampleActionRecentActionCounts = self.filterActionMapsToPreventRepeatActions(sampleActionMaps, sampleRecentActions, width, height)
             pixelActionMap = self.createPixelActionMap(sampleActionMaps, height, width)
 
             if random.random() > randomActionProbability and not shouldBeRandom:
@@ -894,6 +923,25 @@ class DeepLearningAgent:
         return videoData
 
     def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilight=False):
+        """
+            This method is used to generate a single debug image for a single execution trace. Technically this method actually
+            generates two debug images. The first shows what action is being performed, and the second shows what happened after
+            that action. Its designed so they can all be strung together into a movie.
+
+            :param executionSessionId: A string containing the ID of the execution session
+            :param debugImageIndex: The index of this debug image within the movie
+            :param trace: The kwola.datamodels.ExecutionTrace object that this debug image will be generated for
+            :param rawImage: A numpy array containing the raw image data for the result image on this trace
+            :param lastRawImage: A numpy array containing the raw image data for the input image on this trace, e.g. the image from before the action was performed.
+            :param presentRewards: A list containing all of the calculated present reward values for the sequence
+            :param discountedFutureRewards: A list containing all of the calculated discounted future reward values for the sequence
+            :param tempScreenshotDirectory: A string containing the path of the directory where the images will be saved
+            :param includeNeuralNetworkCharts: A boolean indicating whether to include charts showing the neural network predictions in the debug video
+            :param includeNetPresentRewardChart: A boolean indicating whether to include the net present reward chart at the bottom of the debug video
+            :param hilight: A boolean indicating whether this frame should be hilightted or not. Hilighting a frame will change the background color
+
+            :return: None
+        """
         try:
             trace = ExecutionTrace.from_json(trace)
 
@@ -1304,6 +1352,24 @@ class DeepLearningAgent:
             print(datetime.now(), f"[{os.getpid()}]", "Failed to create debug image!", flush=True)
 
     def createRewardPixelMask(self, processedImage, x, y):
+        """
+            This method takes a processed image, and returns a new mask array the same size of the image.
+            This new array will show all of the pixels that should be rewarded for an action performed
+            at the given x,y coordinates. Basically we use flood-fill to ensure that all nearby pixels
+            to the action coordinates that are exactly the same color will get the same reward as the
+            target pixel.
+
+            This is done because UI elements usually have large areas of solid-color which will all act
+            exactly the same when you click on it. So instead of just training the algo just one pixel
+            at a time, we can instead train it to update that entire solid color block. This makes the
+            algo train a ton faster.
+
+            :param processedImage: This is the processed image object, as returned by processRawImageParallel
+            :param x: The x coordinate of the action to be performed.
+            :param y: The y coordinate of the action to be performed.
+            :return: A numpy array, in the shape of [height, width] with 1's for all of the pixels that are
+                     included in this reward mask, and 0's everywhere else.
+        """
         # We use flood-segmentation on the original image to select which pixels we will update reward values for.
         # This works great on UIs because the elements always have big areas of solid-color which respond in the same
         # way.
@@ -1312,11 +1378,19 @@ class DeepLearningAgent:
         return rewardPixelMask
 
     def prepareAdditionalFeaturesForTrace(self, trace):
+        """
+            This method computes the additional feature vector that will get injected into the model based on the given execution trace.
+
+            :param trace: A kwola.datamodels.ExecutionTrace object
+
+            :return: A numpy array containing the additional features vector
+        """
         branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
         decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
         additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
 
         return additionalFeature
+
 
     def calculateTrainingCropPosition(self, centerX, centerY, imageWidth, imageHeight, nextStepCrop=False):
         cropWidth = self.config['training_crop_width']
