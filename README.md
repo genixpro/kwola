@@ -4,9 +4,9 @@ Kwola
 Kwola is an AI user that helps you find bugs in your software. Unlike conventional testing solutions 
 like Selenium or Cypress, Kwola will learn to use your user-interface completely automatically, with no 
 configuration. Kwola does not require you to spend tedious effort writing testing code or manually
-clicking through your app to double check it. Unleash Kwola on your testing environment URL and you'll be 
-finding bugs in no time. In addition, Kwola provides you a video showing how to reproduce the bug 
-and gives you the appropriate error messages & stack traces so you can track down the bug in the codebase.
+clicking through your app to double check it. Unleash Kwola on your URL and Kwola will be finding bugs in 
+no time. In addition, Kwola provides you a video showing how to reproduce the bug and gives you 
+the appropriate error messages & stack traces so you can track down the bug in the codebase.
 
 Learn more at https://kwola.io/ or https://kwolatesting.com/. Sign up for the Kwola Insider's Development 
 Newsletter (https://share.hsforms.com/11VTba-QcSYC6cS38VtFxUQ45177).
