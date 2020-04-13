@@ -45,6 +45,10 @@ go to https://chrome.google.com to install Google Chrome (you may have it instal
 Install chromedriver globally to your operating system. Go here: https://chromedriver.chromium.org/getting-started
 and install the binary appropriate for your operating system and which Chrome version you have installed.
 
+On Windows, they don't give you a proper installer. Its just a zip file containing a prebuilt executable.
+You need to put this executable in a folder thats on thr $PATH environment variable. So I usually just
+copy and paste the executable into the C:\Windows folder. 
+
 For example, I run the following on Linux with Chrome 80:
 
 `[user@localhost]$ wget https://chromedriver.storage.googleapis.com/80.0.3987.106/chromedriver_linux64.zip`
