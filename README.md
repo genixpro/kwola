@@ -24,7 +24,11 @@ Dependencies
 Please go to https://www.python.org/downloads/ to download and install Python. You should also install the Python 
 development headers, as some of our Python dependencies compile C / C++ code into Python modules.
 
-** IMPORTANT ** If you are installing on Windows, there are several errors that can occur if you either have multiple versions of Python installed, or have the 32 bit version of Python installed. Ensure that you have only a single, 64 bit version of Python installed or Torch, the neural network library, will have errors.
+** IMPORTANT ** If you are installing on Windows, there are several errors that can occur if you either have multiple versions of Python installed, or have the 32 bit version of Python installed. Ensure that you have only a single, 64 bit version of Python installed or Torch, the neural network library, will have errors. In some instances, we have had to take the following steps with Python to get Kwola to work on Windows:
+- fully uninstall all versions of Python
+- find all folders called "python" in C:/ and delete them
+- find anything python related in the AppData folder of the user (such as 'pip') and delete them
+- reinstall a fresh copy of the latest version of python, and specifically grab the 64bit only binary from the "Additional Downloads" section of the python website.
 
 2) NodeJS
 
