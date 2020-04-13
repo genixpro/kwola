@@ -24,6 +24,8 @@ Dependencies
 Please go to https://www.python.org/downloads/ to download and install Python. You should also install the Python 
 development headers, as some of our Python dependencies compile C / C++ code into Python modules.
 
+** IMPORTANT ** If you are installing on Windows, there are several errors that can occur if you either have multiple versions of Python installed, or have the 32 bit version of Python installed. Ensure that you have only a single, 64 bit version of Python installed or Torch, the neural network library, will have errors.
+
 2) NodeJS
 
 Please go to https://nodejs.org/en/ to install NodeJS or install it through a package manager
@@ -102,7 +104,8 @@ Installation Instructions
 
 Create a virtual environment. Doing this is not 100% necessary, you can install Kwola globally,
 but there is a much higher likelihood of a package version conflict. Installing inside the virtual
-environment is the most reliable way to run Kwola.
+environment is the most reliable way to run Kwola. Run the following commands in your terminal on Linux / macOS or
+in PowerShell on Windows.
 
 `[user@localhost]$ python3 -m venv venv`
 
