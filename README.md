@@ -49,6 +49,8 @@ On Windows, they don't give you a proper installer. Its just a zip file containi
 You need to put this executable in a folder thats on thr $PATH environment variable. So I usually just
 copy and paste the executable into the C:\Windows folder. 
 
+On macOS, this article provides great installation instructions: https://www.kenst.com/2015/03/installing-chromedriver-on-mac-osx/. I've resigned to just installing it through Homebrew.
+
 For example, I run the following on Linux with Chrome 80:
 
 `[user@localhost]$ wget https://chromedriver.storage.googleapis.com/80.0.3987.106/chromedriver_linux64.zip`
@@ -65,6 +67,10 @@ You must install ffmpeg as it is used to compress the videos of Kwola interactin
 
 Please go to this url: https://www.ffmpeg.org/download.html to get instructions on how to install ffmpeg.
 
+On macOS, if you have Homebrew installed (https://brew.sh/) then you can install Ffmpeg easily with:
+
+`[user@localhost]$ brew install ffmpeg`
+
 6) [linux / macOS] C & C++ Compiler
 
 You need to install a c++ compiler, as it is used by some of the Python dependencies to compile highly 
@@ -78,7 +84,7 @@ On Fedora, you can run:
 
 `[user@localhost]$ sudo dnf install gcc-c++`
 
-On macOS, you must install XCode to get the compiler.
+On macOS, you must install XCode or the XCode Command Line Build Tools get a compiler.
 
 7) [windows] Visual Studio
 
