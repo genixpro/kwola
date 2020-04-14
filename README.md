@@ -135,11 +135,12 @@ Install babel-cli and the Kwola babel plugin globally. This makes it easier for 
 
 `[user@localhost]$ sudo npm install babel-plugin-kwola -g`
 
-If you have any issues, particularly issues with running testing sequences, try installing the babel plugin locally 
-as well, in the same folder that you run the Kwola executable. We are still sorting out precisely how all of this is
-done.
+Some users have been running into issues when they install the babel-plugin-kwola globally. Therefore, just run
+it a second time without -g to install it in your local directory for safe meaasure.
 
 `[user@localhost]$ npm install babel-plugin-kwola`
+
+We are still sorting out precisely what the cause of the issue is.
 
 That's it! Kwola should now be installed.
 
