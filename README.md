@@ -158,7 +158,7 @@ To initiate a Kwola testing session, run the following command. Make sure to rep
 to the website you want to start testing. The URL must be a complete, fully validated url containing 
 the http:// part and everything.
 
-`[user@localhost]$ kwola http://yoururl.com/`
+`[user@localhost]$ kwola http://demo.kwolatesting.com/`
 
 Kwola will now start testing your application! Its that easy. Kwola will create a directory to hold
 all of its results in your current directory. You can cancel the run simply using Ctrl-C or Cmd-C in
@@ -171,7 +171,11 @@ allows you to restart specific runs.
 
 `[user@localhost]$ kwola kwola_run_1`
 
-For example, you can use Kwola with one of our example codebases if you have Docker installed:
+If you want to just quickly test Kwola, use our live restaurant testing demo, available at
+http://demo.kwolatesting.com/ You may want to visit it in your browser first to warm up the server
+its running on before running the console command.
+
+You can use Kwola with any of our example codebases if you have Docker installed:
 
 `[user@localhost]$ docker run docker.io/kwola/kros-1`
 
