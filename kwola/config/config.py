@@ -128,5 +128,10 @@ class Configuration:
 
     @staticmethod
     def getPrebuiltConfigData(prebuild):
-        return json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
+        localFilePath = f"{prebuild}.json"
+        if os.path.exists(localFilePath):
+            with open(localFilePath, 'rt') as f:
+                return json.load(f)
+        else:
+            return json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
 

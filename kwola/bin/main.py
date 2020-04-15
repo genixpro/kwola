@@ -53,8 +53,13 @@ def getConfigurationDirFromCommandLineArgs():
         else:
             print(f"Loading the Kwola run in directory {configDir}")
 
-    elif len(commandArgs) == 1:
+    elif len(commandArgs) >= 1:
         secondArg = commandArgs[0]
+
+        configName = None
+
+        if len(commandArgs) >= 2:
+            configName = commandArgs[1]
 
         if os.path.exists(secondArg) and Configuration.checkDirectoryContainsKwolaConfig(secondArg):
             configDir = secondArg
@@ -63,14 +68,15 @@ def getConfigurationDirFromCommandLineArgs():
             # Create a new config directory for this URL
             url = secondArg
 
-            configName = questionary.select(
-                "Which configuration do you want to load for your model?",
-                choices=[
-                    'small',
-                    'medium',
-                    'large',
-                    'testing'
-                ]).ask()  # returns value of selection
+            if configName is None:
+                configName = questionary.select(
+                    "Which configuration do you want to load for your model?",
+                    choices=[
+                        'small',
+                        'medium',
+                        'large',
+                        'testing'
+                    ]).ask()  # returns value of selection
 
             if configName is None:
                 exit(0)
