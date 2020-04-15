@@ -24,6 +24,14 @@ Dependencies
 Please go to https://www.python.org/downloads/ to download and install Python. You should also install the Python 
 development headers, as some of our Python dependencies compile C / C++ code into Python modules.
 
+At this time, Kwola requries Python version 3.7 or higher. If you run into issues, make sure are using the latest python version.
+
+** IMPORTANT ** If you are installing on Windows, there are several errors that can occur if you either have multiple versions of Python installed, or have the 32 bit version of Python installed. Ensure that you have only a single, 64 bit version of Python installed or Torch, the neural network library, will have errors. In some instances, we have had to take the following steps with Python to get Kwola to work on Windows:
+- fully uninstall all versions of Python
+- find all folders called "python" in C:/ and delete them
+- find anything python related in the AppData folder of the user (such as 'pip' and "Programs\Python") and delete them
+- reinstall a fresh copy of the latest version of python, and specifically grab the 64bit only binary from the "Additional Downloads" section of the python website. When installing, use the "Custom" install, make sure pip is selected and that you want to install Python for all users.
+
 2) NodeJS
 
 Please go to https://nodejs.org/en/ to install NodeJS or install it through a package manager
@@ -38,6 +46,12 @@ go to https://chrome.google.com to install Google Chrome (you may have it instal
 
 Install chromedriver globally to your operating system. Go here: https://chromedriver.chromium.org/getting-started
 and install the binary appropriate for your operating system and which Chrome version you have installed.
+
+On Windows, they don't give you a proper installer. Its just a zip file containing a prebuilt executable.
+You need to put this executable in a folder thats on thr $PATH environment variable. So I usually just
+copy and paste the executable into the C:\Windows folder. 
+
+On macOS, this article provides great installation instructions: https://www.kenst.com/2015/03/installing-chromedriver-on-mac-osx/. I've resigned to just installing it through Homebrew.
 
 For example, I run the following on Linux with Chrome 80:
 
@@ -55,6 +69,10 @@ You must install ffmpeg as it is used to compress the videos of Kwola interactin
 
 Please go to this url: https://www.ffmpeg.org/download.html to get instructions on how to install ffmpeg.
 
+On macOS, if you have Homebrew installed (https://brew.sh/) then you can install Ffmpeg easily with:
+
+`[user@localhost]$ brew install ffmpeg`
+
 6) [linux / macOS] C & C++ Compiler
 
 You need to install a c++ compiler, as it is used by some of the Python dependencies to compile highly 
@@ -68,7 +86,7 @@ On Fedora, you can run:
 
 `[user@localhost]$ sudo dnf install gcc-c++`
 
-On macOS, you must install XCode to get the compiler.
+On macOS, you must install XCode or the XCode Command Line Build Tools get a compiler.
 
 7) [windows] Visual Studio
 
@@ -102,7 +120,8 @@ Installation Instructions
 
 Create a virtual environment. Doing this is not 100% necessary, you can install Kwola globally,
 but there is a much higher likelihood of a package version conflict. Installing inside the virtual
-environment is the most reliable way to run Kwola.
+environment is the most reliable way to run Kwola. Run the following commands in your terminal on Linux / macOS or
+in PowerShell on Windows.
 
 `[user@localhost]$ python3 -m venv venv`
 
@@ -118,11 +137,12 @@ Install babel-cli and the Kwola babel plugin globally. This makes it easier for 
 
 `[user@localhost]$ sudo npm install babel-plugin-kwola -g`
 
-If you have any issues, particularly issues with running testing sequences, try installing the babel plugin locally 
-as well, in the same folder that you run the Kwola executable. We are still sorting out precisely how all of this is
-done.
+Some users have been running into issues when they install the babel-plugin-kwola globally. Therefore, just run
+it a second time without -g to install it in your local directory for safe meaasure.
 
 `[user@localhost]$ npm install babel-plugin-kwola`
+
+We are still sorting out precisely what the cause of the issue is.
 
 That's it! Kwola should now be installed.
 
