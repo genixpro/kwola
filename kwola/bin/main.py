@@ -26,7 +26,7 @@ import questionary
 import sys
 
 
-def getConfigurationDirFromCommandLineArgs():
+def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
     """
         This function is responsible for parsing the command line arguments and returning a directory containing a
         Kwola configuration. If none exists, a new Kwola configuration will be created.
@@ -130,18 +130,19 @@ def getConfigurationDirFromCommandLineArgs():
                                                                    enableDoubleClickCommand=enableDoubleClickCommand,
                                                                    enableRightClickCommand=enableRightClickCommand
                                                                    )
-            needToChange = questionary.select(
-                "Do you want to tune any configuration settings in your Kwola run before proceeding?",
-                choices=[
-                    'no',
-                    'yes'
-                ]).ask()  # returns value of selection
+            if askTuneQuestion:
+                needToChange = questionary.select(
+                    "Do you want to tune any configuration settings in your Kwola run before proceeding?",
+                    choices=[
+                        'no',
+                        'yes'
+                    ]).ask()  # returns value of selection
 
-            if needToChange == "yes":
-                print(f"Please see the configuration file {os.path.join(configDir, 'kwola.json')} for all of the settings that you can tune in this Kwola run.")
-                print(f"When you are ready, simply run the following command to restart Kwola with your updating settings:")
-                print(f"kwola {configDir}")
-                exit(0)
+                if needToChange == "yes":
+                    print(f"Please see the configuration file {os.path.join(configDir, 'kwola.json')} for all of the settings that you can tune in this Kwola run.")
+                    print(f"When you are ready, simply run the following command to restart Kwola with your updating settings:")
+                    print(f"kwola {configDir}")
+                    exit(0)
 
             ready = questionary.select(
                 "Are you ready to unleash the Kwolas?",

@@ -129,7 +129,7 @@ in PowerShell on Windows.
 
 Install Kwola using pip.
 
-`[user@localhost]$ pip3 install kwola`
+`[user@localhost]$ pip3 install kwola --upgrade --no-cache`
 
 Install babel-cli and the Kwola babel plugin globally. This makes it easier for the code to access the babel binary.
 

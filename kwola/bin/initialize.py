@@ -24,5 +24,5 @@ def main():
     """
         This is the entry point for the Kwola secondary command, kwola_init
     """
-    configDir = getConfigurationDirFromCommandLineArgs()
+    configDir = getConfigurationDirFromCommandLineArgs(askTuneQuestion=False)
 
