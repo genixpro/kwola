@@ -53,7 +53,6 @@ class JSRewriteProxy:
 
     def request(self, flow):
         flow.request.headers['Accept-Encoding'] = 'identity'
-        flow.request.headers['Transfer-Encoding'] = 'identity'
 
 
     def responseheaders(self, flow):
