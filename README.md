@@ -134,6 +134,7 @@ Install Kwola using pip.
 Install babel-cli and the Kwola babel plugin globally. This makes it easier for the code to access the babel binary.
 
 `[user@localhost]$ sudo npm install @babel/cli -g`
+`[user@localhost]$ sudo npm install @babel/core -g`
 
 `[user@localhost]$ sudo npm install babel-plugin-kwola -g`
 
