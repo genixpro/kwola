@@ -95,7 +95,7 @@ class JSRewriteProxy:
 
                 filename = str(flow.request.path).split("/")[-1]
 
-                result = subprocess.run(['babel','-f', filename, '--plugins', 'babel-plugin-kwola'], input=bytes(flow.response.data.content), capture_output=True)
+                result = subprocess.run(['babel','-f', filename, '--plugins', 'babel-plugin-kwola'], input=bytes(flow.response.data.content), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 if result.returncode != 0:
                     print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most likely this is because Babel thinks your javascript has invalid syntax.")

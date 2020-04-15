@@ -327,7 +327,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
                         # We do this check here because saving execution traces is actually a pretty CPU heavy process,
                         # so we only want to do it if the loss has actually changed by a significant degree
-                        differenceRatio = abs(traceWeightData['weight'] - sampleRewardLoss) / traceWeightData['weight']
+                        differenceRatio = abs(traceWeightData['weight'] - sampleRewardLoss) / (traceWeightData['weight'] + 1e-6)
                         if differenceRatio > config['training_trace_selection_min_loss_ratio_difference_for_save']:
                             traceWeightData['weight'] = sampleRewardLoss
                             if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
