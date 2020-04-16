@@ -50,12 +50,14 @@ class Configuration:
                 if key not in data:
                     data[key] = value
 
-            for key, value in data.items():
-                setattr(self, key, value)
         except FileNotFoundError:
             # This indicates the prebuilt configuration could not be found.
             # Print an error message and ignore it.
             print(f"Was unable to find the prebuilt configuration file for {data['profile']}. Skipping loading default values.")
+
+
+        for key, value in data.items():
+            setattr(self, key, value)
 
 
 
