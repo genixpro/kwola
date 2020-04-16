@@ -53,7 +53,7 @@ class WebEnvironment:
             if sessionLimit is not None:
                 sessionCount = min(sessionLimit, sessionCount)
 
-            print(datetime.now(), "[{}]".format(os.getpid()), "Starting up {} parallel browser sessions.".format(sessionCount))
+            print(datetime.now(), f"[{os.getpid()}]", f"Starting up {sessionCount} parallel browser sessions.")
 
             sessionFutures = [
                 executor.submit(createSession, sessionNumber) for sessionNumber in range(sessionCount)

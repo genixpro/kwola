@@ -61,7 +61,7 @@ class WebEnvironmentSession:
         capabilities['loggingPrefs'] = {'browser': 'ALL'}
         proxyConfig = Proxy()
         proxyConfig.proxy_type = ProxyType.MANUAL
-        proxyConfig.http_proxy = "localhost:{}".format(proxyPort)
+        proxyConfig.http_proxy = f"localhost:{proxyPort}"
         proxyConfig.add_to_capabilities(capabilities)
 
         self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
@@ -139,7 +139,7 @@ class WebEnvironmentSession:
         self.driver = None
 
     def addScreenshot(self):
-        fileName = "kwola-screenshot-{:05d}.png".format(self.frameNumber)
+        fileName = f"kwola-screenshot-{self.frameNumber:05d}.png"
 
         filePath = os.path.join(self.screenshotDirectory, fileName)
 
@@ -157,7 +157,7 @@ class WebEnvironmentSession:
         return screenshotHash
 
     def movieFileName(self):
-        return "kwola-video-{}.mp4".format(self.tabNumber)
+        return f"kwola-video-{self.tabNumber}.mp4"
 
     def movieFilePath(self):
         return os.path.join(self.screenshotDirectory, self.movieFileName())
@@ -353,12 +353,12 @@ class WebEnvironmentSession:
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
                     if self.config['web_session_print_every_action']:
-                        print(datetime.now(), "[{}]".format(os.getpid()), "Clicking", action.x, action.y, action.source, flush=True)
+                        print(datetime.now(), f"[{os.getpid()}]", "Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.click(on_element=element)
                     actionChain.pause(uiReactionWaitTime)
                 elif action.times == 2:
                     if self.config['web_session_print_every_action']:
-                        print(datetime.now(), "[{}]".format(os.getpid()), "Double Clicking", action.x, action.y, action.source, flush=True)
+                        print(datetime.now(), f"[{os.getpid()}]", "Double Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.double_click(on_element=element)
                     actionChain.pause(uiReactionWaitTime)
 
@@ -366,7 +366,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), "[{}]".format(os.getpid()), "Right Clicking", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "Right Clicking", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
@@ -375,7 +375,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), "[{}]".format(os.getpid()), "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
@@ -386,30 +386,30 @@ class WebEnvironmentSession:
 
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), "[{}]".format(os.getpid()), "Clearing field at", action.x, action.y, action.source, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "Clearing field at", action.x, action.y, action.source, flush=True)
                 element.clear()
 
             if isinstance(action, WaitAction):
-                print(datetime.now(), "[{}]".format(os.getpid()), "Waiting for ", action.time, "at", action.x, action.y, action.source)
+                print(datetime.now(), f"[{os.getpid()}]", "Waiting for ", action.time, "at", action.x, action.y, action.source)
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), "[{}]".format(os.getpid()), "Running action {} {} at {},{} failed!".format(action.type, action.source, action.x, action.y), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), "[{}]".format(os.getpid()), "Running action {} {} at {},{} failed!".format(action.type, action.source, action.x, action.y), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), "[{}]".format(os.getpid()), "Running action {} {} at {},{} failed!".format(action.type, action.source, action.x, action.y), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
         except AttributeError as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), "[{}]".format(os.getpid()), "Running action {} {} at {},{} failed!".format(action.type, action.source, action.x, action.y), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
 
             success = False
 
@@ -424,9 +424,9 @@ class WebEnvironmentSession:
             errorHash = error.computeHash()
 
             if errorHash not in self.errorHashes:
-                print(datetime.now(), "[{}]".format(os.getpid()), "An unhandled exception was detected in client application:")
-                print(datetime.now(), "[{}]".format(os.getpid()), "{} at line {} column {} in {}".format(msg, lineno, colno, source))
-                print(datetime.now(), "[{}]".format(os.getpid()), str(stack), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", "An unhandled exception was detected in client application:")
+                print(datetime.now(), f"[{os.getpid()}]", f"{msg} at line {lineno} column {colno} in {source}")
+                print(datetime.now(), f"[{os.getpid()}]", str(stack), flush=True)
 
                 self.errorHashes.add(errorHash)
                 hadNewError = True
@@ -441,8 +441,8 @@ class WebEnvironmentSession:
                 errorHash = error.computeHash()
 
                 if errorHash not in self.errorHashes:
-                    print(datetime.now(), "[{}]".format(os.getpid()), "A log error was detected in client application:")
-                    print(datetime.now(), "[{}]".format(os.getpid()), message, flush=True)
+                    print(datetime.now(), f"[{os.getpid()}]", "A log error was detected in client application:")
+                    print(datetime.now(), f"[{os.getpid()}]", message, flush=True)
 
                     self.errorHashes.add(errorHash)
                     hadNewError = True

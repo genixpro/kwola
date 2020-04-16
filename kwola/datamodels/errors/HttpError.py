@@ -45,4 +45,4 @@ class HttpError(BaseError):
         return hasher.hexdigest()
 
     def generateErrorDescription(self):
-        return "Error {} at {}: {}".format(self.statusCode, self.path, self.message)
+        return f"Error {self.statusCode} at {self.path}: {self.message}"

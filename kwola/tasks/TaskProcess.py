@@ -38,10 +38,10 @@ class TaskProcess:
 
 
     def run(self):
-        print(datetime.now(), "[{}]".format(os.getpid()), "TaskProcess: Waiting for input from stdin", flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", "TaskProcess: Waiting for input from stdin", flush=True)
         dataStr = sys.stdin.readline()
         data = json.loads(dataStr)
-        print(datetime.now(), "[{}]".format(os.getpid()), "Running process with following data:", flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", "Running process with following data:", flush=True)
         print(json.dumps(data, indent=4), flush=True)
         result = self.targetFunc(**data)
         print(TaskProcess.resultStartString, flush=True)

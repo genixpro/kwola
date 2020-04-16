@@ -81,7 +81,7 @@ def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId,
     executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
 
     videoData = agent.createDebugVideoForExecutionSession(executionSession, includeNeuralNetworkCharts=includeNeuralNetworkCharts, includeNetPresentRewardChart=includeNetPresentRewardChart, hilightStepNumber=hilightStepNumber)
-    with open(os.path.join(kwolaDebugVideoDirectory, '{}{}.mp4'.format(name + "_" if name else "", str(executionSession.id))), "wb") as cloneFile:
+    with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
         cloneFile.write(videoData)
 
     del agent
@@ -105,7 +105,7 @@ def loadAllBugs(config):
 
 
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
-    print(datetime.now(), "[{}]".format(os.getpid()), "Starting New Testing Sequence", flush=True)
+    print(datetime.now(), f"[{os.getpid()}]", "Starting New Testing Sequence", flush=True)
 
     returnValue = {}
 
@@ -192,7 +192,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             os.unlink(resultFileName)
 
             if stepsRemaining % config['testing_print_every'] == 0:
-                print(datetime.now(), "[{}]".format(os.getpid()), "Finished {} testing actions.".format(step + 1), flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Finished {step + 1} testing actions.", flush=True)
 
             traces = environment.runActions(actions, [executionSession.id for executionSession in executionSessions])
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
@@ -235,30 +235,30 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             subProcessCommandQueue.put("quit")
             subProcess.join()
 
-        print(datetime.now(), "[{}]".format(os.getpid()), "Creating movies for the execution sessions of this testing sequence.", flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", f"Creating movies for the execution sessions of this testing sequence.", flush=True)
         videoPaths = environment.createMovies()
 
         kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
 
         for sessionN, videoPath, executionSession in zip(range(len(videoPaths)), videoPaths, executionSessions):
             with open(videoPath, 'rb') as origFile:
-                with open(os.path.join(kwolaVideoDirectory, '{}.mp4'.format(str(executionSession.id))), "wb") as cloneFile:
+                with open(os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
                     cloneFile.write(origFile.read())
 
         totalRewards = []
         for session in executionSessions:
-            print(datetime.now(), "[{}]".format(os.getpid()), "Session {} finished with total reward: {:.2f}".format(session.tabNumber, session.totalReward), flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
             session.saveToDisk(config)
             totalRewards.append(session.totalReward)
 
-        print(datetime.now(), "[{}]".format(os.getpid()), "Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
 
         testStep.bugsFound = len(newErrorsThisTestingStep)
         testStep.errors = newErrorsThisTestingStep
 
         debugVideoSubprocesses = []
 
-        print(datetime.now(), "[{}]".format(os.getpid()), "Found {} new unique errors this session.".format(len(newErrorsThisTestingStep)), flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
         for errorIndex, error, executionSessionId, stepNumber in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds, newErrorOriginalStepNumbers):
             bug = BugModel()
             bug.id = CustomIDField.generateNewUUID(BugModel, config)
@@ -273,19 +273,19 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 file.write(bug.generateBugText())
 
             bugVideoFilePath = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".mp4")
-            with open(os.path.join(kwolaVideoDirectory, '{}.mp4'.format(str(executionSessionId))), "rb") as origFile:
+            with open(os.path.join(kwolaVideoDirectory, f'{str(executionSessionId)}.mp4'), "rb") as origFile:
                 with open(bugVideoFilePath, 'wb') as cloneFile:
                     cloneFile.write(origFile.read())
 
-            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessionId), "{}_bug".format(bug.id), False, False, stepNumber, "bugs"))
+            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
             debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
-            print(datetime.now(), "[{}]".format(os.getpid()), "")
-            print(datetime.now(), "[{}]".format(os.getpid()), "Bug #{}:".format(errorIndex + 1))
-            print(datetime.now(), "[{}]".format(os.getpid()), bug.generateBugText(), flush=True)
-            print(datetime.now(), "[{}]".format(os.getpid()), "")
+            print(datetime.now(), f"[{os.getpid()}]", f"")
+            print(datetime.now(), f"[{os.getpid()}]", f"Bug #{errorIndex + 1}:")
+            print(datetime.now(), f"[{os.getpid()}]", bug.generateBugText(), flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", f"")
 
 
         testStep.status = "completed"
@@ -315,7 +315,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         del environment
 
         for session in executionSessions:
-            print(datetime.now(), "[{}]".format(os.getpid()), "Preparing samples for {} and adding them to the sample cache.".format(session.id), flush=True)
+            print(datetime.now(), f"[{os.getpid()}]", f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
             addExecutionSessionToSampleCache(session.id, config)
 
         for debugVideoSubprocess in debugVideoSubprocesses:
@@ -323,10 +323,10 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
     except Exception as e:
         traceback.print_exc()
-        print(datetime.now(), "[{}]".format(os.getpid()), "Unhandled exception occurred during testing sequence", flush=True)
+        print(datetime.now(), f"[{os.getpid()}]", "Unhandled exception occurred during testing sequence", flush=True)
 
     # This print statement will trigger the parent manager process to kill this process.
-    print(datetime.now(), "[{}]".format(os.getpid()), "Finished Running Testing Sequence!", flush=True)
+    print(datetime.now(), f"[{os.getpid()}]", "Finished Running Testing Sequence!", flush=True)
 
     return returnValue
 
