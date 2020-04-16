@@ -51,7 +51,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
             print(cantStartMessage)
             exit(1)
         else:
-            print(f"Loading the Kwola run in directory {configDir}")
+            print("Loading the Kwola run in directory {}".format(configDir))
 
     elif len(commandArgs) >= 1:
         secondArg = commandArgs[0]
@@ -63,7 +63,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
 
         if os.path.exists(secondArg) and Configuration.checkDirectoryContainsKwolaConfig(secondArg):
             configDir = secondArg
-            print(f"Loading the Kwola run in directory {configDir}")
+            print("Loading the Kwola run in directory {}".format(configDir))
         elif Configuration.isValidURL(secondArg):
             # Create a new config directory for this URL
             url = secondArg
@@ -139,9 +139,9 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                     ]).ask()  # returns value of selection
 
                 if needToChange == "yes":
-                    print(f"Please see the configuration file {os.path.join(configDir, 'kwola.json')} for all of the settings that you can tune in this Kwola run.")
-                    print(f"When you are ready, simply run the following command to restart Kwola with your updating settings:")
-                    print(f"kwola {configDir}")
+                    print("Please see the configuration file {} for all of the settings that you can tune in this Kwola run.".format(os.path.join(configDir, 'kwola.json')))
+                    print("When you are ready, simply run the following command to restart Kwola with your updating settings:")
+                    print("kwola {}".format(configDir))
                     exit(0)
 
             ready = questionary.select(
@@ -154,9 +154,9 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
             if ready == "no":
                 exit(0)
 
-            print(f"")
-            print(f"Starting a fresh Kwola run in directory {configDir} targeting URL {url}")
-            print(f"", flush=True)
+            print("")
+            print("Starting a fresh Kwola run in directory {} targeting URL {}".format(configDir, url))
+            print("", flush=True)
         else:
             print(cantStartMessage)
             exit(2)

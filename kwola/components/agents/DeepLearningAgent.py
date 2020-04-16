@@ -76,7 +76,7 @@ class DeepLearningAgent:
         elif self.whichGpu is None:
             self.variableWrapperFunc = lambda t, x: t(x)
         else:
-            self.variableWrapperFunc = lambda t, x: t(x).cuda(device=f"cuda:{self.whichGpu}")
+            self.variableWrapperFunc = lambda t, x: t(x).cuda(device="cuda:{}".format(self.whichGpu))
 
         # Fetch the folder that we will store the model parameters in
         self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
@@ -323,13 +323,13 @@ class DeepLearningAgent:
 
         if self.whichGpu == "all":
             # Use all available GPUs
-            device_ids = [torch.device(f'cuda:{n}') for n in range(torch.cuda.device_count())]
+            device_ids = [torch.device('cuda:{}'.format(n)) for n in range(torch.cuda.device_count())]
         elif self.whichGpu is None:
             # Only the GPU
             device_ids = [torch.device('cpu')]
         else:
             # Use a specific GPU, ignore the others
-            device_ids = [torch.device(f'cuda:{self.whichGpu}')]
+            device_ids = [torch.device('cuda:{}'.format(self.whichGpu))]
 
         return device_ids
 
@@ -841,7 +841,7 @@ class DeepLearningAgent:
 
                     except ValueError:
                         # If there is any problem, just override back to a fully random action without predictions involved
-                        print(datetime.now(), f"[{os.getpid()}]", "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
+                        print(datetime.now(), "[{}]".format(os.getpid()), "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
                         # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
                         # So instead we just pick an action randomly.
                         actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, samplePixelActionMap)
@@ -1126,7 +1126,7 @@ class DeepLearningAgent:
         """
         videoPath = self.config.getKwolaUserDataDirectory("videos")
 
-        rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"))
+        rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, "{}.mp4".format(str(executionSession.id))))
 
         executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
 
@@ -1287,67 +1287,66 @@ class DeepLearningAgent:
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 antiAliasingMode = cv2.LINE_AA
 
-                cv2.putText(image, f"URL {trace.startURL}", (columnOneLeft, lineOneTop), font, fontSize,
+                cv2.putText(image, "URL {}".format(trace.startURL), (columnOneLeft, lineOneTop), font, fontSize,
                             fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"{str(executionSessionId)}", (columnOneLeft, lineTwoTop), font,
+                cv2.putText(image, str(executionSessionId), (columnOneLeft, lineTwoTop), font,
                             fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"Frame {trace.frameNumber}", (columnOneLeft, lineThreeTop), font,
+                cv2.putText(image, "Frame " + str(trace.frameNumber), (columnOneLeft, lineThreeTop), font,
                             fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image,
-                            f"Action {trace.actionPerformed.type} at {trace.actionPerformed.x},{trace.actionPerformed.y}",
+                cv2.putText(image, "Action {} at {},{}".format(trace.actionPerformed.type, trace.actionPerformed.x, trace.actionPerformed.y),
                             (columnOneLeft, lineFourTop), font, fontSize, fontColor, fontThickness,
                             antiAliasingMode)
-                cv2.putText(image, f"Source: {str(trace.actionPerformed.source)}", (columnOneLeft, lineFiveTop),
+                cv2.putText(image, "Source: {}".format(str(trace.actionPerformed.source)), (columnOneLeft, lineFiveTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Succeed: {str(trace.didActionSucceed)}", (columnOneLeft, lineSixTop),
+                cv2.putText(image, "Succeed: {}".format(str(trace.didActionSucceed)), (columnOneLeft, lineSixTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"Error: {str(trace.didErrorOccur)}", (columnOneLeft, lineSevenTop),
+                cv2.putText(image, "Error: {}".format(str(trace.didErrorOccur)), (columnOneLeft, lineSevenTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"New Error: {str(trace.didNewErrorOccur)}", (columnOneLeft, lineEightTop),
+                cv2.putText(image, "New Error: {}".format(str(trace.didNewErrorOccur)), (columnOneLeft, lineEightTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"Override: {str(trace.actionPerformed.wasRepeatOverride)}", (columnOneLeft, lineNineTop),
-                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
-
-                cv2.putText(image, f"Code Execute: {str(trace.didCodeExecute)}", (columnTwoLeft, lineTwoTop),
-                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"New Branches: {str(trace.didNewBranchesExecute)}", (columnTwoLeft, lineThreeTop),
+                cv2.putText(image, "Override: {}".format(str(trace.actionPerformed.wasRepeatOverride)), (columnOneLeft, lineNineTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Network Traffic: {str(trace.hadNetworkTraffic)}", (columnTwoLeft, lineFourTop),
+                cv2.putText(image, "Code Execute: {}".format(str(trace.didCodeExecute)), (columnTwoLeft, lineTwoTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"New Network Traffic: {str(trace.hadNewNetworkTraffic)}", (columnTwoLeft, lineFiveTop),
-                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
-
-                cv2.putText(image, f"Screenshot Change: {str(trace.didScreenshotChange)}", (columnTwoLeft, lineSixTop),
-                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"New Screenshot: {str(trace.isScreenshotNew)}", (columnTwoLeft, lineSevenTop),
+                cv2.putText(image, "New Branches: {}".format(str(trace.didNewBranchesExecute)), (columnTwoLeft, lineThreeTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Cursor: {str(trace.cursor)}", (columnTwoLeft, lineEightTop), font,
+                cv2.putText(image, "Network Traffic: {}".format(str(trace.hadNetworkTraffic)), (columnTwoLeft, lineFourTop),
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
+                cv2.putText(image, "New Network Traffic: {}".format(str(trace.hadNewNetworkTraffic)), (columnTwoLeft, lineFiveTop),
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
+
+                cv2.putText(image, "Screenshot Change: {}".format(str(trace.didScreenshotChange)), (columnTwoLeft, lineSixTop),
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
+                cv2.putText(image, "New Screenshot: {}".format(str(trace.isScreenshotNew)), (columnTwoLeft, lineSevenTop),
+                            font, fontSize, fontColor, fontThickness, antiAliasingMode)
+
+                cv2.putText(image, "Cursor: {}".format(str(trace.cursor)), (columnTwoLeft, lineEightTop), font,
                             fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Discounted Future Reward: {(discountedFutureReward):.3f}",
+                cv2.putText(image, "Discounted Future Reward: {:.3f}".format(discountedFutureReward),
                             (columnThreeLeft, lineTwoTop), font, fontSize, fontColor, fontThickness,
                             antiAliasingMode)
-                cv2.putText(image, f"Present Reward: {(presentReward):.3f}", (columnThreeLeft, lineThreeTop),
+                cv2.putText(image, "Present Reward: {:.3f}".format(presentReward), (columnThreeLeft, lineThreeTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Branch Coverage: {(trace.cumulativeBranchCoverage * 100):.2f}%",
+                cv2.putText(image, "Branch Coverage: {:.2f}%".format(trace.cumulativeBranchCoverage * 100),
                             (columnThreeLeft, lineFourTop), font, fontSize, fontColor, fontThickness,
                             antiAliasingMode)
 
-                cv2.putText(image, f"URL Change: {str(trace.didURLChange)}", (columnThreeLeft, lineFiveTop),
+                cv2.putText(image, "URL Change: {}".format(str(trace.didURLChange)), (columnThreeLeft, lineFiveTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
-                cv2.putText(image, f"New URL: {str(trace.isURLNew)}", (columnThreeLeft, lineSixTop),
+                cv2.putText(image, "New URL: {}".format(str(trace.isURLNew)), (columnThreeLeft, lineSixTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
-                cv2.putText(image, f"Had Log Output: {trace.hadLogOutput}", (columnThreeLeft, lineSevenTop),
+                cv2.putText(image, "Had Log Output: {}".format(trace.hadLogOutput), (columnThreeLeft, lineSevenTop),
                             font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
                 if trace.actionPerformed.predictedReward:
-                    cv2.putText(image, f"Predicted Reward: {(trace.actionPerformed.predictedReward):.3f}", (columnThreeLeft, lineEightTop),
+                    cv2.putText(image, "Predicted Reward: {:.3f}".format(trace.actionPerformed.predictedReward), (columnThreeLeft, lineEightTop),
                                 font, fontSize, fontColor, fontThickness, antiAliasingMode)
 
             def addBottomRewardChartToImage(image, trace):
@@ -1363,7 +1362,7 @@ class DeepLearningAgent:
                 rewardChartAxes.set_xticks(range(0, len(presentRewards), self.config.debug_video_bottom_reward_chart_x_tick_spacing))
                 rewardChartAxes.set_xticklabels([str(n) for n in range(0, len(presentRewards), self.config.debug_video_bottom_reward_chart_x_tick_spacing)])
                 rewardChartAxes.set_yticks([self.config.debug_video_reward_min_value, self.config.debug_video_reward_max_value])
-                rewardChartAxes.set_yticklabels([f"{self.config.debug_video_reward_min_value:.2f}", f"{self.config.debug_video_reward_max_value:.2f}"])
+                rewardChartAxes.set_yticklabels(["{:.2f}".format(self.config.debug_video_reward_min_value), "{:.2f}".format(self.config.debug_video_reward_max_value)])
                 rewardChartAxes.set_title("Net Present Reward")
                 rewardChartFigure.tight_layout()
 
@@ -1447,7 +1446,7 @@ class DeepLearningAgent:
                 rewardPixelMaskAxes.imshow(rewardPixelMask, vmin=0, vmax=1, cmap=plt.get_cmap("gray"), interpolation="bilinear")
                 rewardPixelMaskAxes.set_xticks([])
                 rewardPixelMaskAxes.set_yticks([])
-                rewardPixelMaskAxes.set_title(f"{rewardPixelCount} target pixels")
+                rewardPixelMaskAxes.set_title("{} target pixels".format(rewardPixelCount))
 
                 # pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 # currentFig += 1
@@ -1456,7 +1455,7 @@ class DeepLearningAgent:
                 # pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
                 # pixelActionMapAxes.set_xticks([])
                 # pixelActionMapAxes.set_yticks([])
-                # pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
+                # pixelActionMapAxes.set_title("{actionPixelCount} action pixels".format(actionPixelCount))
 
                 additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
 
@@ -1513,7 +1512,7 @@ class DeepLearningAgent:
                     rewardPredictionsShrunk = skimage.measure.block_reduce(totalRewardPredictions[0][actionIndex], (squareSize, squareSize), numpy.max)
 
                     im = rewardPredictionAxes[actionIndex].imshow(rewardPredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=self.config.debug_video_reward_min_value, vmax=self.config.debug_video_reward_max_value)
-                    rewardPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f} reward")
+                    rewardPredictionAxes[actionIndex].set_title("{} {:.2f} reward".format(action, maxValue))
                     mainFigure.colorbar(im, ax=rewardPredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
@@ -1525,7 +1524,7 @@ class DeepLearningAgent:
                     advanagePredictionsShrunk = skimage.measure.block_reduce(advantagePredictions[0][actionIndex], (squareSize, squareSize), numpy.max)
 
                     im = advantagePredictionAxes[actionIndex].imshow(advanagePredictionsShrunk, cmap=mainColorMap, interpolation="nearest", vmin=self.config.debug_video_advantage_min_value, vmax=self.config.debug_video_advantage_max_value)
-                    advantagePredictionAxes[actionIndex].set_title(f"{action} {maxValue:.2f} advantage")
+                    advantagePredictionAxes[actionIndex].set_title("{} {:.2f} advantage".format(action, maxValue))
                     mainFigure.colorbar(im, ax=advantagePredictionAxes[actionIndex], orientation='vertical')
 
                 for actionIndex, action in enumerate(self.actionsSorted):
@@ -1537,7 +1536,7 @@ class DeepLearningAgent:
                     actionProbabilityPredictionsShrunk = skimage.measure.block_reduce(actionProbabilities[0][actionIndex], (squareSize, squareSize), numpy.max)
 
                     im = actionProbabilityPredictionAxes[actionIndex].imshow(actionProbabilityPredictionsShrunk, cmap=mainColorMap, interpolation="nearest")
-                    actionProbabilityPredictionAxes[actionIndex].set_title(f"{action} {maxValue:.3f} prob")
+                    actionProbabilityPredictionAxes[actionIndex].set_title("{} {:.3f} prob".format(action, maxValue))
                     mainFigure.colorbar(im, ax=actionProbabilityPredictionAxes[actionIndex], orientation='vertical')
 
                 stampAxes.set_xticks([])
@@ -1553,7 +1552,7 @@ class DeepLearningAgent:
                 stateValueAxes.set_yticks([])
                 stateValueIm = stateValueAxes.imshow([stateValue], cmap=mainColorMap, interpolation="nearest", vmin=self.config.debug_video_reward_min_value, vmax=self.config.debug_video_reward_max_value)
                 mainFigure.colorbar(stateValueIm, ax=stateValueAxes, orientation='vertical')
-                stateValueAxes.set_title(f"State Value {float(stateValue[0]):.3f}")
+                stateValueAxes.set_title("State Value {:.3f}".format(float(stateValue[0])))
 
                 # ax.grid()
                 mainFigure.tight_layout()
@@ -1580,7 +1579,7 @@ class DeepLearningAgent:
             if includeNeuralNetworkCharts:
                 addRightSideDebugCharts(newImage, lastRawImage, trace)
 
-            fileName = f"kwola-screenshot-{debugImageIndex:05d}.png"
+            fileName = "kwola-screenshot-{:05d}.png".format(debugImageIndex)
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
@@ -1595,14 +1594,14 @@ class DeepLearningAgent:
             if includeNeuralNetworkCharts:
                 addRightSideDebugCharts(newImage, lastRawImage, trace)
 
-            fileName = f"kwola-screenshot-{debugImageIndex + 1:05d}.png"
+            fileName = "kwola-screenshot-{:05d}.png".format(debugImageIndex + 1)
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
-            print(datetime.now(), f"[{os.getpid()}]", "Completed debug image", fileName, flush=True)
+            print(datetime.now(), "[{}]".format(os.getpid()), "Completed debug image", fileName, flush=True)
         except Exception:
             traceback.print_exc()
-            print(datetime.now(), f"[{os.getpid()}]", "Failed to create debug image!", flush=True)
+            print(datetime.now(), "[{}]".format(os.getpid()), "Failed to create debug image!", flush=True)
 
     def createRewardPixelMask(self, processedImage, x, y):
         """
@@ -1724,7 +1723,7 @@ class DeepLearningAgent:
         # In this section, we load the video and all of the execution traces from the disk
         # at the same time.
         videoPath = self.config.getKwolaUserDataDirectory("videos")
-        for rawImage, traceId in zip(DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f'{str(executionSession.id)}.mp4')), executionSession.executionTraces):
+        for rawImage, traceId in zip(DeepLearningAgent.readVideoFrames(os.path.join(videoPath, '{}.mp4'.format(str(executionSession.id)))), executionSession.executionTraces):
             trace = ExecutionTrace.loadFromDisk(traceId, self.config)
             # Occasionally if your doing a lot of R&D and killing the code a lot,
             # the software will save a broken file to disk. When this happens, you
@@ -2189,23 +2188,23 @@ class DeepLearningAgent:
             # This else statement should only happen if there is a significant error in the neural network
             # itself that is leading to NaN values in the results. So here, we print out all of the loss
             # values for all of the batchs to help you track down where the error is.
-            print(datetime.now(), f"[{os.getpid()}]", "ERROR! NaN detected in loss calculation. Skipping optimization step.")
+            print(datetime.now(), "[{}]".format(os.getpid()), "ERROR! NaN detected in loss calculation. Skipping optimization step.")
             for batchIndex, batchResult in batchResultTensors:
                 presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
                 advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
                 targetHomogenizationLoss, predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
                 totalSampleLosses, batch = batchResult
 
-                print(datetime.now(), f"[{os.getpid()}]", "Batch", batchIndex)
-                print(datetime.now(), f"[{os.getpid()}]", "presentRewardLoss", float(presentRewardLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "stateValueLoss", float(stateValueLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "advantageLoss", float(advantageLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "tracePredictionLoss", float(tracePredictionLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
+                print(datetime.now(), "[{}]".format(os.getpid()), "Batch", batchIndex)
+                print(datetime.now(), "[{}]".format(os.getpid()), "presentRewardLoss", float(presentRewardLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "stateValueLoss", float(stateValueLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "advantageLoss", float(advantageLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "tracePredictionLoss", float(tracePredictionLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
+                print(datetime.now(), "[{}]".format(os.getpid()), "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
 
             return
 

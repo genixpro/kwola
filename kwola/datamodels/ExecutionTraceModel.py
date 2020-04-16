@@ -179,7 +179,7 @@ class ExecutionTrace(Document):
             elif isinstance(value, list):
                 newArray.extend(value)
             else:
-                print(f"ExecutionTrace.decompressArray Error! Unexpected value of type {type(value)} while decompressing array.")
+                print("ExecutionTrace.decompressArray Error! Unexpected value of type {} while decompressing array.".format(type(value)))
 
 
         return numpy.array(newArray)

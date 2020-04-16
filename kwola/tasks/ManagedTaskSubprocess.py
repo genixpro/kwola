@@ -106,7 +106,7 @@ class ManagedTaskSubprocess:
 
     def extractResultFromOutput(self):
         if TaskProcess.resultStartString not in self.output or TaskProcess.resultFinishString not in self.output:
-            print(datetime.now(), f"[{os.getpid()}]", "Error! Unable to extract result from the subprocess. Its possible the subprocess may have died", flush=True)
+            print(datetime.now(), "[{}]".format(os.getpid()), "Error! Unable to extract result from the subprocess. Its possible the subprocess may have died", flush=True)
             return None
         else:
             resultStart = self.output.index(TaskProcess.resultStartString)
@@ -146,7 +146,7 @@ class ManagedTaskSubprocess:
             else:
                 time.sleep(waitBetweenStdoutUpdates)
 
-        print(datetime.now(), f"[{os.getpid()}]", "Terminating task subprocess, task finished.", flush=True)
+        print(datetime.now(), "[{}]".format(os.getpid()), "Terminating task subprocess, task finished.", flush=True)
         self.alive = False
         self.stopProcessBothMethods()
 
@@ -156,7 +156,7 @@ class ManagedTaskSubprocess:
             print(additionalOutput, sep="", end="", flush=True)
 
         result = self.extractResultFromOutput()
-        print(datetime.now(), f"[{os.getpid()}]", "Task Subprocess finished and gave back result", flush=True)
+        print(datetime.now(), "[{}]".format(os.getpid()), "Task Subprocess finished and gave back result", flush=True)
         print(json.dumps(result, indent=4), flush=True)
 
         return result
@@ -167,7 +167,7 @@ class ManagedTaskSubprocess:
         while self.alive:
             elapsedSeconds = (datetime.now() - self.startTime).total_seconds()
             if elapsedSeconds > self.timeout:
-                print(datetime.now(), f"[{os.getpid()}]", "Killing Process due to too much time elapsed", flush=True)
+                print(datetime.now(), "[{}]".format(os.getpid()), "Killing Process due to too much time elapsed", flush=True)
                 self.stopProcessBothMethods()
 
             time.sleep(1)

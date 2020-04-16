@@ -86,20 +86,22 @@ class Configuration:
     def findLocalKwolaConfigDirectory():
         currentDir = os.getcwd()
 
-        found = None
+        found = []
         subFilesFolders = os.listdir(currentDir)
         for subDir in subFilesFolders:
             if Configuration.checkDirectoryContainsKwolaConfig(subDir):
-                found = subDir
-                break
+                found.append(subDir)
 
-        return found
+
+        found = sorted(found, reverse=True)
+
+        return found[0]
 
     @staticmethod
     def createNewLocalKwolaConfigDir(prebuild, **configArgs):
         n = 1
         while True:
-            dirname = f"kwola_run_{n}"
+            dirname = "kwola_run_{:03d}".format(n)
             if not os.path.exists(dirname):
                 os.mkdir(dirname)
 
@@ -128,10 +130,10 @@ class Configuration:
 
     @staticmethod
     def getPrebuiltConfigData(prebuild):
-        localFilePath = f"{prebuild}.json"
+        localFilePath = "{}.json".format(prebuild)
         if os.path.exists(localFilePath):
             with open(localFilePath, 'rt') as f:
                 return json.load(f)
         else:
-            return json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
+            return json.loads(pkg_resources.resource_string("kwola", "config/prebuilt_configs/{}.json".format(prebuild)))
 

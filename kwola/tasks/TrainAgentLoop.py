@@ -59,7 +59,7 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
 
 
 def runRandomInitialization(config, trainingSequence):
-    print(datetime.now(), f"[{os.getpid()}]", "Starting random testing sequences for initialization", flush=True)
+    print(datetime.now(), "[{}]".format(os.getpid()), "Starting random testing sequences for initialization", flush=True)
 
     trainingSequence.initializationTestingSteps = []
 
@@ -75,11 +75,11 @@ def runRandomInitialization(config, trainingSequence):
 
         for future in as_completed(futures):
             result = future.result()
-            print(datetime.now(), f"[{os.getpid()}]", "Random Testing Sequence Completed", flush=True)
+            print(datetime.now(), "[{}]".format(os.getpid()), "Random Testing Sequence Completed", flush=True)
 
     # Save the training sequence with all the data on the initialization sequences
     trainingSequence.saveToDisk(config)
-    print(datetime.now(), f"[{os.getpid()}]", "Random initialization completed", flush=True)
+    print(datetime.now(), "[{}]".format(os.getpid()), "Random initialization completed", flush=True)
 
 
 def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber):
@@ -99,11 +99,11 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
             trainingSequence.trainingSteps.append(trainingStep)
             trainingSequence.saveToDisk(config)
         else:
-            print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
+            print(datetime.now(), "[{}]".format(os.getpid()), "Training task subprocess appears to have failed", flush=True)
 
     except Exception as e:
         traceback.print_exc()
-        print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
+        print(datetime.now(), "[{}]".format(os.getpid()), "Training task subprocess appears to have failed", flush=True)
 
 
 def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugVideo=False):
@@ -159,7 +159,7 @@ def runMainTrainingLoop(config, trainingSequence):
 
             wait(futures)
 
-            print(datetime.now(), f"[{os.getpid()}]", "Completed one parallel training & testing step! Hooray!", flush=True)
+            print(datetime.now(), "[{}]".format(os.getpid()), "Completed one parallel training & testing step! Hooray!", flush=True)
 
             stepsCompleted += 1
 
