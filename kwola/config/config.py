@@ -39,18 +39,24 @@ class Configuration:
         if 'profile' not in data:
             data['profile'] = 'medium'
 
-        # If there are any configuration values that exist in the prebuilt config
-        # that we don't see in the loaded configuration file, then we add in
-        # those keys with the default values taken from the prebuilt config.
-        # This allows people to continue running existing runs even if we add
-        # new configuration keys in subsequent releases.
-        prebuiltConfigData = Configuration.getPrebuiltConfigData(data['profile'])
-        for key, value in prebuiltConfigData.items():
-            if key not in data:
-                data[key] = value
+        try:
+            # If there are any configuration values that exist in the prebuilt config
+            # that we don't see in the loaded configuration file, then we add in
+            # those keys with the default values taken from the prebuilt config.
+            # This allows people to continue running existing runs even if we add
+            # new configuration keys in subsequent releases.
+            prebuiltConfigData = Configuration.getPrebuiltConfigData(data['profile'])
+            for key, value in prebuiltConfigData.items():
+                if key not in data:
+                    data[key] = value
 
-        for key, value in data.items():
-            setattr(self, key, value)
+            for key, value in data.items():
+                setattr(self, key, value)
+        except FileNotFoundError:
+            # This indicates the prebuilt configuration could not be found.
+            # Print an error message and ignore it.
+            print(f"Was unable to find the prebuilt configuration file for {data['profile']}. Skipping loading default values.")
+
 
 
     def getKwolaUserDataDirectory(self, subDirName):
