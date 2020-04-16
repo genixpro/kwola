@@ -86,20 +86,21 @@ class Configuration:
     def findLocalKwolaConfigDirectory():
         currentDir = os.getcwd()
 
-        found = None
+        found = []
         subFilesFolders = os.listdir(currentDir)
         for subDir in subFilesFolders:
             if Configuration.checkDirectoryContainsKwolaConfig(subDir):
-                found = subDir
-                break
+                found.append(subDir)
 
-        return found
+        found = sorted(found, reverse=True)
+
+        return found[0]
 
     @staticmethod
     def createNewLocalKwolaConfigDir(prebuild, **configArgs):
         n = 1
         while True:
-            dirname = f"kwola_run_{n}"
+            dirname = f"kwola_run_{n:03d}"
             if not os.path.exists(dirname):
                 os.mkdir(dirname)
 
