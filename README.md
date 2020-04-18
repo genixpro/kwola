@@ -148,8 +148,8 @@ We are still sorting out precisely what the cause of the issue is.
 
 That's it! Kwola should now be installed. You can verify your Kwola installation using tools that are bundled with
 Kwola. These tools are provided as diagnostics that seperately test each of the major Kwola components / dependencies.
-We also provide a single command that tests all of the components together. These tests are intended to be used to check
-that you have installed everything correctly.
+We also provide a single command that runs a short, preconfigured end-to-end test of Kwola. These tests are intended
+to be used to check that you have installed everything correctly.
 
 First, check to make sure that Kwola is able to start headless browsers. This command tests that Chrome & 
 chomedriver are installed and Kwola is correctly finding and running the binaries.
@@ -176,7 +176,9 @@ will do a very short test sequence against the Kwola demo URL. It should take ju
 `[user@localhost]$ kwola_rapid_local_test_suite`
 
 If this completes successfully, then your Kwola installation is working. You are now ready to unleash Kwola onto
-your own URL.
+your own URL. If you still experience issues, that likely means that there is a bug in Kwola itself and its not
+related to your environment or installation. Please submit an issue through Github and attach as much information
+as you can. Thanks!
 
 
 Usage
