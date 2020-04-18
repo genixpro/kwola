@@ -456,7 +456,7 @@ def loadExecutionTraceWeightData(traceId, sessionId, configDir):
 
     if os.path.exists(weightFile):
         with open(weightFile, "rt") as f:
-            
+
             data = json.load(f)
     else:
         data = {
