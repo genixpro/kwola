@@ -482,6 +482,8 @@ def saveExecutionTraceWeightData(traceWeightData, configDir):
 def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
     config = Configuration(configDir)
 
+    success = True
+
     if gpu is not None:
         for subprocessIndex in range(10):
             try:
@@ -681,6 +683,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
     except Exception:
         print(datetime.now(), f"[{os.getpid()}]", f"Error occurred while learning sequence!", flush=True)
         traceback.print_exc()
+        success = False
     finally:
         files = os.listdir(batchDirectory)
         for file in files:
@@ -691,7 +694,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
 
     # This print statement will trigger the parent manager process to kill this process.
     print(datetime.now(), f"[{os.getpid()}]", "==== Training Step Completed ====", flush=True)
-    return {"trainingStepId": str(trainingStep.id)}
+    return {"trainingStepId": str(trainingStep.id), "success": success}
 
 
 if __name__ == "__main__":

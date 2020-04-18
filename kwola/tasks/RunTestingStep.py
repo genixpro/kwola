@@ -107,7 +107,7 @@ def loadAllBugs(config):
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
     print(datetime.now(), f"[{os.getpid()}]", "Starting New Testing Sequence", flush=True)
 
-    returnValue = {}
+    returnValue = {'success': True}
 
     try:
         multiprocessing.set_start_method('spawn')
@@ -124,7 +124,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         testStep.status = "running"
         testStep.saveToDisk(config)
 
-        returnValue = {"testingStepId": str(testStep.id)}
+        returnValue["testingStepId"] = str(testStep.id)
 
         executionSessions = [
             ExecutionSession(
@@ -324,6 +324,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
     except Exception as e:
         traceback.print_exc()
         print(datetime.now(), f"[{os.getpid()}]", "Unhandled exception occurred during testing sequence", flush=True)
+        returnValue['success'] = False
 
     # This print statement will trigger the parent manager process to kill this process.
     print(datetime.now(), f"[{os.getpid()}]", "Finished Running Testing Sequence!", flush=True)

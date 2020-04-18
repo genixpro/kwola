@@ -55,10 +55,10 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
     trainingSequence.initializationTestingSteps.append(testingStep)
     trainingSequence.saveToDisk(config)
 
-    return
+    return result
 
 
-def runRandomInitialization(config, trainingSequence):
+def runRandomInitialization(config, trainingSequence, exitOnFail=True):
     print(datetime.now(), f"[{os.getpid()}]", "Starting random testing sequences for initialization", flush=True)
 
     trainingSequence.initializationTestingSteps = []
@@ -75,6 +75,10 @@ def runRandomInitialization(config, trainingSequence):
 
         for future in as_completed(futures):
             result = future.result()
+            if result is None:
+                if exitOnFail:
+                    raise RuntimeError("Random initialization sequence failed and did not return a result.")
+
             print(datetime.now(), f"[{os.getpid()}]", "Random Testing Sequence Completed", flush=True)
 
     # Save the training sequence with all the data on the initialization sequences
@@ -101,6 +105,8 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
         else:
             print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
 
+        return result
+
     except Exception as e:
         traceback.print_exc()
         print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
@@ -123,8 +129,9 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
     trainingSequence.testingSteps.append(testingStep)
     trainingSequence.saveToDisk(config)
 
+    return result
 
-def runMainTrainingLoop(config, trainingSequence):
+def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
     stepsCompleted = 0
 
     stepStartTime = datetime.now()
@@ -159,6 +166,17 @@ def runMainTrainingLoop(config, trainingSequence):
 
             wait(futures)
 
+            anyFailures = False
+            for future in futures:
+                result = future.result()
+                if result is None:
+                    anyFailures = True
+                if 'success' in result and not result['success']:
+                    anyFailures = True
+
+            if anyFailures and exitOnFail:
+                raise RuntimeError("One of the testing / training loops failed and did not return successfully. Exiting the training loop.")
+
             print(datetime.now(), f"[{os.getpid()}]", "Completed one parallel training & testing step! Hooray!", flush=True)
 
             stepsCompleted += 1
@@ -170,7 +188,7 @@ def runMainTrainingLoop(config, trainingSequence):
         trainingSequence.saveToDisk(config)
 
 
-def trainAgent(configDir):
+def trainAgent(configDir, exitOnFail=False):
     multiprocessing.set_start_method('spawn')
 
     config = Configuration(configDir)
@@ -195,10 +213,10 @@ def trainAgent(configDir):
 
     testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
     if len(testingSteps) == 0:
-        runRandomInitialization(config, trainingSequence)
+        runRandomInitialization(config, trainingSequence, exitOnFail=True)
         trainingSequence.saveToDisk(config)
 
-    runMainTrainingLoop(config, trainingSequence)
+    runMainTrainingLoop(config, trainingSequence, exitOnFail=True)
 
     trainingSequence.status = "completed"
     trainingSequence.endTime = datetime.now()
