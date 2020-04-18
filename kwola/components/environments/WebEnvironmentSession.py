@@ -175,7 +175,12 @@ class WebEnvironmentSession:
         return os.path.join(self.screenshotDirectory, self.movieFileName())
 
     def createMovie(self):
-        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if result.returncode != 0:
+            print(f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:")
+            print(str(result.stdout, 'utf8'))
+            print(str(result.stderr, 'utf8'))
 
         return self.movieFilePath()
 
