@@ -3,9 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "babel-plugin-kwola": "^0.0.9",
     "@babel/cli": "^7.0.0",
-    "@babel/core": "^7.0.0"
+    "@babel/core": "^7.0.0",
+    "babel-plugin-kwola": "0.0.9"
   },
   "license": "GPLv3 Affero"
 }

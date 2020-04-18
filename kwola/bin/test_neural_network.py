@@ -82,14 +82,20 @@ def main():
         allSuccess = False
 
     gpus = torch.cuda.device_count()
-    for gpu in range(gpus):
-        print(f"Initializing the deep neural network on your CUDA GPU #{gpu}")
-        success = runNeuralNetworkTestOnGPU(gpu=gpu, config=config)
-        if success:
-            print(f"We have successfully initialized a neural network on GPU #{gpu} and run a few a training batches through it.")
-        else:
-            print(f"Neural network training appears to have failed on GPU #{gpu}")
-            allSuccess = False
+    if gpus > 0:
+        torch.distributed.init_process_group(backend="gloo",
+                                             world_size=1,
+                                             rank=0,
+                                             init_method="file:///tmp/kwola_distributed_coordinator", )
+
+        for gpu in range(gpus):
+            print(f"Initializing the deep neural network on your CUDA GPU #{gpu}")
+            success = runNeuralNetworkTestOnGPU(gpu=gpu, config=config)
+            if success:
+                print(f"We have successfully initialized a neural network on GPU #{gpu} and run a few a training batches through it.")
+            else:
+                print(f"Neural network training appears to have failed on GPU #{gpu}")
+                allSuccess = False
 
     if allSuccess:
         print("Everything worked! Kwola deep learning appears to be fully working.")
