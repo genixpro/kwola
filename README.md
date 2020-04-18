@@ -147,10 +147,12 @@ it a second time without -g to install it in your local directory for safe measu
 We are still sorting out precisely what the cause of the issue is.
 
 That's it! Kwola should now be installed. You can verify your Kwola installation using tools that are bundled with
-Kwola.
+Kwola. These tools are provided as diagnostics that seperately test each of the major Kwola components / dependencies.
+We also provide a single command that tests all of the components together. These tests are intended to be used to check
+that you have installed everything correctly.
 
-First, check to make sure that Selenium works. This tests that Chrome & chomedriver are installed and Kwola
-is correctly finding and running the binaries.
+First, check to make sure that Kwola is able to start headless browsers. This command tests that Chrome & 
+chomedriver are installed and Kwola is correctly finding and running the binaries.
 
 `[user@localhost]$ kwola_test_local_chromedriver`
 
@@ -168,7 +170,7 @@ and is a critical process.
 
 `[user@localhost]$ kwola_test_ffmpeg`
 
-If all four of those commands are successful, you can now run a more complete test suite. This next test suite
+If all four of those commands are successful, you can now run an end-to-end test suite. This next test suite
 will do a very short test sequence against the Kwola demo URL. It should take just a couple minutes to complete.
 
 `[user@localhost]$ kwola_rapid_local_test_suite`
