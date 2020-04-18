@@ -152,7 +152,7 @@ Kwola.
 First, check to make sure that Selenium works. This tests that Chrome & chomedriver are installed and Kwola
 is correctly finding and running the binaries.
 
-`[user@localhost]$ kwola_test_local_selenium`
+`[user@localhost]$ kwola_test_local_chromedriver`
 
 Next, check to make sure that NodeJS, Babel and the javascript code transpiling is working correctly.
 

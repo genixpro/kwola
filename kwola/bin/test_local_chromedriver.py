@@ -25,7 +25,8 @@ import time
 
 def main():
     """
-        This is the entry for the selenium testing command.
+        This is the entry for the command which tests your chrome & chromedriver installation to see if
+        Selenium is able to interact with it successfully.
     """
 
     targetURL = "https://google.com/"
