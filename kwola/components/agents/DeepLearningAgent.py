@@ -892,6 +892,23 @@ class DeepLearningAgent:
         width = pixelActionMap.shape[2]
         height = pixelActionMap.shape[1]
 
+        # Here we have an extra check just in case there were no action maps to choose our random action from.
+        if len(sampleActionMaps) == 0:
+            # We just choose x,y coordinates and the action from anywhere on the screen.
+            actionX = random.randint(0, int(width / self.config['model_image_downscale_ratio']))
+            actionY = random.randint(0, int(height / self.config['model_image_downscale_ratio']))
+            actionType = random.choice(range(len(self.actionsSorted)))
+
+            # We give the user a warning since this situation should be pretty rare. If its coming up a lot,
+            # that would indicate something ver wrong.
+            print(datetime.now(), f"[{os.getpid()}]", "Warning, there were no action maps to choose from when"
+                                                      " selecting a random action. Choosing a random x,y coordinate"
+                                                      " completely at random, anywhere on the screen and choosing"
+                                                      " any random action to execute at that coordinate. Its the"
+                                                      " only available option.", flush=True)
+
+            return actionX, actionY, actionType
+
         # Here we are assigning a weight for each of the action maps available to the network to choose from.
         # The weights for the action maps are based on what type of HTML element that action map is representing.
         actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, self.elementBaseWeights['other']) for map in sampleActionMaps]) / (numpy.array(sampleActionRecentActionCounts) + 1)

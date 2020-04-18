@@ -43,6 +43,7 @@ import selenium.common.exceptions
 import subprocess
 import tempfile
 import time
+import pickle
 
 
 class WebEnvironmentSession:
@@ -115,7 +116,16 @@ class WebEnvironmentSession:
         if initialBranchTrace is None:
             raise Exception("Error, did not find the kwola line counter object in the browser. This usually indicates that there was an error either in translating the javascript or in loading the page in the first place.")
 
-        self.branchTraceAcceptedFilesAndSizes = {key: len(value) for key, value in initialBranchTrace.items()}
+        branchTraceAcceptedFilesDiskFilePath = os.path.join(config.getKwolaUserDataDirectory("web_session_data"), "branch_trace_accepted_files_and_sizes")
+
+        if os.path.exists(branchTraceAcceptedFilesDiskFilePath):
+            with open(branchTraceAcceptedFilesDiskFilePath, "rb") as f:
+                self.branchTraceAcceptedFilesAndSizes = pickle.load(f)
+        else:
+            self.branchTraceAcceptedFilesAndSizes = {key: len(value) for key, value in initialBranchTrace.items()}
+            with open(branchTraceAcceptedFilesDiskFilePath, "wb") as f:
+                pickle.dump(self.branchTraceAcceptedFilesAndSizes, f)
+
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(initialBranchTrace)
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
