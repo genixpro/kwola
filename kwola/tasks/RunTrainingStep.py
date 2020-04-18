@@ -431,11 +431,8 @@ def printMovingAverageLosses(config, trainingStep):
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
     if config['enable_cursor_prediction_loss']:
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
-    if config['enable_loss_balancing']:
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Raw Loss:", averageTotalLoss, flush=True)
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Rebalanced Loss:", averageTotalRebalancedLoss, flush=True)
-    else:
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Loss:", averageTotalLoss, flush=True)
+
+    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Loss:", averageTotalLoss, flush=True)
 
 
 def loadExecutionSession(sessionId, config):
@@ -459,6 +456,7 @@ def loadExecutionTraceWeightData(traceId, sessionId, configDir):
 
     if os.path.exists(weightFile):
         with open(weightFile, "rt") as f:
+            
             data = json.load(f)
     else:
         data = {
@@ -476,7 +474,7 @@ def saveExecutionTraceWeightData(traceWeightData, configDir):
     weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceWeightData['id'] + ".json")
 
     with open(weightFile, "wt") as f:
-        json.dump(f, traceWeightData)
+        json.dump(traceWeightData, f)
 
 
 def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
