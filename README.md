@@ -191,6 +191,11 @@ your own URL. If you still experience issues, that likely means that there is a 
 related to your environment or installation. Please submit an issue through Github and attach as much information
 as you can. Thanks!
 
+Side-note, if you are interested in running the full end-to-end test suite for Kwola, please run the following
+command:
+
+`[user@localhost]$ kwola_full_internal_test_suite`
+
 
 Usage
 =====
