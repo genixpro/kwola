@@ -140,13 +140,28 @@ Install babel-cli and the Kwola babel plugin globally. This makes it easier for 
 `[user@localhost]$ sudo npm install babel-plugin-kwola -g`
 
 Some users have been running into issues when they install the babel-plugin-kwola globally. Therefore, just run
-it a second time without -g to install it in your local directory for safe meaasure.
+it a second time without -g to install it in your local directory for safe measure.
 
 `[user@localhost]$ npm install babel-plugin-kwola`
 
 We are still sorting out precisely what the cause of the issue is.
 
-That's it! Kwola should now be installed.
+That's it! Kwola should now be installed. You can verify your Kwola installation using tools that are bundled with
+Kwola.
+
+First, check to make sure that Selenium works. This tests that Chrome & chomedriver are installed and Kwola
+is correctly finding and running the binaries.
+
+`[user@localhost]$ kwola_test_local_selenium`
+
+If the command outputs that it is successful, you can now run a more complete test suite. This next test suite
+will do a very short test sequence against the Kwola demo URL. It should take just a couple minutes to complete.
+
+`[user@localhost]$ kwola_rapid_local_test_suite`
+
+If this completes successfully, then your Kwola installation is working. You are now ready to unleash Kwola onto
+your own URL.
+
 
 Usage
 =====
