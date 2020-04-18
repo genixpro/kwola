@@ -22,13 +22,12 @@ import unittest
 
 def main():
     """
-        This is the entry point for the Kwola secondary command, kwola_train_agent.
-
-        It is basically identical in behaviour as the main function.
+        This is the entry point for for the kwola full testing sequence.
     """
-    suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop")
-    suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_end_to_end.TestEndToEnd")
 
     runner = unittest.TextTestRunner(verbosity=3)
-    runner.run(suite)
+
+    runner.run(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop"))
+    runner.run(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_end_to_end.TestEndToEnd"))
+
 
