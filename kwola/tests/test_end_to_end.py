@@ -2,6 +2,7 @@
 import unittest
 from ..tasks import TrainAgentLoop
 from ..config.config import Configuration
+import shutil
 
 class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):
@@ -18,7 +19,10 @@ class TestEndToEnd(unittest.TestCase):
                                                                enableDoubleClickCommand=False,
                                                                enableRightClickCommand=False
                                                                )
-        TrainAgentLoop.trainAgent(configDir)
+        try:
+            TrainAgentLoop.trainAgent(configDir)
+        finally:
+            shutil.rmtree(configDir)
 
     def test_amazon(self):
         self.run_click_only_test("https://amazon.com/")

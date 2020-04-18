@@ -2,7 +2,7 @@
 import unittest
 from ..tasks import TrainAgentLoop
 from ..config.config import Configuration
-
+import shutil
 
 class TestTrainingLoop(unittest.TestCase):
     def test_restaurant_click_only(self):
@@ -19,7 +19,10 @@ class TestTrainingLoop(unittest.TestCase):
                                                                enableDoubleClickCommand=False,
                                                                enableRightClickCommand=False
                                                                )
-        TrainAgentLoop.trainAgent(configDir)
+        try:
+            TrainAgentLoop.trainAgent(configDir)
+        finally:
+            shutil.rmtree(configDir)
 
     def test_restaurant_all_actions(self):
         configDir = Configuration.createNewLocalKwolaConfigDir("testing",
@@ -36,3 +39,7 @@ class TestTrainingLoop(unittest.TestCase):
                                                                enableRightClickCommand=True
                                                                )
         TrainAgentLoop.trainAgent(configDir)
+        try:
+            TrainAgentLoop.trainAgent(configDir)
+        finally:
+            shutil.rmtree(configDir)
