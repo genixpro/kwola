@@ -146,6 +146,17 @@ it a second time without -g to install it in your local directory for safe measu
 
 We are still sorting out precisely what the cause of the issue is.
 
+Lastly, if you are interested in connecting and debugging URL's that will require a TLS connection (URLS with https://
+in part of it), then you will need to install the certificate that was generated when you installed kwola as a trusted
+root certificate. If you are on a computer with a full user interface with, you can do this easily using the following
+command:
+
+`[user@localhost]$ kwola_install_proxy_cert`
+
+If you are on a server machine, its a bit more complicated. You will have to read this page and follow the instructions:
+
+https://docs.mitmproxy.org/stable/concepts-certificates/
+
 That's it! Kwola should now be installed. You can verify your Kwola installation using tools that are bundled with
 Kwola. These tools are provided as diagnostics that seperately test each of the major Kwola components / dependencies.
 We also provide a single command that runs a short, preconfigured end-to-end test of Kwola. These tests are intended

@@ -62,6 +62,7 @@ class WebEnvironmentSession:
         proxyConfig = Proxy()
         proxyConfig.proxy_type = ProxyType.MANUAL
         proxyConfig.http_proxy = f"localhost:{proxyPort}"
+        proxyConfig.ssl_proxy = f"localhost:{proxyPort}"
         proxyConfig.add_to_capabilities(capabilities)
 
         self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
@@ -102,8 +103,6 @@ class WebEnvironmentSession:
         # TODO: NEED TO FIND A BETTER WAY FOR THE PATH TRACER TO SEPARATE OUT FLOWS FROM DIFFERENT TABS
         self.pathTracer = pathTracer
 
-        self.lastBranchTrace = self.extractBranchTrace()
-
         self.allUrls.add(self.targetURL)
         self.allUrls.add(self.driver.current_url)
 
@@ -114,9 +113,9 @@ class WebEnvironmentSession:
 
         initialBranchTrace = self.extractBranchTrace()
         if initialBranchTrace is None:
-            raise Exception("Error, did not find the kwola line counter object in the browser. This usually indicates that there was an errer either in translating the javascript or in loading the page in the first place.")
+            raise Exception("Error, did not find the kwola line counter object in the browser. This usually indicates that there was an error either in translating the javascript or in loading the page in the first place.")
 
-        self.branchTraceAcceptedFileNames = list(initialBranchTrace.keys())
+        self.branchTraceAcceptedFilesAndSizes = {key: len(value) for key, value in initialBranchTrace.items()}
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(initialBranchTrace)
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
@@ -189,6 +188,9 @@ class WebEnvironmentSession:
 
         result = self.driver.execute_script(injected_javascript)
 
+        if result is None:
+            return []
+
         return result
 
     def branchFeatureSize(self):
@@ -197,10 +199,50 @@ class WebEnvironmentSession:
     def computeCumulativeBranchExecutionVector(self, branchTrace):
         cumulativeBranchExecutionVector = np.array([])
 
+        if branchTrace is None:
+            print(datetime.now(), f"[{os.getpid()}]", "Warning! There is no data in the branch trace. Its possible we "
+                                                      "have navigated to a page that doesn't actually have any JS"
+                                                      "running. Reusing the cumulative branch execution vector"
+                                                      "from the previous from.")
+            cumulativeBranchExecutionVector = self.lastCumulativeBranchExecutionVector
+            return cumulativeBranchExecutionVector
+
+        for fileName in sorted(self.branchTraceAcceptedFilesAndSizes.keys()):
+            acceptableSize = self.branchTraceAcceptedFilesAndSizes[fileName]
+            if fileName in branchTrace:
+                if len(branchTrace[fileName]) != acceptableSize:
+                    print(datetime.now(), f"[{os.getpid()}]",
+                          f"Warning, the branch trace for file {fileName} appears to have "
+                          f"changed size from {acceptableSize} at the start of the session to "
+                          f"{len(branchTrace[fileName])} now. This likely means that "
+                          f"the client is loading different javascript files with the "
+                          f"same name. Dynamically loaded javascript is "
+                          f"not currently supported, and certainly this type is extra confusing. "
+                          f"Kwola will only be able to analyze the javascript that was loaded "
+                          f"during the initial html page load at this time.", flush=True)
+
+                    cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.zeros([acceptableSize])])
+                else:
+                    counterVector = branchTrace[fileName]
+                    # print(fileName, len(counterVector), flush=True)
+                    cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.array(counterVector)])
+            else:
+                print(datetime.now(), f"[{os.getpid()}]", f"Warning, there is a missing javascript file {fileName} in the branch "
+                                                          f"trace - the javascript file {fileName} was loaded on startup of the session"
+                                                          f"but is no longer present in the branch trace. This likely means "
+                                                          f"that Kwola changed to a different page and that page did not "
+                                                          f"load all of the same javascript files. This is not supported "
+                                                          f"at this time - Kwola will only be able to use the javascript "
+                                                          f"files that are shared between all pages.", flush=True)
+                cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.zeros([acceptableSize])])
+
         for fileName in sorted(branchTrace.keys()):
-            if fileName in self.branchTraceAcceptedFileNames:
-                counterVector = branchTrace[fileName]
-                cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.array(counterVector)])
+            if fileName not in self.branchTraceAcceptedFilesAndSizes:
+                print(datetime.now(), f"[{os.getpid()}]", f"Warning, there is an extra javascript file in the branch "
+                                                          f"trace {fileName} that was not there on startup. Dynamically "
+                                                          f"loaded javascript is not currently supported - Kwola will "
+                                                          f"only analyze the javascript that was loaded during the "
+                                                          f"initial html page load.", flush=True)
 
         return cumulativeBranchExecutionVector
 
@@ -273,7 +315,7 @@ class WebEnvironmentSession:
                     || isFunction(element.onkeyup))
                     data.canType = true;
                     
-                if (window.kwolaEvents.has(element))
+                if (window.kwolaEvents && window.kwolaEvents.has(element))
                 {
                     const knownEvents = window.kwolaEvents.get(element);
                     if (knownEvents.indexOf("click") != -1)
@@ -494,7 +536,6 @@ class WebEnvironmentSession:
         # Update the decaying execution trace to use as input for the next round
         self.decayingExecutionTrace = np.maximum(self.decayingExecutionTrace * 0.95, np.minimum(np.ones_like(branchExecutionVector), branchExecutionVector))
 
-        self.lastBranchTrace = branchTrace
         self.lastCumulativeBranchExecutionVector = cumulativeBranchExecutionVector
         self.allUrls.add(self.driver.current_url)
 
