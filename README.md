@@ -158,7 +158,12 @@ Next, check to make sure that NodeJS, Babel and the javascript code transpiling 
 
 `[user@localhost]$ kwola_test_javascript_rewriting`
 
-If both of those commands are successful, you can now run a more complete test suite. This next test suite
+If that is looking good, its time to test the neural network. This will check to see that pytorch is installed
+and that Kwola is able to run on your CPU & any GPU's installed without any issues.
+
+`[user@localhost]$ kwola_test_neural_network`
+
+If all three of those commands are successful, you can now run a more complete test suite. This next test suite
 will do a very short test sequence against the Kwola demo URL. It should take just a couple minutes to complete.
 
 `[user@localhost]$ kwola_rapid_local_test_suite`
