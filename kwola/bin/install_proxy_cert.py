@@ -26,6 +26,7 @@ from selenium import webdriver
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 import threading
 import time
+import sys
 
 def findFreePort():
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
@@ -53,6 +54,8 @@ def main():
     """
         This is the entry for the command which makes it convenient to install the proxy certificate
     """
+    commandArgs = sys.argv[1:]
+
     proxyPort = findFreePort()
 
     proxyThread = threading.Thread(target=runProxy, args=[proxyPort], daemon=True)
@@ -70,7 +73,12 @@ def main():
     driver.get("http://mitm.it/")
 
     print("Please kill the command with Ctrl-C or (Cmd-C on macOS) when you are finished installing the certificates. Timeout in 600 seconds...")
-    time.sleep(600)
+
+    timeout = 600
+    if len(commandArgs) > 0:
+        timeout = int(str(commandArgs[0]))
+    
+    time.sleep(timeout)
 
 
 
