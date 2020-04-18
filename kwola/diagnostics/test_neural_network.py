@@ -23,7 +23,7 @@ from ..components.agents.DeepLearningAgent import DeepLearningAgent
 import torch
 import torch.distributed
 import traceback
-
+import shutil
 
 def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
     try:
@@ -109,6 +109,8 @@ def testNeuralNetworkAllGPUs(verbose=True):
     if allSuccess:
         if verbose:
             print("Everything worked! Kwola deep learning appears to be fully working.")
+
+    shutil.rmtree(configDir)
 
     return allSuccess
 

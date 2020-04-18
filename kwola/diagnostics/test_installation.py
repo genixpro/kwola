@@ -53,9 +53,9 @@ def testInstallation(verbose=True):
             if not neuralNetworkWorking:
                 print("Something in your Pytorch / CUDA / NVIDIA / GPU installation. does not appear to be working."
                       " Please double check your installation of these tools and ensure you can run kwola_test_neural_network"
-                      "successfully.")
+                      " successfully.")
             if not jsRewritingWorking:
                 print("Something in your NodeJS / babel / babel-plugin-kwola installation does not appear to be working."
                       " Please double check your installation of these tools and ensure you can run kwola_test_javascript_rewriting"
-                      "successfully.")
+                      " successfully.")
         return False
