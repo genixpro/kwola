@@ -43,16 +43,16 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.0.46',
+    version='0.0.47',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
         'Programming Language :: Python',
         'Framework :: Pyramid',
     ],
-    author='',
-    author_email='',
-    url='',
+    author='Bradley Arsenault',
+    author_email='brad@kwola.io',
+    url='https://kwola.io/',
     keywords='torch pytorch artificial intelligence',
     packages=find_packages(),
     include_package_data=True,
