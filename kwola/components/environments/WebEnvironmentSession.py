@@ -113,6 +113,9 @@ class WebEnvironmentSession:
         self.lastScreenshotHash = screenHash
 
         initialBranchTrace = self.extractBranchTrace()
+        if initialBranchTrace is None:
+            raise Exception("Error, did not find the kwola line counter object in the browser. This usually indicates that there was an errer either in translating the javascript or in loading the page in the first place.")
+
         self.branchTraceAcceptedFileNames = list(initialBranchTrace.keys())
         self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(initialBranchTrace)
         self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)

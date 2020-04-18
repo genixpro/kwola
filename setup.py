@@ -72,7 +72,8 @@ setup(
             'kwola_train_agent = kwola.bin.train_agent:main',
             'kwola_run_train_step = kwola.bin.run_train_step:main',
             'kwola_run_test_step = kwola.bin.run_test_step:main',
-            'kwola_run_internal_test_suite = kwola.bin.run_internal_test_suite:main'
+            'kwola_run_internal_test_suite = kwola.bin.run_internal_test_suite:main',
+            'kwola_test_local_selenium = kwola.bin.test_local_selenium:main',
         ]
     }
 )
