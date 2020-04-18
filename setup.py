@@ -77,7 +77,8 @@ setup(
             'kwola_test_chromedriver = kwola.bin.test_chromedriver:main',
             'kwola_test_javascript_rewriting = kwola.bin.test_javascript_rewriting:main',
             'kwola_test_ffmpeg = kwola.bin.test_ffmpeg:main',
-            'kwola_test_neural_network = kwola.bin.test_neural_network:main'
+            'kwola_test_neural_network = kwola.bin.test_neural_network:main',
+            'kwola_test_installation = kwola.bin.test_installation:main'
         ]
     }
 )
