@@ -44,7 +44,8 @@ def main():
 
     if "kwola" not in str(result.stdout):
         print(f"Error, did not detect kwola transpiled javascript code from the output of babel. This indicates a failure. Output is:")
-        print(result.stdout)
+        print(str(result.stdout, 'utf8'))
+        print(str(result.stderr, 'utf8'))
         failure = True
 
     if failure:
