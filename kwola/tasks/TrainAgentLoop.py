@@ -189,7 +189,10 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
 
 
 def trainAgent(configDir, exitOnFail=False):
-    multiprocessing.set_start_method('spawn')
+    try:
+        multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        pass
 
     config = Configuration(configDir)
 

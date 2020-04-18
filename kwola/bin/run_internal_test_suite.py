@@ -27,6 +27,7 @@ def main():
         It is basically identical in behaviour as the main function.
     """
     suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop")
+    suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_end_to_end.TestEndToEnd")
 
     runner = unittest.TextTestRunner(verbosity=3)
     runner.run(suite)

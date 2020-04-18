@@ -190,13 +190,13 @@ class DeepLearningAgent:
 
         # Only add in the double click action if the user configured it
         if config['enableDoubleClickCommand']:
-            self.actions['doubleClick'] = lambda x, y: ClickTapAction(type="double_click", x=x, y=y, times=2)
+            self.actions['doubleClick'] = lambda x, y: ClickTapAction(type="doubleClick", x=x, y=y, times=2)
             self.actionBaseWeights.append(config['random_weight_double_click'])
             self.actionProbabilityBoostKeywords.append([])
 
         # Only add in the right click action if the user configured it
         if config['enableRightClickCommand']:
-            self.actions['rightClick'] = lambda x, y: RightClickAction(type="right_click", x=x, y=y)
+            self.actions['rightClick'] = lambda x, y: RightClickAction(type="rightClick", x=x, y=y)
             self.actionBaseWeights.append(config['random_weight_right_click'])
             self.actionProbabilityBoostKeywords.append([])
 
