@@ -27,6 +27,7 @@ from ...datamodels.actions.TypeAction import TypeAction
 from ...datamodels.ExecutionSessionModel import ExecutionSession
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
 from .TraceNet import TraceNet
+from ..utils.video import chooseBestFfmpegVideoCodec
 from datetime import datetime
 import concurrent.futures
 import copy
@@ -1183,7 +1184,7 @@ class DeepLearningAgent:
 
             concurrent.futures.wait(futures)
 
-        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', 'libx264', '-crf', '15', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-crf', '15', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
 
