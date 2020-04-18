@@ -163,7 +163,12 @@ and that Kwola is able to run on your CPU & any GPU's installed without any issu
 
 `[user@localhost]$ kwola_test_neural_network`
 
-If all three of those commands are successful, you can now run a more complete test suite. This next test suite
+Lastly, test to make sure that your kwola installation is able to run ffmpeg. ffmpeg is used for saving videos
+and is a critical process.
+
+`[user@localhost]$ kwola_test_ffmpeg`
+
+If all four of those commands are successful, you can now run a more complete test suite. This next test suite
 will do a very short test sequence against the Kwola demo URL. It should take just a couple minutes to complete.
 
 `[user@localhost]$ kwola_rapid_local_test_suite`

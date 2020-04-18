@@ -43,7 +43,7 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.0.40',
+    version='0.0.41',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
@@ -76,6 +76,7 @@ setup(
             'kwola_full_internal_test_suite = kwola.bin.full_internal_test_suite:main',
             'kwola_test_local_selenium = kwola.bin.test_local_selenium:main',
             'kwola_test_javascript_rewriting = kwola.bin.test_javascript_rewriting:main',
+            'kwola_test_ffmpeg = kwola.bin.test_ffmpeg:main',
             'kwola_test_neural_network = kwola.bin.test_neural_network:main'
         ]
     }
