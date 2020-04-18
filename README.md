@@ -154,7 +154,11 @@ is correctly finding and running the binaries.
 
 `[user@localhost]$ kwola_test_local_selenium`
 
-If the command outputs that it is successful, you can now run a more complete test suite. This next test suite
+Next, check to make sure that NodeJS, Babel and the javascript code transpiling is working correctly.
+
+`[user@localhost]$ kwola_test_javascript_rewriting`
+
+If both of those commands are successful, you can now run a more complete test suite. This next test suite
 will do a very short test sequence against the Kwola demo URL. It should take just a couple minutes to complete.
 
 `[user@localhost]$ kwola_rapid_local_test_suite`

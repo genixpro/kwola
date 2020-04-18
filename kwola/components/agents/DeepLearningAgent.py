@@ -350,6 +350,8 @@ class DeepLearningAgent:
         devices = self.getTorchDevices()
         outputDevice = devices[0]
 
+        self.branchFeatureSize = branchFeatureSize
+
         # Create the primary torch model object
         self.model = TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
 
@@ -1844,6 +1846,40 @@ class DeepLearningAgent:
                 "cursors": numpy.array([cursorVector], dtype=numpy.uint8)
             }
 
+    def prepareEmptyBatch(self):
+        """
+            This function will prepare a batch that is composed entirely of zeros. It has no data and is used soley for testing
+            to ensure code is working.
+
+            :return: This returns a single dictionary object of the batch size needed
+        """
+        width = 800
+        height = 600
+
+        return {
+                "traceIds": ["test"] * self.config['batch_size'],
+                "processedImages": numpy.zeros([self.config['batch_size'], 1,  height, width], dtype=numpy.float16),
+                "additionalFeatures": numpy.zeros([self.config['batch_size'], self.branchFeatureSize * 2], dtype=numpy.float16),
+                "pixelActionMaps": numpy.ones([self.config['batch_size'], len(self.actionsSorted), height, width], dtype=numpy.uint8),
+                "stepNumbers": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
+
+                "nextProcessedImages": numpy.zeros([self.config['batch_size'], 1,  height, width], dtype=numpy.float16),
+                "nextAdditionalFeatures": numpy.zeros([self.config['batch_size'], self.branchFeatureSize * 2], dtype=numpy.float16),
+                "nextPixelActionMaps": numpy.ones([self.config['batch_size'], len(self.actionsSorted), height, width], dtype=numpy.uint8),
+                "nextStepNumbers": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
+
+                "actionTypes": [self.actionsSorted[0]] * self.config['batch_size'],
+                "actionXs": numpy.zeros([self.config['batch_size']], dtype=numpy.int16),
+                "actionYs": numpy.zeros([self.config['batch_size']], dtype=numpy.int16),
+                "futureBranchTraces": numpy.zeros([self.config['batch_size'], self.branchFeatureSize], dtype=numpy.int8),
+
+                "presentRewards": numpy.ones([self.config['batch_size']], dtype=numpy.float32),
+                "rewardPixelMasks": numpy.ones([self.config['batch_size'], height, width], dtype=numpy.uint8),
+                "executionFeatures": numpy.zeros([self.config['batch_size'], 12], dtype=numpy.uint8),
+                "cursors": numpy.zeros([self.config['batch_size'], len(self.cursors)], dtype=numpy.uint8)
+            }
+
+
     def learnFromBatches(self, batches):
         """
             Runs backprop on the neural network with the given set of batches.
@@ -2142,7 +2178,7 @@ class DeepLearningAgent:
             # Add in the average homogenization loss if that is enabled
             if self.config['enable_homogenization_loss']:
                 targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
-                extraLosses.append(targetHomogenizationLoss.unsqueeze(0))
+                extraLosses.append(targetHomogenizationLoss.unsqueeze(0).unsqueeze(0))
             else:
                 targetHomogenizationLoss = zeroTensor
 
@@ -2233,10 +2269,7 @@ class DeepLearningAgent:
             targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
             predictedCursorLoss = float(predictedCursorLoss.data.item())
             totalLoss = float(totalLoss.data.item())
-            if self.config['enable_loss_balancing']:
-                totalRebalancedLoss = float(totalRebalancedLoss.data.item())
-            else:
-                totalRebalancedLoss = 0
+            totalRebalancedLoss = 0
 
             # Calculate the total present reward in the batch
             batchReward = float(numpy.sum(batch['presentRewards']))
