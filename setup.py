@@ -43,7 +43,7 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.0.42',
+    version='0.0.43',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
@@ -74,7 +74,7 @@ setup(
             'kwola_run_test_step = kwola.bin.run_test_step:main',
             'kwola_rapid_local_test_suite = kwola.bin.rapid_local_test_suite:main',
             'kwola_full_internal_test_suite = kwola.bin.full_internal_test_suite:main',
-            'kwola_test_local_chromedriver = kwola.bin.test_local_chromedriver:main',
+            'kwola_test_chromedriver = kwola.bin.test_chromedriver:main',
             'kwola_test_javascript_rewriting = kwola.bin.test_javascript_rewriting:main',
             'kwola_test_ffmpeg = kwola.bin.test_ffmpeg:main',
             'kwola_test_neural_network = kwola.bin.test_neural_network:main'
