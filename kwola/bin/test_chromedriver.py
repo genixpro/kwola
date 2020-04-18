@@ -17,11 +17,8 @@
 #     You should have received a copy of the GNU Affero General Public License
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-from selenium.webdriver.common.by import By
-import selenium
-import selenium.common
-import selenium.webdriver.chrome.options
-import time
+
+from ..diagnostics.test_chromedriver import testChromedriver
 
 def main():
     """
@@ -29,34 +26,9 @@ def main():
         Selenium is able to interact with it successfully.
     """
 
-    targetURL = "https://google.com/"
-
-    print(f"Starting a Chrome browser through the chromedriver and pointing it at {targetURL}")
-
-    chrome_options = selenium.webdriver.chrome.options.Options()
-    chrome_options.headless = True
-
-    capabilities = selenium.webdriver.DesiredCapabilities.CHROME
-    capabilities['loggingPrefs'] = {'browser': 'ALL'}
-
-    driver = selenium.webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
-
-    driver.get(targetURL)
-
-    # HACK! give time for page to load before proceeding.
-    time.sleep(2)
-
-    googleBodyElement = None
-
-    try:
-        googleBodyElement = driver.find_element(By.ID, 'gsr')
-    except selenium.common.exceptions.NoSuchElementException:
-        pass
-
-    if googleBodyElement is not None:
-        print(f"Congratulations! Your Selenium installation appears to be working. We were able to load {targetURL} with a headless browser.")
+    success = testChromedriver(verbose=True)
+    if success:
+        exit(0)
     else:
-        print(f"Unfortunately, your Selenium installation does not appear to be working. We were unable to load {targetURL} with the headless browser and confirm its the Google page.")
-
-    driver.close()
+        exit(1)
 

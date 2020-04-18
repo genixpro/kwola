@@ -21,6 +21,7 @@
 
 from ..config.config import Configuration
 from ..tasks import TrainAgentLoop
+from ..diagnostics.test_installation import testInstallation
 import os.path
 import questionary
 import sys
@@ -169,5 +170,12 @@ def main():
         This is the entry point for the main Kwola application, the console command "kwola".
         All it does is start a training loop.
     """
+    success = testInstallation(verbose=True)
+    if not success:
+        print(
+            "Unable to start the training loop. There appears to be a problem "
+            "with your Kwola installation or environment. Exiting.")
+        exit(1)
+
     configDir = getConfigurationDirFromCommandLineArgs()
     TrainAgentLoop.trainAgent(configDir)

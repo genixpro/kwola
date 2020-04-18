@@ -18,7 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-import subprocess
+from ..diagnostics.test_ffmpeg import testFfmpeg
 
 
 def main():
@@ -26,16 +26,8 @@ def main():
         This is the entry for the selenium testing command.
     """
 
-    result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    failure = None
-
-    if result.returncode != 0:
-        print(f"Error, process return code was not zero. It was {result.returncode}, indicating a failure. Please make sure ffmpeg is installed and is accessible from the console.")
-        failure = True
-
-    if failure:
-        exit(1)
-    else:
-        print("Kwola was successfully able to run ffmpeg")
+    success = testFfmpeg(verbose=True)
+    if success:
         exit(0)
+    else:
+        exit(1)

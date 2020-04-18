@@ -24,12 +24,17 @@ from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..tasks import RunTestingStep
 from .main import getConfigurationDirFromCommandLineArgs
-
+from ..diagnostics.test_installation import testInstallation
 
 def main():
     """
         This is the entry point for the Kwola secondary command, kwola_run_test_step.
     """
+    success = testInstallation(verbose=True)
+    if not success:
+        print("Refusing to start testing step. There appears to be a problem with your Kwola installation or environment.")
+        exit(1)
+
     configDir = getConfigurationDirFromCommandLineArgs()
     config = Configuration(configDir)
 

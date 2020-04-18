@@ -21,7 +21,7 @@
 
 from ..tasks import TrainAgentLoop
 from .main import getConfigurationDirFromCommandLineArgs
-
+from ..diagnostics.test_installation import testInstallation
 
 def main():
     """
@@ -29,5 +29,10 @@ def main():
 
         It is basically identical in behaviour as the main function.
     """
+    success = testInstallation(verbose=True)
+    if not success:
+        print("Refusing to start training loop. There appears to be a problem with your Kwola installation or environment.")
+        exit(1)
+
     configDir = getConfigurationDirFromCommandLineArgs()
     TrainAgentLoop.trainAgent(configDir)

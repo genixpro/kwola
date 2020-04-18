@@ -18,35 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from ..config.config import Configuration
-from ..components.agents.DeepLearningAgent import DeepLearningAgent
-import torch
-import traceback
-
-
-def runNeuralNetworkTestOnGPU(gpu, config):
-    try:
-        branchSize = 50
-
-        agent = DeepLearningAgent(config=config, whichGpu=gpu)
-
-        agent.initialize(branchSize, enableTraining=True)
-
-        print("Saving and loading the network to disk")
-        agent.save()
-        agent.load()
-
-        print("Starting training.")
-
-        for i in range(3):
-            print("Running iteration", i+1)
-            batches = [agent.prepareEmptyBatch() for n in range(2)]
-            agent.learnFromBatches(batches)
-
-        return True
-    except Exception:
-        traceback.print_exc()
-        return False
+from ..diagnostics.test_neural_network import testNeuralNetworkAllGPUs
 
 
 def main():
@@ -54,48 +26,9 @@ def main():
         This is the entry for the neural network testing command.
     """
 
-
-    configDir = Configuration.createNewLocalKwolaConfigDir("testing",
-                                                           url="http://demo.kwolatesting.com/",
-                                                           email="",
-                                                           password="",
-                                                           name="",
-                                                           paragraph="",
-                                                           enableRandomNumberCommand=False,
-                                                           enableRandomBracketCommand=False,
-                                                           enableRandomMathCommand=False,
-                                                           enableRandomOtherSymbolCommand=False,
-                                                           enableDoubleClickCommand=False,
-                                                           enableRightClickCommand=False
-                                                           )
-
-    config = Configuration(configDir)
-
-    allSuccess = True
-
-    print("Initializing the deep neural network on the CPU.")
-    success = runNeuralNetworkTestOnGPU(gpu=None, config=config)
+    success = testNeuralNetworkAllGPUs(verbose=True)
     if success:
-        print("We have successfully initialized a neural network on the CPU and run a few a training batches through it.")
+        exit(0)
     else:
-        print("Neural network training appears to have failed on the CPU.")
-        allSuccess = False
+        exit(1)
 
-    gpus = torch.cuda.device_count()
-    if gpus > 0:
-        torch.distributed.init_process_group(backend="gloo",
-                                             world_size=1,
-                                             rank=0,
-                                             init_method="file:///tmp/kwola_distributed_coordinator", )
-
-        for gpu in range(gpus):
-            print(f"Initializing the deep neural network on your CUDA GPU #{gpu}")
-            success = runNeuralNetworkTestOnGPU(gpu=gpu, config=config)
-            if success:
-                print(f"We have successfully initialized a neural network on GPU #{gpu} and run a few a training batches through it.")
-            else:
-                print(f"Neural network training appears to have failed on GPU #{gpu}")
-                allSuccess = False
-
-    if allSuccess:
-        print("Everything worked! Kwola deep learning appears to be fully working.")

@@ -6,6 +6,8 @@ import shutil
 
 class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):
+        print(f"\nStarting a click-only test targeting the URL {url}")
+
         configDir = Configuration.createNewLocalKwolaConfigDir("testing",
                                                                url=url,
                                                                email="",
@@ -21,6 +23,10 @@ class TestEndToEnd(unittest.TestCase):
                                                                )
         try:
             TrainAgentLoop.trainAgent(configDir)
+            print(f"Click-only test for URL {url} has completed successfully")
+        except Exception:
+            print(f"Click-only test for URL {url} has failed.")
+            raise
         finally:
             shutil.rmtree(configDir)
 

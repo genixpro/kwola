@@ -18,22 +18,29 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-import unittest
-from ..diagnostics.test_installation import testInstallation
+import subprocess
 
-def main():
+
+def testFfmpeg(verbose=True):
     """
-        This is the entry point for for the kwola full testing sequence.
+        This function is used to test whether FFMPEG is working correctly.
     """
-    success = testInstallation(verbose=True)
-    if not success:
-        print(
-            "There appears to be a problem with your Kwola installation or environment. Exiting.")
-        exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=3)
+    if verbose:
+        print("Testing running ffmpeg ...")
 
-    runner.run(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop"))
-    runner.run(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_end_to_end.TestEndToEnd"))
+    result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    failure = None
 
+    if result.returncode != 0:
+        if verbose:
+            print(f"Error, process return code was not zero. It was {result.returncode}, indicating a failure. Please make sure ffmpeg is installed and is accessible from the console.")
+        failure = True
+
+    if failure:
+        return False
+    else:
+        if verbose:
+            print("Kwola was successfully able to run ffmpeg.")
+        return True

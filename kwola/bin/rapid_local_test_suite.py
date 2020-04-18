@@ -19,11 +19,18 @@
 #
 
 import unittest
+from ..diagnostics.test_installation import testInstallation
 
 def main():
     """
         This is the entry point for the Kwola secondary command that runs a rapid test suite that can be used to diagnose whether your Kwola installation is working.
     """
+    success = testInstallation(verbose=True)
+    if not success:
+        print(
+            "There appears to be a problem with your Kwola installation or environment. Exiting.")
+        exit(1)
+
     suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop.test_restaurant_click_only")
 
     runner = unittest.TextTestRunner(verbosity=3)
