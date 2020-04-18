@@ -38,7 +38,6 @@ class TestTrainingLoop(unittest.TestCase):
                                                                enableDoubleClickCommand=True,
                                                                enableRightClickCommand=True
                                                                )
-        TrainAgentLoop.trainAgent(configDir)
         try:
             TrainAgentLoop.trainAgent(configDir)
         finally:
