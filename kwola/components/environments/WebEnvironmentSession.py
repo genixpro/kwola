@@ -186,6 +186,10 @@ class WebEnvironmentSession:
 
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
         injected_javascript = (
+            'if (!window.kwolaCounters)'
+            '{'
+            '   window.kwolaCounters = {};'
+            '}'
             'Object.keys(window.kwolaCounters).forEach((fileName) => {'
             '   window.kwolaCounters[fileName].fill(0);'
             '});'
