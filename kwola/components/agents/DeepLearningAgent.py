@@ -1772,11 +1772,11 @@ class DeepLearningAgent:
         # provide an additional, highly supervised target for a secondary loss function.
         tracesReversed = list(copy.copy(executionTraces))
         tracesReversed.reverse()
-        currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace)
+        currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace, dtype=numpy.float)
         executionTraceDiscountRate = self.config['future_execution_trace_decay_rate']
         decayingFutureBranchTraces = []
         for trace in tracesReversed:
-            decayingFutureBranchTrace = numpy.array(trace.branchExecutionTrace)
+            decayingFutureBranchTrace = numpy.array(trace.branchExecutionTrace, dtype=numpy.float)
             currentTrace *= executionTraceDiscountRate
             currentTrace += numpy.minimum(decayingFutureBranchTrace, numpy.ones_like(decayingFutureBranchTrace))
             decayingFutureBranchTraces.append(decayingFutureBranchTrace)

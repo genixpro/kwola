@@ -69,76 +69,81 @@ def addExecutionSessionToSampleCache(executionSessionId, config):
 
 
 def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessionId, batchDirectory):
-    config = Configuration(configDir)
+    try:
+        config = Configuration(configDir)
 
-    agent = DeepLearningAgent(config, whichGpu=None)
+        agent = DeepLearningAgent(config, whichGpu=None)
 
-    sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
-    cacheFile = os.path.join(sampleCacheDir, executionTraceId + ".pickle.gz")
+        sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
+        cacheFile = os.path.join(sampleCacheDir, executionTraceId + ".pickle.gz")
 
-    if not os.path.exists(cacheFile):
-        addExecutionSessionToSampleCache(executionSessionId, config)
-        cacheHit = False
-    else:
-        cacheHit = True
+        if not os.path.exists(cacheFile):
+            addExecutionSessionToSampleCache(executionSessionId, config)
+            cacheHit = False
+        else:
+            cacheHit = True
 
-    with open(cacheFile, 'rb') as file:
-        sampleBatch = pickle.loads(gzip.decompress(file.read()))
+        with open(cacheFile, 'rb') as file:
+            sampleBatch = pickle.loads(gzip.decompress(file.read()))
 
-    imageWidth = sampleBatch['processedImages'].shape[3]
-    imageHeight = sampleBatch['processedImages'].shape[2]
+        imageWidth = sampleBatch['processedImages'].shape[3]
+        imageHeight = sampleBatch['processedImages'].shape[2]
 
-    # Calculate the crop positions for the main training image
-    if config['training_enable_image_cropping']:
-        randomXDisplacement = random.randint(-config['training_crop_center_random_x_displacement'], config['training_crop_center_random_x_displacement'])
-        randomYDisplacement = random.randint(-config['training_crop_center_random_y_displacement'], config['training_crop_center_random_y_displacement'])
+        # Calculate the crop positions for the main training image
+        if config['training_enable_image_cropping']:
+            randomXDisplacement = random.randint(-config['training_crop_center_random_x_displacement'], config['training_crop_center_random_x_displacement'])
+            randomYDisplacement = random.randint(-config['training_crop_center_random_y_displacement'], config['training_crop_center_random_y_displacement'])
 
-        cropLeft, cropTop, cropRight, cropBottom = agent.calculateTrainingCropPosition(sampleBatch['actionXs'][0] + randomXDisplacement, sampleBatch['actionYs'][0] + randomYDisplacement, imageWidth, imageHeight)
-    else:
-        cropLeft = 0
-        cropRight = imageWidth
-        cropTop = 0
-        cropBottom = imageHeight
+            cropLeft, cropTop, cropRight, cropBottom = agent.calculateTrainingCropPosition(sampleBatch['actionXs'][0] + randomXDisplacement, sampleBatch['actionYs'][0] + randomYDisplacement, imageWidth, imageHeight)
+        else:
+            cropLeft = 0
+            cropRight = imageWidth
+            cropTop = 0
+            cropBottom = imageHeight
 
-    # Calculate the crop positions for the next state image
-    if config['training_enable_next_state_image_cropping']:
-        nextStateCropCenterX = random.randint(10, imageWidth - 10)
-        nextStateCropCenterY = random.randint(10, imageHeight - 10)
+        # Calculate the crop positions for the next state image
+        if config['training_enable_next_state_image_cropping']:
+            nextStateCropCenterX = random.randint(10, imageWidth - 10)
+            nextStateCropCenterY = random.randint(10, imageHeight - 10)
 
-        nextStateCropLeft, nextStateCropTop, nextStateCropRight, nextStateCropBottom = agent.calculateTrainingCropPosition(nextStateCropCenterX, nextStateCropCenterY, imageWidth, imageHeight, nextStepCrop=True)
-    else:
-        nextStateCropLeft = 0
-        nextStateCropRight = imageWidth
-        nextStateCropTop = 0
-        nextStateCropBottom = imageHeight
+            nextStateCropLeft, nextStateCropTop, nextStateCropRight, nextStateCropBottom = agent.calculateTrainingCropPosition(nextStateCropCenterX, nextStateCropCenterY, imageWidth, imageHeight, nextStepCrop=True)
+        else:
+            nextStateCropLeft = 0
+            nextStateCropRight = imageWidth
+            nextStateCropTop = 0
+            nextStateCropBottom = imageHeight
 
-    # Crop all the input images and update the action x & action y
-    # This is done at this step because the cropping is random
-    # and thus you don't want to store the randomly cropped version
-    # in the redis cache
-    sampleBatch['processedImages'] = sampleBatch['processedImages'][:, :, cropTop:cropBottom, cropLeft:cropRight]
-    sampleBatch['pixelActionMaps'] = sampleBatch['pixelActionMaps'][:, :, cropTop:cropBottom, cropLeft:cropRight]
-    sampleBatch['rewardPixelMasks'] = sampleBatch['rewardPixelMasks'][:, cropTop:cropBottom, cropLeft:cropRight]
-    sampleBatch['actionXs'] = sampleBatch['actionXs'] - cropLeft
-    sampleBatch['actionYs'] = sampleBatch['actionYs'] - cropTop
+        # Crop all the input images and update the action x & action y
+        # This is done at this step because the cropping is random
+        # and thus you don't want to store the randomly cropped version
+        # in the redis cache
+        sampleBatch['processedImages'] = sampleBatch['processedImages'][:, :, cropTop:cropBottom, cropLeft:cropRight]
+        sampleBatch['pixelActionMaps'] = sampleBatch['pixelActionMaps'][:, :, cropTop:cropBottom, cropLeft:cropRight]
+        sampleBatch['rewardPixelMasks'] = sampleBatch['rewardPixelMasks'][:, cropTop:cropBottom, cropLeft:cropRight]
+        sampleBatch['actionXs'] = sampleBatch['actionXs'] - cropLeft
+        sampleBatch['actionYs'] = sampleBatch['actionYs'] - cropTop
 
-    sampleBatch['nextProcessedImages'] = sampleBatch['nextProcessedImages'][:, :, nextStateCropTop:nextStateCropBottom, nextStateCropLeft:nextStateCropRight]
-    sampleBatch['nextPixelActionMaps'] = sampleBatch['nextPixelActionMaps'][:, :, nextStateCropTop:nextStateCropBottom, nextStateCropLeft:nextStateCropRight]
+        sampleBatch['nextProcessedImages'] = sampleBatch['nextProcessedImages'][:, :, nextStateCropTop:nextStateCropBottom, nextStateCropLeft:nextStateCropRight]
+        sampleBatch['nextPixelActionMaps'] = sampleBatch['nextPixelActionMaps'][:, :, nextStateCropTop:nextStateCropBottom, nextStateCropLeft:nextStateCropRight]
 
-    # Add augmentation to the processed images. This is done at this stage
-    # so that we don't store the augmented version in the redis cache.
-    # Instead, we want the pure version in the redis cache and create a
-    # new augmentation every time we load it.
-    processedImage = sampleBatch['processedImages'][0]
-    augmentedImage = agent.augmentProcessedImageForTraining(processedImage)
-    sampleBatch['processedImages'][0] = augmentedImage
+        # Add augmentation to the processed images. This is done at this stage
+        # so that we don't store the augmented version in the redis cache.
+        # Instead, we want the pure version in the redis cache and create a
+        # new augmentation every time we load it.
+        processedImage = sampleBatch['processedImages'][0]
+        augmentedImage = agent.augmentProcessedImageForTraining(processedImage)
+        sampleBatch['processedImages'][0] = augmentedImage
 
-    fileDescriptor, fileName = tempfile.mkstemp(".bin", dir=batchDirectory)
+        fileDescriptor, fileName = tempfile.mkstemp(".bin", dir=batchDirectory)
 
-    with open(fileDescriptor, 'wb') as batchFile:
-        pickle.dump(sampleBatch, batchFile)
+        with open(fileDescriptor, 'wb') as batchFile:
+            pickle.dump(sampleBatch, batchFile)
 
-    return fileName, cacheHit
+        return fileName, cacheHit
+    except Exception:
+        traceback.print_exc()
+        print("", flush=True)
+        raise
 
 
 def isNumpyArray(obj):
@@ -158,7 +163,7 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
             # This just gives a bit of bias towards the algorithm to select
             # the same execution traces while the system is booting up
             # and gets the GPU to full speed sooner without requiring the cache to be
-            # completely filled. This is helpful when coldstarting a training run, such
+            # completely filled. This is helpful when cold starting a training run, such
             # as when doing R&D. it basically plays no role once you have a run going
             # for any length of time since the batch cache will fill up within
             # a single training step.
