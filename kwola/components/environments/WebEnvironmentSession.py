@@ -114,8 +114,6 @@ class WebEnvironmentSession:
         self.lastScreenshotHash = screenHash
 
         self.cumulativeBranchTrace = self.extractBranchTrace()
-        if self.cumulativeBranchTrace is None:
-            raise Exception("Error, did not find the kwola line counter object in the browser. This usually indicates that there was an error either in translating the javascript or in loading the page in the first place.")
 
         self.errorHashes = set()
 
@@ -197,9 +195,16 @@ class WebEnvironmentSession:
 
         self.driver.execute_script(injected_javascript)
 
-        # Cast everything to a numpy array so we don't have to do it later
-        for fileName, vector in result.items():
-            result[fileName] = numpy.array(vector)
+        if result is not None:
+            # Cast everything to a numpy array so we don't have to do it later
+            for fileName, vector in result.items():
+                result[fileName] = numpy.array(vector)
+        else:
+            print(datetime.now(), f"[{os.getpid()}]", "Warning, did not find the kwola line counter object in the browser. This usually "
+                  "indicates that there was an error either in translating the javascript, an error "
+                  "in loading the page, or that the page has absolutely no javascript. "
+                  f"On page: {self.driver.current_url}")
+            result = {}
 
         return result
 

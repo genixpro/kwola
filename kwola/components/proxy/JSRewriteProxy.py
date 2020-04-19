@@ -26,6 +26,7 @@ import os
 import os.path
 import subprocess
 import base64
+import traceback
 
 
 class JSRewriteProxy:
@@ -33,6 +34,11 @@ class JSRewriteProxy:
         self.config = config
 
         self.memoryCache = {}
+
+        self.knownResponseWrappers = [
+            ("""<!--/*--><html><body><script type="text/javascript"><!--//*/""",
+             """ """)
+        ]
 
     def getCacheFileName(self, fileHash, fileName):
         cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("javascript"), fileHash + "_" + fileName)
@@ -118,7 +124,22 @@ class JSRewriteProxy:
 
                 fileNameForBabel = shortFileHash + "-" + fileName
 
-                result = subprocess.run(['babel','-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola'], input=bytes(flow.response.data.content), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                jsFileContents = str(bytes(flow.response.data.content), 'utf8').strip()
+                strictMode = False
+                if jsFileContents.startswith("'use strict';") or jsFileContents.startswith('"use strict";'):
+                    strictMode = True
+                    jsFileContents = jsFileContents.replace("'use strict';", "")
+                    jsFileContents = jsFileContents.replace('"use strict";', "")
+
+                wrapperStart = ""
+                wrapperEnd = ""
+                for wrapper in self.knownResponseWrappers:
+                    if jsFileContents.startswith(wrapper[0]) and jsFileContents.endswith(wrapper[1]):
+                        jsFileContents = jsFileContents[len(wrapper[0]):-len(wrapper[1])]
+                        wrapperStart = wrapper[0]
+                        wrapperEnd = wrapper[1]
+
+                result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', 'script'], input=bytes(jsFileContents, 'utf8'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 if result.returncode != 0:
                     print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most likely this is because Babel thinks your javascript has invalid syntax, or that babel is not working / not able to find the babel-plugin-kwola / unable to transpile the javascript for some other reason. See the following truncated output:")
@@ -131,12 +152,17 @@ class JSRewriteProxy:
                     else:
                         print("No data in standard error output")
                 else:
-                    transformed = result.stdout
+                    transformed = wrapperStart + str(result.stdout, "utf8") + wrapperEnd
 
-                    self.saveInCache(shortFileHash, fileName, transformed)
-                    self.memoryCache[longFileHash] = transformed
+                    if strictMode:
+                        transformed = '"use strict";\n' + transformed
 
-                    flow.response.data.headers['Content-Length'] = str(len(transformed))
-                    flow.response.data.content = transformed
+                    transformedBytes = bytes(transformed, 'utf8')
+
+                    self.saveInCache(shortFileHash, fileName, transformedBytes)
+                    self.memoryCache[longFileHash] = transformedBytes
+
+                    flow.response.data.headers['Content-Length'] = str(len(transformedBytes))
+                    flow.response.data.content = transformedBytes
         except Exception as e:
-            print(e)
+            traceback.print_exc()
