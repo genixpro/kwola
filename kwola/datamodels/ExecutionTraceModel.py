@@ -86,46 +86,35 @@ class ExecutionTrace(Document):
 
     cursor = StringField()
 
-    # This field is compressed using a transparent algorithm that makes sparse arrays smaller
-    startCumulativeBranchExecutionTraceCompressed = ListField()
-
-    # This field is compressed using a transparent algorithm that makes sparse arrays smaller
-    startDecayingExecutionTraceCompressed = ListField()
-
-    # This field is compressed using a transparent algorithm that makes sparse arrays smaller
-    branchExecutionTraceCompressed = ListField()
+    # This field is stores the execution trace for this round.
+    # The dictionary maps file names to lists which then contain the line execution counts for that file
+    # It is transparently compressed and decompressed on the fly
+    branchTraceCompressed = DictField(ListField())
 
     # This field is used by the training routine to track how much loss the network had on this execution trace.
     lastTrainingRewardLoss = FloatField(default=1.0)
 
+    # Cached cumulative branch trace vector. This is only "cached" because it can actually be recomputed on the fly
+    cachedCumulativeBranchTrace = DictField(ListField())
+
+    # Cached decaying branch trace vector. This is only "cached" because it can actually be recomputed on the fly
+    cachedDecayingBranchTrace = DictField(ListField())
+
     # We use Python getter / setter methods to transparently compress and decompress
     # these fields as they go into and out of the database model.
     @property
-    def startCumulativeBranchExecutionTrace(self):
-        return self.decompressArray(self.startCumulativeBranchExecutionTraceCompressed)
+    def branchTrace(self):
+        return {
+            fileName: self.decompressArray(self.branchTraceCompressed[fileName])
+            for fileName in self.branchTraceCompressed.keys()
+        }
 
-    @startCumulativeBranchExecutionTrace.setter
-    def startCumulativeBranchExecutionTrace(self, value):
-        self.startCumulativeBranchExecutionTraceCompressed = self.compressArray(value)
-
-
-    @property
-    def startDecayingExecutionTrace(self):
-        return self.decompressArray(self.startDecayingExecutionTraceCompressed)
-
-    @startDecayingExecutionTrace.setter
-    def startDecayingExecutionTrace(self, value):
-        self.startDecayingExecutionTraceCompressed = self.compressArray(value)
-
-
-    @property
-    def branchExecutionTrace(self):
-        return self.decompressArray(self.branchExecutionTraceCompressed)
-
-    @branchExecutionTrace.setter
-    def branchExecutionTrace(self, value):
-        self.branchExecutionTraceCompressed = self.compressArray(value)
-
+    @branchTrace.setter
+    def branchTrace(self, value):
+        self.branchTraceCompressed = {
+            fileName: self.compressArray(value[fileName])
+            for fileName in value.keys()
+        }
 
     def compressArray(self, array):
         """
@@ -185,6 +174,8 @@ class ExecutionTrace(Document):
         return numpy.array(newArray)
 
     def saveToDisk(self, config):
+        self.cachedCumulativeBranchTrace = None
+        self.cachedDecayingBranchTrace = None
         saveObjectToDisk(self, "execution_traces", config)
 
 

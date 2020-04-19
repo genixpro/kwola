@@ -56,11 +56,11 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
             inferenceBatchFileName = message
 
         with open(inferenceBatchFileName, 'rb') as file:
-            step, images, envActionMaps, additionalFeatures, pastExecutionTraces = pickle.load(file)
+            step, images, envActionMaps, pastExecutionTraces = pickle.load(file)
 
         os.unlink(inferenceBatchFileName)
 
-        actions = agent.nextBestActions(step, images, envActionMaps, additionalFeatures, pastExecutionTraces, shouldBeRandom=shouldBeRandom)
+        actions = agent.nextBestActions(step, images, envActionMaps, pastExecutionTraces, shouldBeRandom=shouldBeRandom)
 
         resultFileDescriptor, resultFileName = tempfile.mkstemp()
         with open(resultFileDescriptor, 'wb') as file:
@@ -172,16 +172,12 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             images = environment.getImages()
             envActionMaps = environment.getActionMaps()
 
-            branchFeature = environment.getBranchFeatures()
-            decayingExecutionTraceFeature = environment.getExecutionTraceFeatures()
-            additionalFeatures = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=1)
-
             fileDescriptor, inferenceBatchFileName = tempfile.mkstemp()
 
             with open(fileDescriptor, 'wb') as file:
-                pickle.dump((step, images, envActionMaps, additionalFeatures, executionSessionTraces), file)
+                pickle.dump((step, images, envActionMaps, executionSessionTraces), file)
 
-            del images, envActionMaps, branchFeature, decayingExecutionTraceFeature, additionalFeatures
+            del images, envActionMaps
 
             subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses[0]
 

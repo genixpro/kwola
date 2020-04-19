@@ -23,7 +23,7 @@ import torch
 
 
 class TraceNet(torch.nn.Module):
-    def __init__(self, config, additionalFeatureSize, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
+    def __init__(self, config, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
         super(TraceNet, self).__init__()
 
         self.config = config
@@ -34,9 +34,11 @@ class TraceNet(torch.nn.Module):
 
         self.timeEncodingSize = 1
 
+        self.symbolEmbedding = torch.nn.EmbeddingBag(self.config['symbol_dictionary_size'], self.config['symbol_embedding_size'], mode="sum")
+
         self.stampProjection = torch.nn.Sequential(
             torch.nn.Linear(
-                in_features=additionalFeatureSize,
+                in_features=self.config['symbol_embedding_size'],
                 out_features=self.stampSize - self.timeEncodingSize
             ),
             torch.nn.ELU(),
@@ -233,8 +235,11 @@ class TraceNet(torch.nn.Module):
 
         pixelFeatureMap = self.mainModel(data['image'])
 
+        # Compute the embedding based on the symbols provided. symbols are usually traces of which lines of code got executed.
+        symbolEmbeddings = self.symbolEmbedding(data['symbolIndexes'], data['symbolOffsets'], per_sample_weights=data['symbolWeights'])
+
         # Concatenate the step number with the rest of the additional features
-        additionalFeaturesWithStep = torch.cat([torch.log10(data['stepNumber'] + torch.ones_like(data['stepNumber'])).reshape([-1, 1]), self.stampProjection(data['additionalFeature'])], dim=1)
+        additionalFeaturesWithStep = torch.cat([torch.log10(data['stepNumber'] + torch.ones_like(data['stepNumber'])).reshape([-1, 1]), self.stampProjection(symbolEmbeddings)], dim=1)
 
         # Append the stamp layer along side the pixel-by-pixel features
         stamp = additionalFeaturesWithStep.reshape([-1, self.config['additional_features_stamp_depth_size'],

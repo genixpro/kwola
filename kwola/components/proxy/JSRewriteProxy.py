@@ -25,6 +25,7 @@ import hashlib
 import os
 import os.path
 import subprocess
+import base64
 
 
 class JSRewriteProxy:
@@ -61,6 +62,31 @@ class JSRewriteProxy:
         """
         pass
 
+    def computeHashes(self, data):
+        """
+            Computes two hashes for the given data. A short hash and a long hash.
+
+            The long hash is a full md5 hash, encoded in base64 except with the extra 2 characters removed
+            so its purely alphanumeric, although can vary in length.
+
+            The short hash is a very short, four character hash which helps uniquely identify the file when used
+            alongside the filename. Its also purely alphanumeric and only in lowercase.
+
+            @returns (longHash, shortHash) a tuple with two strings
+        """
+        hasher = hashlib.md5()
+        hasher.update(data)
+
+        base64ExtraCharacters = bytes("--", 'utf8')
+        longHash = str(base64.b64encode(hasher.digest(), altchars=base64ExtraCharacters), 'utf8')
+        longHash = longHash.replace("-", "")
+        longHash = longHash.replace("=", "")
+
+        shortHashLength = 4
+        shortHash = longHash[::int(len(longHash)/shortHashLength)][:shortHashLength].lower()
+
+        return longHash, shortHash
+
 
     @concurrent
     def response(self, flow):
@@ -68,34 +94,31 @@ class JSRewriteProxy:
             The full HTTP response has been read.
         """
 
-        fileData = bytes(flow.response.data.content)
-        hasher = hashlib.md5()
-        hasher.update(bytes(flow.request.path, 'utf8'))
-        hasher.update(fileData)
-
         # Ignore it if its a 304 not modified error. These are fine.
         if flow.response.status_code == 304:
             return
 
-        fileHash = hasher.hexdigest()
+        longFileHash, shortFileHash = self.computeHashes(bytes(flow.response.data.content))
         fileName = flow.request.path.split("/")[-1]
         if "?" in fileName:
             fileName = fileName.split("?")[0]
 
         try:
             if '.js' in fileName and not ".json" in fileName:
-                cached = self.memoryCache.get(fileHash)
+                cached = self.memoryCache.get(longFileHash)
                 if cached is None:
-                    cached = self.findInCache(fileHash, fileName)
+                    cached = self.findInCache(shortFileHash, fileName)
                     if cached is not None:
-                        self.memoryCache[fileHash] = cached
+                        self.memoryCache[longFileHash] = cached
 
                 if cached is not None:
                     flow.response.data.headers['Content-Length'] = str(len(cached))
                     flow.response.data.content = cached
                     return
 
-                result = subprocess.run(['babel','-f', fileName, '--plugins', 'babel-plugin-kwola'], input=bytes(flow.response.data.content), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                fileNameForBabel = shortFileHash + "-" + fileName
+
+                result = subprocess.run(['babel','-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola'], input=bytes(flow.response.data.content), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 if result.returncode != 0:
                     print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most likely this is because Babel thinks your javascript has invalid syntax, or that babel is not working / not able to find the babel-plugin-kwola / unable to transpile the javascript for some other reason.")
@@ -104,8 +127,8 @@ class JSRewriteProxy:
                 else:
                     transformed = result.stdout
 
-                    self.saveInCache(fileHash, fileName, transformed)
-                    self.memoryCache[fileHash] = transformed
+                    self.saveInCache(shortFileHash, fileName, transformed)
+                    self.memoryCache[longFileHash] = transformed
 
                     flow.response.data.headers['Content-Length'] = str(len(transformed))
                     flow.response.data.content = transformed

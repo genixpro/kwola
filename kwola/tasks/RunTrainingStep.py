@@ -195,10 +195,25 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
 
         batch = {}
         for key in samples[0].keys():
-            if isNumpyArray(samples[0][key]):
-                batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
+            # We have to do something special here since they are not concatenated the normal way
+            if key == "symbolIndexes" or key == 'symbolWeights' or key == "nextSymbolIndexes" or key == 'nextSymbolWeights':
+                batch[key] = numpy.concatenate([sample[key][0] for sample in samples], axis=0)
+
+                currentOffset = 0
+                offsets = []
+                for sample in samples:
+                    offsets.append(currentOffset)
+                    currentOffset += len(sample[key][0])
+
+                if 'next' in key:
+                    batch['nextSymbolOffsets'] = numpy.array(offsets)
+                else:
+                    batch['symbolOffsets'] = numpy.array(offsets)
             else:
-                batch[key] = [sample[key][0] for sample in samples]
+                if isNumpyArray(samples[0][key]):
+                    batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
+                else:
+                    batch[key] = [sample[key][0] for sample in samples]
 
         cacheHitRate = numpy.mean(cacheHits)
 

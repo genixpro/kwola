@@ -113,22 +113,9 @@ class WebEnvironmentSession:
         self.screenshotHashes.add(screenHash)
         self.lastScreenshotHash = screenHash
 
-        initialBranchTrace = self.extractBranchTrace()
-        if initialBranchTrace is None:
+        self.cumulativeBranchTrace = self.extractBranchTrace()
+        if self.cumulativeBranchTrace is None:
             raise Exception("Error, did not find the kwola line counter object in the browser. This usually indicates that there was an error either in translating the javascript or in loading the page in the first place.")
-
-        branchTraceAcceptedFilesDiskFilePath = os.path.join(config.getKwolaUserDataDirectory("web_session_data"), "branch_trace_accepted_files_and_sizes")
-
-        if os.path.exists(branchTraceAcceptedFilesDiskFilePath):
-            with open(branchTraceAcceptedFilesDiskFilePath, "rb") as f:
-                self.branchTraceAcceptedFilesAndSizes = pickle.load(f)
-        else:
-            self.branchTraceAcceptedFilesAndSizes = {key: len(value) for key, value in initialBranchTrace.items()}
-            with open(branchTraceAcceptedFilesDiskFilePath, "wb") as f:
-                pickle.dump(self.branchTraceAcceptedFilesAndSizes, f)
-
-        self.lastCumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(initialBranchTrace)
-        self.decayingExecutionTrace = np.zeros_like(self.lastCumulativeBranchExecutionVector)
 
         self.errorHashes = set()
 
@@ -137,18 +124,22 @@ class WebEnvironmentSession:
 
     def shutdown(self):
         # Cleanup the screenshot files
-        for filePath in self.screenshotPaths:
-            os.unlink(filePath)
+        if hasattr(self, "screenshotPaths"):
+            for filePath in self.screenshotPaths:
+                os.unlink(filePath)
 
-        self.screenshotPaths = []
-        if os.path.exists(self.movieFilePath()):
-            os.unlink(self.movieFilePath())
+            self.screenshotPaths = []
+            if hasattr(self, "tabNumber") and os.path.exists(self.movieFilePath()):
+                os.unlink(self.movieFilePath())
 
-        if os.path.exists(self.screenshotDirectory):
-            os.rmdir(self.screenshotDirectory)
+        if hasattr(self, "screenshotDirectory"):
+            if os.path.exists(self.screenshotDirectory):
+                os.rmdir(self.screenshotDirectory)
 
-        if self.driver:
-            self.driver.quit()
+        if hasattr(self, "driver"):
+            if self.driver:
+                self.driver.quit()
+
         self.driver = None
 
     def addScreenshot(self):
@@ -193,6 +184,19 @@ class WebEnvironmentSession:
 
         result = self.driver.execute_script(injected_javascript)
 
+        # The JavaScript that we want to inject. This will extract out the Kwola debug information.
+        injected_javascript = (
+            'Object.keys(window.kwolaCounters).forEach((fileName) => {'
+            '   window.kwolaCounters[fileName].fill(0);'
+            '});'
+        )
+
+        self.driver.execute_script(injected_javascript)
+
+        # Cast everything to a numpy array so we don't have to do it later
+        for fileName, vector in result.items():
+            result[fileName] = numpy.array(vector)
+
         return result
 
     def extractExceptions(self):
@@ -210,57 +214,10 @@ class WebEnvironmentSession:
         return result
 
     def branchFeatureSize(self):
-        return len(self.lastCumulativeBranchExecutionVector)
-
-    def computeCumulativeBranchExecutionVector(self, branchTrace):
-        cumulativeBranchExecutionVector = np.array([])
-
-        if branchTrace is None:
-            print(datetime.now(), f"[{os.getpid()}]", "Warning! There is no data in the branch trace. Its possible we "
-                                                      "have navigated to a page that doesn't actually have any JS"
-                                                      "running. Reusing the cumulative branch execution vector"
-                                                      "from the previous from.")
-            cumulativeBranchExecutionVector = self.lastCumulativeBranchExecutionVector
-            return cumulativeBranchExecutionVector
-
-        for fileName in sorted(self.branchTraceAcceptedFilesAndSizes.keys()):
-            acceptableSize = self.branchTraceAcceptedFilesAndSizes[fileName]
-            if fileName in branchTrace:
-                if len(branchTrace[fileName]) != acceptableSize:
-                    print(datetime.now(), f"[{os.getpid()}]",
-                          f"Warning, the branch trace for file {fileName} appears to have "
-                          f"changed size from {acceptableSize} at the start of the session to "
-                          f"{len(branchTrace[fileName])} now. This likely means that "
-                          f"the client is loading different javascript files with the "
-                          f"same name. Dynamically loaded javascript is "
-                          f"not currently supported, and certainly this type is extra confusing. "
-                          f"Kwola will only be able to analyze the javascript that was loaded "
-                          f"during the initial html page load at this time.", flush=True)
-
-                    cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.zeros([acceptableSize])])
-                else:
-                    counterVector = branchTrace[fileName]
-                    # print(fileName, len(counterVector), flush=True)
-                    cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.array(counterVector)])
-            else:
-                print(datetime.now(), f"[{os.getpid()}]", f"Warning, there is a missing javascript file {fileName} in the branch "
-                                                          f"trace - the javascript file {fileName} was loaded on startup of the session"
-                                                          f"but is no longer present in the branch trace. This likely means "
-                                                          f"that Kwola changed to a different page and that page did not "
-                                                          f"load all of the same javascript files. This is not supported "
-                                                          f"at this time - Kwola will only be able to use the javascript "
-                                                          f"files that are shared between all pages.", flush=True)
-                cumulativeBranchExecutionVector = np.concatenate([cumulativeBranchExecutionVector, np.zeros([acceptableSize])])
-
-        for fileName in sorted(branchTrace.keys()):
-            if fileName not in self.branchTraceAcceptedFilesAndSizes:
-                print(datetime.now(), f"[{os.getpid()}]", f"Warning, there is an extra javascript file in the branch "
-                                                          f"trace {fileName} that was not there on startup. Dynamically "
-                                                          f"loaded javascript is not currently supported - Kwola will "
-                                                          f"only analyze the javascript that was loaded during the "
-                                                          f"initial html page load.", flush=True)
-
-        return cumulativeBranchExecutionVector
+        size = 0
+        for fileName in self.cumulativeBranchTrace.keys():
+            size += len(self.cumulativeBranchTrace[fileName])
+        return size
 
     def getActionMaps(self):
         elementActionMaps = self.driver.execute_script("""
@@ -514,14 +471,31 @@ class WebEnvironmentSession:
 
         cumulativeProxyPaths = self.pathTracer.seenPaths
         newProxyPaths = cumulativeProxyPaths.difference(self.lastProxyPaths)
+        newBranches = False
+        filteredBranchTrace = {}
 
-        cumulativeBranchExecutionVector = self.computeCumulativeBranchExecutionVector(branchTrace)
+        for fileName in branchTrace.keys():
+            traceVector = branchTrace[fileName]
+            didExecuteFile = bool(numpy.sum(traceVector) > 0)
 
-        branchExecutionVector = cumulativeBranchExecutionVector - self.lastCumulativeBranchExecutionVector
+            if didExecuteFile:
+                filteredBranchTrace[fileName] = traceVector
 
-        executionTrace.branchExecutionTrace = branchExecutionVector.tolist()
-        executionTrace.startCumulativeBranchExecutionTrace = self.lastCumulativeBranchExecutionVector.tolist()
-        executionTrace.startDecayingExecutionTrace = self.decayingExecutionTrace.tolist()
+            if fileName in self.cumulativeBranchTrace:
+                cumulativeTraceVector = self.cumulativeBranchTrace[fileName]
+
+                if len(traceVector) == len(cumulativeTraceVector):
+                    newBranchCount = np.sum(traceVector[cumulativeTraceVector == 0])
+                    if newBranchCount > 0:
+                        newBranches = True
+                else:
+                    if didExecuteFile:
+                        newBranches = True
+            else:
+                if didExecuteFile:
+                    newBranches = True
+
+        executionTrace.branchTrace = {k:v.tolist() for k,v in filteredBranchTrace.items()}
 
         executionTrace.networkTrafficTrace = list(self.pathTracer.recentPaths)
 
@@ -535,9 +509,8 @@ class WebEnvironmentSession:
 
         executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
         executionTrace.didNewErrorOccur = hadNewError
-        executionTrace.didCodeExecute = bool(np.sum(branchExecutionVector) > 0)
-
-        executionTrace.didNewBranchesExecute = bool(np.sum(branchExecutionVector[self.lastCumulativeBranchExecutionVector == 0]) > 0)
+        executionTrace.didCodeExecute = bool(len(filteredBranchTrace) > 0)
+        executionTrace.didNewBranchesExecute = bool(newBranches)
 
         executionTrace.hadNetworkTraffic = len(self.pathTracer.recentPaths) > 0
         executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
@@ -547,12 +520,25 @@ class WebEnvironmentSession:
         executionTrace.isURLNew = executionTrace.finishURL not in self.allUrls
 
         executionTrace.hadLogOutput = bool(executionTrace.logOutput)
-        executionTrace.cumulativeBranchCoverage = float(np.count_nonzero(cumulativeBranchExecutionVector)) / len(cumulativeBranchExecutionVector)
 
-        # Update the decaying execution trace to use as input for the next round
-        self.decayingExecutionTrace = np.maximum(self.decayingExecutionTrace * 0.95, np.minimum(np.ones_like(branchExecutionVector), branchExecutionVector))
+        total = 0
+        executedAtleastOnce = 0
+        for fileName in self.cumulativeBranchTrace:
+            total += len(self.cumulativeBranchTrace[fileName])
+            executedAtleastOnce += np.count_nonzero(self.cumulativeBranchTrace[fileName])
 
-        self.lastCumulativeBranchExecutionVector = cumulativeBranchExecutionVector
+        executionTrace.cumulativeBranchCoverage = float(executedAtleastOnce) / float(total)
+
+        for fileName in filteredBranchTrace.keys():
+            if fileName in self.cumulativeBranchTrace:
+                if len(branchTrace[fileName]) == len(self.cumulativeBranchTrace[fileName]):
+                    self.cumulativeBranchTrace[fileName] += branchTrace[fileName]
+                else:
+                    print(f"Warning! The file with fileName {fileName} has changed the size of its trace vector. This "
+                          f"is very unusual and could indicate some strange situation with dynamically loaded javascript")
+            else:
+                self.cumulativeBranchTrace[fileName] = branchTrace[fileName]
+
         self.allUrls.add(self.driver.current_url)
 
         self.lastScreenshotHash = screenHash
@@ -574,9 +560,3 @@ class WebEnvironmentSession:
         image = numpy.flip(image[:, :, :3], axis=2)  # OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
 
         return image
-
-    def getBranchFeature(self):
-        return numpy.minimum(self.lastCumulativeBranchExecutionVector, numpy.ones_like(self.lastCumulativeBranchExecutionVector))
-
-    def getExecutionTraceFeature(self):
-        return self.decayingExecutionTrace

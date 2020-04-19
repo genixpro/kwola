@@ -133,22 +133,6 @@ class WebEnvironment:
         ]
         return actionMaps
 
-    def getBranchFeatures(self):
-        tabFeatures = [
-            tab.getBranchFeature()
-            for tab in self.sessions
-        ]
-
-        return np.array(tabFeatures)
-
-    def getExecutionTraceFeatures(self):
-        tabFeatures = [
-            tab.getExecutionTraceFeature()
-            for tab in self.sessions
-        ]
-
-        return np.array(tabFeatures)
-
     def numberParallelSessions(self):
         return len(self.sessions)
 

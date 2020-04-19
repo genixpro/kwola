@@ -27,6 +27,8 @@ from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..datamodels.TrainingSequenceModel import TrainingSequence
 from ..datamodels.TrainingStepModel import TrainingStep
+from ..datamodels.ExecutionSessionModel import ExecutionSession
+from ..datamodels.ExecutionTraceModel import ExecutionTrace
 from .RunTrainingStep import loadAllTestingSteps
 from concurrent.futures import as_completed, wait
 from concurrent.futures import ThreadPoolExecutor
@@ -75,9 +77,11 @@ def runRandomInitialization(config, trainingSequence, exitOnFail=True):
 
         for future in as_completed(futures):
             result = future.result()
-            if result is None:
+            if result is None or ('success' in result and not result['success']):
                 if exitOnFail:
                     raise RuntimeError("Random initialization sequence failed and did not return a result.")
+            else:
+                updateModelSymbols(config, result['testingStepId'])
 
             print(datetime.now(), f"[{os.getpid()}]", "Random Testing Sequence Completed", flush=True)
 
@@ -131,6 +135,29 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
 
     return result
 
+def updateModelSymbols(config, testingStepId):
+    # Load and save the agent to make sure all training subprocesses are synced
+    environment = WebEnvironment(config=config, sessionLimit=1)
+    agent = DeepLearningAgent(config=config, whichGpu=None)
+    agent.initialize(environment.branchFeatureSize(), enableTraining=False)
+    agent.load()
+
+    testingStep = TestingStep.loadFromDisk(testingStepId, config)
+
+    totalNewSymbols = 0
+    for executionSessionId in testingStep.executionSessions:
+        executionSession = ExecutionSession.loadFromDisk(executionSessionId, config)
+
+        traces = []
+        for executionTraceId in executionSession.executionTraces:
+            traces.append(ExecutionTrace.loadFromDisk(executionTraceId, config))
+
+        totalNewSymbols += agent.assignNewSymbols(traces)
+
+    print(datetime.now(), f"[{os.getpid()}]", f"Added {totalNewSymbols} new symbols from testing step {testingStepId}", flush=True)
+
+    agent.save()
+
 def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
     stepsCompleted = 0
 
@@ -146,28 +173,31 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
             if os.path.exists("/tmp/kwola_distributed_coordinator"):
                 os.unlink("/tmp/kwola_distributed_coordinator")
 
-            futures = []
+            allFutures = []
+            testStepFutures = []
 
             if torch.cuda.device_count() > 0:
                 for gpu in range(numberOfTrainingStepsInParallel):
                     trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=gpu)
-                    futures.append(trainingFuture)
+                    allFutures.append(trainingFuture)
                     trainingStepsLaunched += 1
             else:
                 trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=None)
-                futures.append(trainingFuture)
+                allFutures.append(trainingFuture)
                 trainingStepsLaunched += 1
 
             for testingStepNumber in range(config['testing_sequences_per_training_step']):
                 testStepIndex = testStepsLaunched + config['training_random_initialization_sequences']
-                futures.append(executor.submit(runTestingSubprocess, config, trainingSequence, testStepIndex, generateDebugVideo=True if testingStepNumber == 0 else False))
+                future = executor.submit(runTestingSubprocess, config, trainingSequence, testStepIndex, generateDebugVideo=True if testingStepNumber == 0 else False)
+                allFutures.append(future)
+                testStepFutures.append(future)
                 time.sleep(3)
                 testStepsLaunched += 1
 
-            wait(futures)
+            wait(allFutures)
 
             anyFailures = False
-            for future in futures:
+            for future in allFutures:
                 result = future.result()
                 if result is None:
                     anyFailures = True
@@ -176,6 +206,13 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
 
             if anyFailures and exitOnFail:
                 raise RuntimeError("One of the testing / training loops failed and did not return successfully. Exiting the training loop.")
+
+            if not anyFailures:
+                print(datetime.now(), f"[{os.getpid()}]", "Updating the symbols table", flush=True)
+                for future in testStepFutures:
+                    result = future.result()
+                    testingStepId = result['testingStepId']
+                    updateModelSymbols(config, testingStepId)
 
             print(datetime.now(), f"[{os.getpid()}]", "Completed one parallel training & testing step! Hooray!", flush=True)
 

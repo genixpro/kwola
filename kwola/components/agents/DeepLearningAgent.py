@@ -28,6 +28,7 @@ from ...datamodels.ExecutionSessionModel import ExecutionSession
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
 from .TraceNet import TraceNet
 from ..utils.video import chooseBestFfmpegVideoCodec
+from pprint import pprint
 from datetime import datetime
 import concurrent.futures
 import copy
@@ -56,6 +57,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import traceback
+import pickle
+import copy
 
 
 class DeepLearningAgent:
@@ -81,6 +84,7 @@ class DeepLearningAgent:
 
         # Fetch the folder that we will store the model parameters in
         self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
+        self.symbolMapPath = os.path.join(config.getKwolaUserDataDirectory("models"), "symbol_map")
 
         # This is just a generic list of known HTML cursors. Its pretty comprehensive,
         # and is used for the cursor prediction, which is an additional loss that
@@ -262,6 +266,19 @@ class DeepLearningAgent:
         # consistent as long as the action names haven't changed.
         self.actionsSorted = sorted(self.actions.keys())
 
+        # Create the symbol map. This maps symbols in their string form to
+        # specific indexes in the embedding table
+        self.symbolMap = {
+            "": 0,
+            None: 0
+        }
+
+        # Create a set to efficiently hold the list of known files
+        self.knownFiles = set()
+
+        # Stores the index where the next symbol should be added
+        self.nextSymbolIndex = 1
+
     def randomString(self, chars, len):
         """
             Generates a random string.
@@ -300,6 +317,12 @@ class DeepLearningAgent:
             if self.targetNetwork is not None:
                 self.targetNetwork.load_state_dict(stateDict)
 
+        # We also need to load the symbol map - this is the mapping between symbol strings
+        # and their index values within the embedding structure
+        if os.path.exists(self.symbolMapPath):
+            with open(self.symbolMapPath, 'rb') as f:
+                (self.symbolMap, self.knownFiles, self.nextSymbolIndex) = pickle.load(f)
+
     def save(self, saveName=""):
         """
             Saves the agent to disk. By default, you will save the agent into the primary slot, which is the
@@ -313,6 +336,9 @@ class DeepLearningAgent:
             saveName = "_" + saveName
 
         torch.save(self.model.state_dict(), self.modelPath + saveName)
+
+        with open(self.symbolMapPath, 'wb') as f:
+            pickle.dump((self.symbolMap, self.knownFiles, self.nextSymbolIndex), f)
 
     def getTorchDevices(self):
         """
@@ -354,11 +380,11 @@ class DeepLearningAgent:
         self.branchFeatureSize = branchFeatureSize
 
         # Create the primary torch model object
-        self.model = TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+        self.model = TraceNet(self.config, len(self.actions), branchFeatureSize, 12, len(self.cursors))
 
         # If training is enabled, we also have to create the target network
         if enableTraining:
-            self.targetNetwork = TraceNet(self.config, branchFeatureSize * 2, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+            self.targetNetwork = TraceNet(self.config, len(self.actions), branchFeatureSize, 12, len(self.cursors))
         else:
             self.targetNetwork = None
 
@@ -584,7 +610,7 @@ class DeepLearningAgent:
 
 
 
-    def nextBestActions(self, stepNumber, rawImages, envActionMaps, additionalFeatures, pastExecutionTraces, shouldBeRandom=False):
+    def nextBestActions(self, stepNumber, rawImages, envActionMaps, pastExecutionTraces, shouldBeRandom=False):
         """
             This is the main prediction / inference function for the agent. This function will decide what is the next
             best action to take, given a particular state.
@@ -596,8 +622,6 @@ class DeepLearningAgent:
             :param envActionMaps: This is an array of arrays. The outer array contains a list for each of the sub
                                   environments being inferenced for. The inner list should just be a list of
                                   kwola.datamodels.ActionMapModel instances.
-            :param additionalFeatures: This should be a numpy array containing the additional features vector,
-                                        one for each sub environment.
             :param pastExecutionTraces:  This should be a list of lists. The outer list should contain a list for each sub
                                          environment. The inner list should be a list of kwola.datamodels.ExecutionTrace
                                          instances, providing all of the execution traces leading up to the current state
@@ -605,6 +629,10 @@ class DeepLearningAgent:
                                    predictions of the machine learning algorithm.
             :return:
         """
+        for pastExecutionTraceList in pastExecutionTraces:
+            self.computeCachedCumulativeBranchTraces(pastExecutionTraceList)
+            self.computeCachedDecayingBranchTrace(pastExecutionTraceList)
+
         # Process all of the images
         processedImages = self.processImages(rawImages)
         actions = []
@@ -630,6 +658,21 @@ class DeepLearningAgent:
             sampleRecentActions.reverse()
             recentActions.append(sampleRecentActions)
 
+        # Now we compute the symbol lists for each sub environment. The symbol list gives the model an indication
+        # of which lines of code it has triggered already in the run, as well as which lines of code it has
+        # executed recently.
+        symbolLists = []
+        symbolWeights = []
+        for pastExecutionTraceList in pastExecutionTraces:
+            if len(pastExecutionTraceList) > 0:
+                symbols, weights = self.computeAllSymbolsForTrace(pastExecutionTraceList[-1])
+            else:
+                symbols = [0]
+                weights = [1]
+
+            symbolLists.append(symbols)
+            symbolWeights.append(weights)
+
         # Declare function level width and height variables for convenience.
         width = processedImages.shape[3]
         height = processedImages.shape[2]
@@ -642,7 +685,9 @@ class DeepLearningAgent:
         # the neural network
         batchSampleIndexes = []
         imageBatch = []
-        additionalFeatureVectorBatch = []
+        symbolListOffsets = []
+        symbolListBatch = []
+        symbolWeightBatch = []
         pixelActionMapsBatch = []
         epsilonsPerSample = []
         recentActionsBatch = []
@@ -651,7 +696,8 @@ class DeepLearningAgent:
 
         modelDownscale = self.config['model_image_downscale_ratio']
 
-        for sampleIndex, image, additionalFeatureVector, sampleActionMaps, sampleRecentActions in zip(range(len(processedImages)), processedImages, additionalFeatures, envActionMaps, recentActions):
+        zippedValues = zip(range(len(processedImages)), processedImages, symbolLists, symbolWeights, envActionMaps, recentActions)
+        for sampleIndex, image, sampleSymbolList, sampleSymbolWeights, sampleActionMaps, sampleRecentActions in zippedValues:
             # Ok here is a very important mechanism. Technically what is being calculated below is the "epsilon" value from classical
             # Q-learning. I'm just giving it a different name which suits my style. The "epsilon" is just the probability that the
             # algorithm will choose a random action instead of the prediction. In our situation, we have two values, because we have
@@ -684,7 +730,9 @@ class DeepLearningAgent:
                 # Add this sample to all of the lists that will be processed later
                 batchSampleIndexes.append(sampleIndex)
                 imageBatch.append(image)
-                additionalFeatureVectorBatch.append(additionalFeatureVector)
+                symbolListOffsets.append(len(symbolListBatch))
+                symbolListBatch.extend(sampleSymbolList)
+                symbolWeightBatch.extend(sampleSymbolWeights)
                 actionMapsBatch.append(sampleActionMaps)
                 pixelActionMapsBatch.append(pixelActionMap)
                 recentActionsBatch.append(sampleRecentActions)
@@ -715,7 +763,9 @@ class DeepLearningAgent:
         if len(imageBatch) > 0:
             # Create torch tensors out of the numpy arrays, effectively preparing the data for input into the neural network.
             imageTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(imageBatch))
-            additionalFeatureTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(additionalFeatureVectorBatch))
+            symbolIndexesTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(symbolListBatch))
+            symbolListOffsetsTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(symbolListOffsets))
+            symbolWeightsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(symbolWeightBatch))
             pixelActionMapTensor = self.variableWrapperFunc(torch.FloatTensor, pixelActionMapsBatch)
             stepNumberTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array([stepNumber] * len(imageBatch)))
 
@@ -730,7 +780,9 @@ class DeepLearningAgent:
                 # Here we go! Here we are now finally putting data into the neural network and processing it.
                 outputs = self.modelParallel({
                     "image": imageTensor,
-                    "additionalFeature": additionalFeatureTensor,
+                    "symbolIndexes": symbolIndexesTensor,
+                    "symbolOffsets": symbolListOffsetsTensor,
+                    "symbolWeights": symbolWeightsTensor,
                     "pixelActionMaps": pixelActionMapTensor,
                     "stepNumber": stepNumberTensor,
                     "outputStamp": False,
@@ -773,8 +825,8 @@ class DeepLearningAgent:
 
                     # Adjust the x, y coordinates by the downscale ration so that we get x,y coordinates
                     # on the original, unscaled image
-                    actionX = int(actionX / self.config['model_image_downscale_ratio'])
-                    actionY = int(actionY / self.config['model_image_downscale_ratio'])
+                    actionX = int(actionX / modelDownscale)
+                    actionY = int(actionY / modelDownscale)
 
                     # Here we create an action object using the lambdas. We aren't creating the final action object,
                     # since we do one last check below to ensure this isn't an exact repeat action.
@@ -839,8 +891,8 @@ class DeepLearningAgent:
 
                         # Adjust the x, y coordinates by the downscale ration so that we get x,y coordinates
                         # on the original, unscaled image
-                        actionX = int(actionX / self.config['model_image_downscale_ratio'])
-                        actionY = int(actionY / self.config['model_image_downscale_ratio'])
+                        actionX = int(actionX / modelDownscale)
+                        actionY = int(actionY / modelDownscale)
 
                     except ValueError:
                         # If there is any problem, just override back to a fully random action without predictions involved
@@ -1150,6 +1202,9 @@ class DeepLearningAgent:
 
         executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config) for traceId in executionSession.executionTraces]
 
+        self.computeCachedCumulativeBranchTraces(executionTraces)
+        self.computeCachedDecayingBranchTrace(executionTraces)
+
         # Filter out any traces that failed to load. Generally this only happens when you interrupt the process
         # while it is writing a file. So it happens to devs but not in production. Still we protect against
         # this case in several places throughout the code.
@@ -1176,7 +1231,7 @@ class DeepLearningAgent:
                     if hilightStepNumber is not None and hilightStepNumber == (trace.frameNumber - 1):
                         hilight = True
 
-                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, trace.to_json(), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart, hilight)
+                    future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, pickle.dumps(trace), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart, hilight)
                     futures.append(future)
 
                     debugImageIndex += 2
@@ -1203,7 +1258,7 @@ class DeepLearningAgent:
 
             :param executionSessionId: A string containing the ID of the execution session
             :param debugImageIndex: The index of this debug image within the movie
-            :param trace: The kwola.datamodels.ExecutionTrace object that this debug image will be generated for
+            :param trace: The kwola.datamodels.ExecutionTrace object that this debug image will be generated for. It should be serialized into a string using pickle.dumps prior to input.
             :param rawImage: A numpy array containing the raw image data for the result image on this trace
             :param lastRawImage: A numpy array containing the raw image data for the input image on this trace, e.g. the image from before the action was performed.
             :param presentRewards: A list containing all of the calculated present reward values for the sequence
@@ -1211,12 +1266,12 @@ class DeepLearningAgent:
             :param tempScreenshotDirectory: A string containing the path of the directory where the images will be saved
             :param includeNeuralNetworkCharts: A boolean indicating whether to include charts showing the neural network predictions in the debug video
             :param includeNetPresentRewardChart: A boolean indicating whether to include the net present reward chart at the bottom of the debug video
-            :param hilight: A boolean indicating whether this frame should be hilightted or not. Hilighting a frame will change the background color
+            :param hilight: A boolean indicating whether this frame should be hilighted or not. Hilighting a frame will change the background color
 
             :return: None
         """
         try:
-            trace = ExecutionTrace.from_json(trace)
+            trace = pickle.loads(trace)
 
             topSize = self.config.debug_video_top_size
             bottomSize = self.config.debug_video_bottom_size
@@ -1478,13 +1533,24 @@ class DeepLearningAgent:
                 # pixelActionMapAxes.set_yticks([])
                 # pixelActionMapAxes.set_title(f"{actionPixelCount} action pixels")
 
-                additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
+                symbols, weights = self.computeAllSymbolsForTrace(trace)
+
+                symbolListBatch = symbols
+                symbolWeightBatch = weights
+                symbolListOffsets = [0]
 
                 with torch.no_grad():
                     self.model.eval()
+
+                    symbolIndexesTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(symbolListBatch))
+                    symbolListOffsetsTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(symbolListOffsets))
+                    symbolWeightsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(symbolWeightBatch))
+
                     outputs = \
                         self.modelParallel({"image": self.variableWrapperFunc(torch.FloatTensor, numpy.array([processedImage])),
-                                            "additionalFeature": self.variableWrapperFunc(torch.FloatTensor, [additionalFeature]),
+                                            "symbolIndexes": symbolIndexesTensor,
+                                            "symbolOffsets": symbolListOffsetsTensor,
+                                            "symbolWeights": symbolWeightsTensor,
                                             "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor, numpy.array([pixelActionMap])),
                                             "stepNumber": self.variableWrapperFunc(torch.FloatTensor, numpy.array([trace.frameNumber - 1])),
                                             "outputStamp": True,
@@ -1650,21 +1716,6 @@ class DeepLearningAgent:
 
         return rewardPixelMask
 
-    def prepareAdditionalFeaturesForTrace(self, trace):
-        """
-            This method computes the additional feature vector that will get injected into the model based on the given execution trace.
-
-            :param trace: A kwola.datamodels.ExecutionTrace object
-
-            :return: A numpy array containing the additional features vector
-        """
-        branchFeature = numpy.minimum(trace.startCumulativeBranchExecutionTrace, numpy.ones_like(trace.startCumulativeBranchExecutionTrace))
-        decayingExecutionTraceFeature = numpy.array(trace.startDecayingExecutionTrace)
-        additionalFeature = numpy.concatenate([branchFeature, decayingExecutionTraceFeature], axis=0)
-
-        return additionalFeature
-
-
     def calculateTrainingCropPosition(self, centerX, centerY, imageWidth, imageHeight, nextStepCrop=False):
         """
             This method is used to calculate the coordinates for cropping the image for use in training.
@@ -1756,6 +1807,9 @@ class DeepLearningAgent:
                 processedImages.append(processedImage)
                 executionTraces.append(trace)
 
+        self.computeCachedCumulativeBranchTraces(executionTraces)
+        self.computeCachedDecayingBranchTrace(executionTraces)
+
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
 
@@ -1772,13 +1826,25 @@ class DeepLearningAgent:
         # provide an additional, highly supervised target for a secondary loss function.
         tracesReversed = list(copy.copy(executionTraces))
         tracesReversed.reverse()
-        currentTrace = numpy.zeros_like(executionTraces[0].branchExecutionTrace, dtype=numpy.float)
+        currentTrace = []
+        for fileName in executionTraces[-1].cachedCumulativeBranchTrace.keys():
+            currentTrace.extend([0] * len(executionTraces[-1].cachedCumulativeBranchTrace[fileName]))
+        currentTrace = numpy.array(currentTrace, dtype=numpy.float)
         executionTraceDiscountRate = self.config['future_execution_trace_decay_rate']
         decayingFutureBranchTraces = []
         for trace in tracesReversed:
-            decayingFutureBranchTrace = numpy.array(trace.branchExecutionTrace, dtype=numpy.float)
+            decayingFutureBranchTrace = []
+            for fileName in executionTraces[-1].cachedCumulativeBranchTrace.keys():
+                if fileName in trace.branchTrace and len(trace.branchTrace[fileName]) == len(executionTraces[-1].cachedCumulativeBranchTrace[fileName]):
+                    decayingFutureBranchTrace.extend(trace.branchTrace[fileName])
+                else:
+                    decayingFutureBranchTrace.extend([0] * len(executionTraces[-1].cachedCumulativeBranchTrace[fileName]))
+
+            decayingFutureBranchTrace = numpy.array(decayingFutureBranchTrace, dtype=numpy.float)
+
             currentTrace *= executionTraceDiscountRate
             currentTrace += numpy.minimum(decayingFutureBranchTrace, numpy.ones_like(decayingFutureBranchTrace))
+            print(decayingFutureBranchTrace)
             decayingFutureBranchTraces.append(decayingFutureBranchTrace)
 
         decayingFutureBranchTraces.reverse()
@@ -1793,12 +1859,11 @@ class DeepLearningAgent:
             width = processedImage.shape[2]
             height = processedImage.shape[1]
 
-            # Construct the additional feature vector. This is basically composed of the decaying past branch trace,
-            # along with the cumulative branch vector containing all of the data
-            additionalFeature = self.prepareAdditionalFeaturesForTrace(trace)
+            # Compute the symbols and weights for the current trace
+            symbols, weights = self.computeAllSymbolsForTrace(trace)
 
             # We do the same for the next trace
-            nextAdditionalFeature = self.prepareAdditionalFeaturesForTrace(nextTrace)
+            nextSymbols, nextWeights = self.computeAllSymbolsForTrace(nextTrace)
 
             # Create the pixel action maps for both of the traces
             pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
@@ -1844,12 +1909,14 @@ class DeepLearningAgent:
             yield {
                 "traceIds": [str(trace.id)],
                 "processedImages": numpy.array([processedImage], dtype=numpy.float16),
-                "additionalFeatures": numpy.array([additionalFeature], dtype=numpy.float16),
+                "symbolIndexes": numpy.array([symbols], dtype=numpy.int32),
+                "symbolWeights": numpy.array([weights], dtype=numpy.float16),
                 "pixelActionMaps": numpy.array([pixelActionMap], dtype=numpy.uint8),
                 "stepNumbers": numpy.array([trace.frameNumber - 1], dtype=numpy.int32),
 
                 "nextProcessedImages": numpy.array([nextProcessedImage], dtype=numpy.float16),
-                "nextAdditionalFeatures": numpy.array([nextAdditionalFeature], dtype=numpy.float16),
+                "nextSymbolIndexes": numpy.array([nextSymbols], dtype=numpy.int32),
+                "nextSymbolWeights": numpy.array([nextWeights], dtype=numpy.float16),
                 "nextPixelActionMaps": numpy.array([nextPixelActionMap], dtype=numpy.uint8),
                 "nextStepNumbers": numpy.array([nextTrace.frameNumber], dtype=numpy.uint8),
 
@@ -1878,11 +1945,16 @@ class DeepLearningAgent:
                 "traceIds": ["test"] * self.config['batch_size'],
                 "processedImages": numpy.zeros([self.config['batch_size'], 1,  height, width], dtype=numpy.float16),
                 "additionalFeatures": numpy.zeros([self.config['batch_size'], self.branchFeatureSize * 2], dtype=numpy.float16),
+                "symbolIndexes": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
+                "symbolWeights": numpy.ones([self.config['batch_size']], dtype=numpy.float16),
+                "symbolOffsets": numpy.array(range(self.config['batch_size']), dtype=numpy.int32),
                 "pixelActionMaps": numpy.ones([self.config['batch_size'], len(self.actionsSorted), height, width], dtype=numpy.uint8),
                 "stepNumbers": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
 
                 "nextProcessedImages": numpy.zeros([self.config['batch_size'], 1,  height, width], dtype=numpy.float16),
-                "nextAdditionalFeatures": numpy.zeros([self.config['batch_size'], self.branchFeatureSize * 2], dtype=numpy.float16),
+                "nextSymbolIndexes": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
+                "nextSymbolWeights": numpy.ones([self.config['batch_size']], dtype=numpy.float16),
+                "nextSymbolOffsets": numpy.array(range(self.config['batch_size']), dtype=numpy.int32),
                 "nextPixelActionMaps": numpy.ones([self.config['batch_size'], len(self.actionsSorted), height, width], dtype=numpy.uint8),
                 "nextStepNumbers": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
 
@@ -1966,10 +2038,15 @@ class DeepLearningAgent:
             heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
             presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
             processedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['processedImages']))
-            additionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['additionalFeatures'])
+            symbolIndexesTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(batch['symbolIndexes']))
+            symbolListOffsetsTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(batch['symbolOffsets']))
+            symbolWeightsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['symbolWeights']))
             stepNumberTensor = self.variableWrapperFunc(torch.FloatTensor, batch['stepNumbers'])
             nextProcessedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextProcessedImages']))
-            nextAdditionalFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextAdditionalFeatures']))
+            nextSymbolIndexesTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(batch['nextSymbolIndexes']))
+            nextSymbolListOffsetsTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(batch['nextSymbolOffsets']))
+            nextSymbolWeightsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextSymbolWeights']))
+
             nextStepNumbers = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['nextStepNumbers']))
 
             # Only create the following tensors if the loss is actually enabled for them
@@ -1992,7 +2069,9 @@ class DeepLearningAgent:
             # all of the various predictions
             currentStateOutputs = self.modelParallel({
                 "image": processedImagesTensor,
-                "additionalFeature": additionalFeaturesTensor,
+                "symbolIndexes": symbolIndexesTensor,
+                "symbolOffsets": symbolListOffsetsTensor,
+                "symbolWeights": symbolWeightsTensor,
                 "pixelActionMaps": pixelActionMaps,
                 "stepNumber": stepNumberTensor,
                 "action_type": batch['actionTypes'],
@@ -2021,7 +2100,9 @@ class DeepLearningAgent:
                 # on the next step.
                 nextStateOutputs = self.targetNetwork({
                     "image": nextProcessedImagesTensor,
-                    "additionalFeature": nextAdditionalFeaturesTensor,
+                    "symbolIndexes": nextSymbolIndexesTensor,
+                    "symbolOffsets": nextSymbolListOffsetsTensor,
+                    "symbolWeights": nextSymbolWeightsTensor,
                     "pixelActionMaps": nextStatePixelActionMaps,
                     "stepNumber": nextStepNumbers,
                     "outputStamp": False,
@@ -2347,3 +2428,146 @@ class DeepLearningAgent:
         processedImage = numpy.around(processedImage, decimals=2)
 
         return processedImage
+
+    @staticmethod
+    def branchCoveredSymbol(fileName, branchIndex):
+        return f'{branchIndex}-{fileName}-covered-branch'
+
+    @staticmethod
+    def branchRecentlyExecutedSymbol(fileName, branchIndex):
+        return f'{branchIndex}-{fileName}-recently-executed-branch'
+
+    def assignNewSymbols(self, executionTraces):
+        """
+            This method will go through all of the execution traces provided, and for each one,
+            it will check to see if there were any new symbols seen that need to be assigned.
+            Symbols can be anything from a line of code being executed through to an interaction
+            with a particular path or url or variable name. Basically they ways of giving the
+            model an indication of what state its in and what has happened recently, visa via
+            these symbols which become neural network embeddings.
+
+            :param executionTraces: A list or generator providing kwola.datamodels.ExecutionTraceModel objects
+
+            :return: An integer providing the number of new symbols added
+
+
+        """
+        newSymbolCount = 0
+        tooManyCount = 0
+        for trace in executionTraces:
+            for fileName in trace.branchTrace.keys():
+                if fileName not in self.knownFiles:
+                    for n in range(len(trace.branchTrace[fileName])):
+                        if (self.nextSymbolIndex + 2) >= self.config['symbol_dictionary_size']:
+                            tooManyCount += 1
+                        else:
+                            self.symbolMap[DeepLearningAgent.branchCoveredSymbol(fileName, n)] = self.nextSymbolIndex
+                            self.nextSymbolIndex += 1
+                            self.symbolMap[DeepLearningAgent.branchRecentlyExecutedSymbol(fileName, n)] = self.nextSymbolIndex
+                            self.nextSymbolIndex += 1
+                            newSymbolCount += 2
+                self.knownFiles.add(fileName)
+
+
+        if tooManyCount > 0:
+            print(f"Warning: The number of symbols detected in the application has exceeded the size of the dictionary by {tooManyCount} symbols. "
+                  "These are not able to be added to the dictionary and thus won't be considered by the model. Try increasing the symbol_dictionary_size"
+                  "parameter.")
+
+        return newSymbolCount
+
+    def computeCachedCumulativeBranchTraces(self, executionTraces):
+        if len(executionTraces) == 0:
+            return
+
+        executionTraces[0].cachedCumulativeBranchTrace = {
+            name: numpy.array(value)
+            for name, value in executionTraces[0].branchTrace.items()
+        }
+
+        lastTrace = executionTraces[0]
+
+        for trace in executionTraces[1:]:
+            if trace.cachedCumulativeBranchTrace is None:
+                trace.cachedCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedCumulativeBranchTrace)
+
+                for fileName in trace.branchTrace.keys():
+                    if fileName in trace.cachedCumulativeBranchTrace:
+                        if len(trace.branchTrace[fileName]) == len(trace.cachedCumulativeBranchTrace[fileName]):
+                            trace.cachedCumulativeBranchTrace[fileName] += numpy.array(trace.branchTrace[fileName])
+                    else:
+                        trace.cachedCumulativeBranchTrace[fileName] = trace.branchTrace[fileName]
+            lastTrace = trace
+
+
+    def computeCachedDecayingBranchTrace(self, executionTraces):
+        if len(executionTraces) == 0:
+            return
+
+        executionTraces[0].cachedDecayingBranchTrace = {
+            name: numpy.minimum(numpy.ones_like(value), numpy.array(value))
+            for name, value in executionTraces[0].branchTrace.items()
+        }
+
+        lastTrace = executionTraces[0]
+
+        for trace in executionTraces[1:]:
+            if trace.cachedDecayingBranchTrace is None:
+                trace.cachedDecayingBranchTrace = copy.deepcopy(lastTrace.cachedDecayingBranchTrace)
+                for fileName in trace.cachedDecayingBranchTrace.keys():
+                    trace.cachedDecayingBranchTrace[fileName] *= self.config['decaying_branch_trace_decay_rate']
+
+                for fileName in trace.branchTrace.keys():
+                    branchesExecuted = numpy.minimum(numpy.ones_like(trace.branchTrace[fileName]),
+                                                     numpy.array(trace.branchTrace[fileName]))*self.config['decaying_branch_trace_scale']
+
+                    if fileName in trace.cachedDecayingBranchTrace:
+                        if len(trace.branchTrace[fileName]) == len(trace.cachedDecayingBranchTrace[fileName]):
+                            trace.cachedDecayingBranchTrace[fileName] += branchesExecuted
+                    else:
+                        trace.cachedDecayingBranchTrace[fileName] = branchesExecuted
+
+            lastTrace = trace
+
+    def computeCoverageSymbolsList(self, executionTrace):
+        symbols = []
+        weights = []
+        for fileName in executionTrace.cachedCumulativeBranchTrace:
+            for branchIndex in range(len(executionTrace.cachedCumulativeBranchTrace[fileName])):
+                if executionTrace.cachedCumulativeBranchTrace[fileName][branchIndex] > 0:
+                    symbol = DeepLearningAgent.branchCoveredSymbol(fileName, branchIndex)
+                    symbolIndex = self.symbolMap.get(symbol, -1)
+                    if symbolIndex > 0:
+                        symbols.append(symbolIndex)
+                        weights.append(1.0)
+
+        return symbols, weights
+
+
+    def computeDecayingBranchTraceSymbolsList(self, executionTrace):
+        symbols = []
+        weights = []
+        for fileName in executionTrace.cachedDecayingBranchTrace:
+            for branchIndex in range(len(executionTrace.cachedDecayingBranchTrace[fileName])):
+                if executionTrace.cachedDecayingBranchTrace[fileName][branchIndex] > self.config['decaying_branch_trace_minimum_weight_for_symbol_inclusion']:
+                    symbol = DeepLearningAgent.branchCoveredSymbol(fileName, branchIndex)
+                    symbolIndex = self.symbolMap.get(symbol, -1)
+                    if symbolIndex > 0:
+                        symbols.append(symbolIndex)
+                        weights.append(executionTrace.cachedDecayingBranchTrace[fileName][branchIndex])
+
+        return symbols, weights
+
+    def computeAllSymbolsForTrace(self, executionTrace):
+        allSymbolList = []
+        allWeightList = []
+
+        symbols, weights = self.computeCoverageSymbolsList(executionTrace)
+        allSymbolList.extend(symbols)
+        allWeightList.extend(weights)
+
+        symbols, weights = self.computeDecayingBranchTraceSymbolsList(executionTrace)
+        allSymbolList.extend(symbols)
+        allWeightList.extend(weights)
+
+        return allSymbolList, allWeightList
