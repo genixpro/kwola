@@ -82,10 +82,13 @@ class WebEnvironmentSession:
         # Inject bug detection script
         self.driver.execute_script("""
             window.kwolaExceptions = [];
-            const currentOnError = window.onerror;
+            var currentOnError = window.onerror;
             window.onerror=function(msg, source, lineno, colno, error) {
-                currentOnError(msg, source, lineno, colno, error);
                 window.kwolaExceptions.push([msg, source, lineno, colno, error.stack]);
+                if (currentOnError)
+                {
+                    currentOnError(msg, source, lineno, colno, error);
+                }
             }
         """)
 

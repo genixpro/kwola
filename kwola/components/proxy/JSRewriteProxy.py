@@ -36,8 +36,8 @@ class JSRewriteProxy:
         self.memoryCache = {}
 
         self.knownResponseWrappers = [
-            ("""<!--/*--><html><body><script type="text/javascript"><!--//*/""",
-             """ """)
+            (b"""<!--/*--><html><body><script type="text/javascript"><!--//*/""",
+             b"""""")
         ]
 
     def getCacheFileName(self, fileHash, fileName):
@@ -124,45 +124,54 @@ class JSRewriteProxy:
 
                 fileNameForBabel = shortFileHash + "-" + fileName
 
-                jsFileContents = str(bytes(flow.response.data.content), 'utf8').strip()
-                strictMode = False
-                if jsFileContents.startswith("'use strict';") or jsFileContents.startswith('"use strict";'):
-                    strictMode = True
-                    jsFileContents = jsFileContents.replace("'use strict';", "")
-                    jsFileContents = jsFileContents.replace('"use strict";', "")
+                originalFileContents = bytes(flow.response.data.content)
 
-                wrapperStart = ""
-                wrapperEnd = ""
+                jsFileContents = bytes(flow.response.data.content).strip()
+                strictMode = False
+                if jsFileContents.startswith(b"'use strict';") or jsFileContents.startswith(b'"use strict";'):
+                    strictMode = True
+                    jsFileContents = jsFileContents.replace(b"'use strict';", b"")
+                    jsFileContents = jsFileContents.replace(b'"use strict";', b"")
+
+                wrapperStart = b""
+                wrapperEnd = b""
                 for wrapper in self.knownResponseWrappers:
                     if jsFileContents.startswith(wrapper[0]) and jsFileContents.endswith(wrapper[1]):
                         jsFileContents = jsFileContents[len(wrapper[0]):-len(wrapper[1])]
                         wrapperStart = wrapper[0]
                         wrapperEnd = wrapper[1]
 
-                result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', 'script'], input=bytes(jsFileContents, 'utf8'), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', 'script'], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 if result.returncode != 0:
-                    print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most likely this is because Babel thinks your javascript has invalid syntax, or that babel is not working / not able to find the babel-plugin-kwola / unable to transpile the javascript for some other reason. See the following truncated output:")
+                    print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most"
+                                                              f" likely this is because Babel thinks your javascript has invalid syntax, or that"
+                                                              f" babel is not working / not able to find the babel-plugin-kwola / unable to"
+                                                              f" transpile the javascript for some other reason. See the following truncated"
+                                                              f" output:", flush=True)
+
                     if len(str(result.stdout, 'utf8')) > 0:
-                        print(str(result.stdout, 'utf8')[:500])
+                        print(str(result.stdout, 'utf8')[:500], flush=True)
                     else:
-                        print("No data in standard output")
+                        print("No data in standard output", flush=True)
                     if len(str(result.stderr, 'utf8')) > 0:
-                        print(str(result.stderr, 'utf8')[:500])
+                        print(str(result.stderr, 'utf8')[:500], flush=True)
                     else:
-                        print("No data in standard error output")
+                        print("No data in standard error output", flush=True)
+
+                    self.saveInCache(shortFileHash, fileName, originalFileContents)
+                    self.memoryCache[longFileHash] = originalFileContents
                 else:
-                    transformed = wrapperStart + str(result.stdout, "utf8") + wrapperEnd
+                    print(datetime.now(), f"[{os.getpid()}]", f"Successfully translated {fileName} with Kwola branch counting and event tracing.", flush=True)
+                    transformed = wrapperStart + result.stdout + wrapperEnd
 
                     if strictMode:
-                        transformed = '"use strict";\n' + transformed
+                        transformed = b'"use strict";\n' + transformed
 
-                    transformedBytes = bytes(transformed, 'utf8')
+                    self.saveInCache(shortFileHash, fileName, transformed)
+                    self.memoryCache[longFileHash] = transformed
 
-                    self.saveInCache(shortFileHash, fileName, transformedBytes)
-                    self.memoryCache[longFileHash] = transformedBytes
-
-                    flow.response.data.headers['Content-Length'] = str(len(transformedBytes))
-                    flow.response.data.content = transformedBytes
+                    flow.response.data.headers['Content-Length'] = str(len(transformed))
+                    flow.response.data.content = transformed
         except Exception as e:
             traceback.print_exc()

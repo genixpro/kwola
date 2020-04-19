@@ -2471,7 +2471,7 @@ class DeepLearningAgent:
 
         if tooManyCount > 0:
             print(f"Warning: The number of symbols detected in the application has exceeded the size of the dictionary by {tooManyCount} symbols. "
-                  "These are not able to be added to the dictionary and thus won't be considered by the model. Try increasing the symbol_dictionary_size"
+                  "These are not able to be added to the dictionary and thus won't be considered by the model. Try increasing the symbol_dictionary_size "
                   "parameter.")
 
         return newSymbolCount
