@@ -40,7 +40,7 @@ class ProxyProcess:
         self.commandQueue = multiprocessing.Queue()
         self.resultQueue = multiprocessing.Queue()
 
-        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.port, self.commandQueue, self.resultQueue), daemon=True)
+        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.port, self.commandQueue, self.resultQueue))
         self.proxyProcess.start()
 
         # Wait for the result indicating that the proxy process is ready
@@ -49,7 +49,6 @@ class ProxyProcess:
 
     def __del__(self):
         if self.proxyProcess is not None:
-            self.commandQueue.put("quit")
             self.proxyProcess.terminate()
 
     def findFreePort(self):
@@ -75,9 +74,6 @@ class ProxyProcess:
 
         while True:
             message = commandQueue.get()
-
-            if message == "quit":
-                break
 
             if message == "resetPathTrace":
                 pathTracer.recentPaths = set()

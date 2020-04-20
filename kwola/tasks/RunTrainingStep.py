@@ -432,7 +432,6 @@ def printMovingAverageLosses(config, trainingStep):
 
     averageTracePredictionLoss = numpy.mean(trainingStep.tracePredictionLosses[-averageStart:])
     averageExecutionFeatureLoss = numpy.mean(trainingStep.executionFeaturesLosses[-averageStart:])
-    averageTargetHomogenizationLoss = numpy.mean(trainingStep.targetHomogenizationLosses[-averageStart:])
     averagePredictedCursorLoss = numpy.mean(trainingStep.predictedCursorLosses[-averageStart:])
     averageTotalLoss = numpy.mean(trainingStep.totalLosses[-averageStart:])
     averageTotalRebalancedLoss = numpy.mean(trainingStep.totalRebalancedLosses[-averageStart:])
@@ -447,8 +446,6 @@ def printMovingAverageLosses(config, trainingStep):
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
     if config['enable_execution_feature_prediction_loss']:
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
-    if config['enable_homogenization_loss']:
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Target Homogenization Loss:", averageTargetHomogenizationLoss, flush=True)
     if config['enable_cursor_prediction_loss']:
         print(datetime.now(), f"[{os.getpid()}]", "Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
 
@@ -533,7 +530,6 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         trainingStep.discountedFutureRewardLosses = []
         trainingStep.tracePredictionLosses = []
         trainingStep.executionFeaturesLosses = []
-        trainingStep.targetHomogenizationLosses = []
         trainingStep.predictedCursorLosses = []
         trainingStep.totalRewardLosses = []
         trainingStep.totalLosses = []
@@ -641,7 +637,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                     for result, batch in zip(results, batches):
                         totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, \
                         stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, \
-                        executionFeaturesLoss, targetHomogenizationLoss, predictedCursorLoss, \
+                        executionFeaturesLoss, predictedCursorLoss, \
                         totalLoss, totalRebalancedLoss, batchReward, \
                         sampleRewardLosses = result
 
@@ -652,7 +648,6 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
                         trainingStep.actionProbabilityLosses.append(actionProbabilityLoss)
                         trainingStep.tracePredictionLosses.append(tracePredictionLoss)
                         trainingStep.executionFeaturesLosses.append(executionFeaturesLoss)
-                        trainingStep.targetHomogenizationLosses.append(targetHomogenizationLoss)
                         trainingStep.predictedCursorLosses.append(predictedCursorLoss)
                         trainingStep.totalRewardLosses.append(totalRewardLoss)
                         trainingStep.totalRebalancedLosses.append(totalRebalancedLoss)

@@ -50,8 +50,6 @@ class TrainingStep(Document):
 
     executionFeaturesLosses = ListField(FloatField())
 
-    targetHomogenizationLosses = ListField(FloatField())
-
     predictedCursorLosses = ListField(FloatField())
 
     totalRewardLosses = ListField(FloatField())

@@ -130,7 +130,7 @@ class ManagedTaskSubprocess:
         return False
 
     def waitForProcessResult(self):
-        atexit.register(lambda: self.process.kill())
+        atexit.register(lambda: self.process.terminate())
 
         waitBetweenStdoutUpdates = 0.2
 

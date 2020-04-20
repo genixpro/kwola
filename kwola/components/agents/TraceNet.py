@@ -334,7 +334,5 @@ class TraceNet(torch.nn.Module):
                 outputDict['predictedExecutionFeatures'] = self.predictedExecutionFeaturesLinear(joinedFeatures)
             if self.config['enable_cursor_prediction_loss']:
                 outputDict['predictedCursor'] = self.predictedCursorLinear(joinedFeatures)
-            if self.config['enable_homogenization_loss']:
-                outputDict['pixelFeatureMap'] = self.pixelFeatureMapUpsampler(mergedPixelFeatureMap)
 
         return outputDict

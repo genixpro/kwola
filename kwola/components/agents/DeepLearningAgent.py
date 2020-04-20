@@ -1992,7 +1992,6 @@ class DeepLearningAgent:
                         actionProbabilityLoss,
                         tracePredictionLoss,
                         predictedExecutionFeaturesLoss,
-                        targetHomogenizationLoss,
                         predictedCursorLoss,
                         totalLoss,
                         totalRebalancedLoss,
@@ -2031,7 +2030,6 @@ class DeepLearningAgent:
             actionProbabilityLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_action_probability_weight']])
             executionFeatureLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_execution_feature_weight']])
             executionTraceLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_execution_trace_weight']])
-            homogenizationLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_homogenization_weight']])
             cursorPredictionLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_cursor_prediction_weight']])
             widthTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[3]])
             heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
@@ -2123,7 +2121,6 @@ class DeepLearningAgent:
             advantageLosses = []
             actionProbabilityLosses = []
             presentRewardLosses = []
-            targetHomogenizationLosses = []
             discountedFutureRewardLosses = []
 
             # Here we just zip together all of the various data for each sample in this batch, so that we can iterate
@@ -2209,18 +2206,6 @@ class DeepLearningAgent:
                 # that allows us to calculate the advantage values.
                 stateValueLoss = (stateValuePrediction - (presentReward.detach() + discountedFutureReward.detach())).pow(2)
 
-                # Here we calculate the homogenization loss if it is enabled.
-                if self.config['enable_homogenization_loss']:
-                    pixelFeatureImage = currentStateOutputs['pixelFeatureMap'][sampleIndex]
-
-                    # Target Homogenization loss - basically, all of the pixels for the masked area should produce similar features to each other and different features
-                    # from other pixels.
-                    targetHomogenizationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * rewardPixelMask).pow(2).mean(axis=0)
-                    targetDifferentiationDifferenceMap = ((pixelFeatureImage - pixelFeatureImage[:, actionY, actionX].unsqueeze(1).unsqueeze(1)) * (1.0 - rewardPixelMask)).pow(2).mean(axis=0)
-                    targetHomogenizationLoss = torch.abs((targetHomogenizationDifferenceMap.sum() / countPixelMask) - (targetDifferentiationDifferenceMap.sum() / (widthTensor * heightTensor - countPixelMask)))
-                    targetHomogenizationLoss = targetHomogenizationLoss * homogenizationLossWeightFloat
-                    targetHomogenizationLosses.append(targetHomogenizationLoss.unsqueeze(0))
-
                 # Now we multiply each of the various losses by their weights. These weights are just
                 # used to balance the losses against each other, since they have varying absolute magnitudes and
                 # varying importance
@@ -2273,13 +2258,6 @@ class DeepLearningAgent:
             # This is the final, total loss for all different loss functions across all the different samples
             totalRewardLoss = presentRewardLoss + discountedFutureRewardLoss + stateValueLoss + advantageLoss + actionProbabilityLoss
 
-            # Add in the average homogenization loss if that is enabled
-            if self.config['enable_homogenization_loss']:
-                targetHomogenizationLoss = torch.mean(torch.cat(targetHomogenizationLosses))
-                extraLosses.append(targetHomogenizationLoss.unsqueeze(0).unsqueeze(0))
-            else:
-                targetHomogenizationLoss = zeroTensor
-
             # We do a check here because if there are no extra loss functions, then
             # torch will give us an error saying we are concatenating and summing an
             # empty tensor, which is true.
@@ -2305,7 +2283,6 @@ class DeepLearningAgent:
                 actionProbabilityLoss,
                 tracePredictionLoss,
                 predictedExecutionFeaturesLoss,
-                targetHomogenizationLoss,
                 predictedCursorLoss,
                 totalRewardLoss,
                 totalLoss,
@@ -2327,7 +2304,7 @@ class DeepLearningAgent:
             for batchIndex, batchResult in batchResultTensors:
                 presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
                 advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
-                targetHomogenizationLoss, predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
+                predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
                 totalSampleLosses, batch = batchResult
 
                 print(datetime.now(), f"[{os.getpid()}]", "Batch", batchIndex)
@@ -2338,7 +2315,6 @@ class DeepLearningAgent:
                 print(datetime.now(), f"[{os.getpid()}]", "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
                 print(datetime.now(), f"[{os.getpid()}]", "tracePredictionLoss", float(tracePredictionLoss.data.item()))
                 print(datetime.now(), f"[{os.getpid()}]", "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "targetHomogenizationLoss", float(targetHomogenizationLoss.data.item()))
                 print(datetime.now(), f"[{os.getpid()}]", "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
 
             return
@@ -2350,7 +2326,7 @@ class DeepLearningAgent:
         for batchResult in batchResultTensors:
             presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
             advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
-            targetHomogenizationLoss, predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
+            predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
             totalSampleLosses, batch = batchResult
 
             # We cast all of the torch tensors into Python float objects.
@@ -2364,7 +2340,6 @@ class DeepLearningAgent:
             actionProbabilityLoss = float(actionProbabilityLoss.data.item())
             tracePredictionLoss = float(tracePredictionLoss.data.item())
             predictedExecutionFeaturesLoss = float(predictedExecutionFeaturesLoss.data.item())
-            targetHomogenizationLoss = float(targetHomogenizationLoss.data.item())
             predictedCursorLoss = float(predictedCursorLoss.data.item())
             totalLoss = float(totalLoss.data.item())
             totalRebalancedLoss = 0
@@ -2378,7 +2353,7 @@ class DeepLearningAgent:
             sampleLosses = [tensor.data.item() for tensor in totalSampleLosses]
 
             # Accumulate the giant tuple of values into the results list.
-            batchResults.append((totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, targetHomogenizationLoss,
+            batchResults.append((totalRewardLoss, presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss,
                                  predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleLosses))
         return batchResults
 
