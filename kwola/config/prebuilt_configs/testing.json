@@ -141,7 +141,7 @@
   "reward_discount_rate": 0.85,
   "reward_impossible_action": -1e1,
   "reward_log_output": 1e-3,
-  "reward_network_traffic": 1e-3,
+  "reward_network_traffic": 5e-3,
   "reward_new_code_executed": 3e-1,
   "reward_new_network_traffic": 5e-2,
   "reward_new_screenshot": 0,

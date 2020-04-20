@@ -34,6 +34,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.proxy import Proxy, ProxyType
+from ..proxy.ProxyProcess import ProxyProcess
 import cv2
 import hashlib
 import numpy
@@ -52,9 +53,10 @@ class WebEnvironmentSession:
         This class represents a single tab in the web environment.
     """
 
-    def __init__(self, config, tabNumber, proxyPort, pathTracer):
+    def __init__(self, config, tabNumber):
         self.config = config
         self.targetURL = config['url']
+        self.proxy = ProxyProcess(config)
 
         chrome_options = Options()
         chrome_options.headless = config['web_session_headless']
@@ -63,8 +65,8 @@ class WebEnvironmentSession:
         capabilities['loggingPrefs'] = {'browser': 'ALL'}
         proxyConfig = Proxy()
         proxyConfig.proxy_type = ProxyType.MANUAL
-        proxyConfig.http_proxy = f"localhost:{proxyPort}"
-        proxyConfig.ssl_proxy = f"localhost:{proxyPort}"
+        proxyConfig.http_proxy = f"localhost:{self.proxy.port}"
+        proxyConfig.ssl_proxy = f"localhost:{self.proxy.port}"
         proxyConfig.add_to_capabilities(capabilities)
 
         self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
@@ -110,9 +112,6 @@ class WebEnvironmentSession:
         self.screenshotDirectory = tempfile.mkdtemp()
         self.screenshotPaths = []
         self.screenshotHashes = set()
-
-        # TODO: NEED TO FIND A BETTER WAY FOR THE PATH TRACER TO SEPARATE OUT FLOWS FROM DIFFERENT TABS
-        self.pathTracer = pathTracer
 
         self.allUrls.add(self.targetURL)
         self.allUrls.add(self.driver.current_url)
@@ -368,7 +367,7 @@ class WebEnvironmentSession:
 
         startLogCount = len(self.driver.get_log('browser'))
 
-        self.pathTracer.recentPaths = set()
+        self.proxy.resetPathTrace()
 
         uiReactionWaitTime = 0.50
 
@@ -487,7 +486,9 @@ class WebEnvironmentSession:
 
         branchTrace = self.extractBranchTrace()
 
-        cumulativeProxyPaths = self.pathTracer.seenPaths
+        urlPathTrace = self.proxy.getPathTrace()
+
+        cumulativeProxyPaths = urlPathTrace['seen']
         newProxyPaths = cumulativeProxyPaths.difference(self.lastProxyPaths)
         newBranches = False
         filteredBranchTrace = {}
@@ -515,7 +516,7 @@ class WebEnvironmentSession:
 
         executionTrace.branchTrace = {k:v.tolist() for k,v in filteredBranchTrace.items()}
 
-        executionTrace.networkTrafficTrace = list(self.pathTracer.recentPaths)
+        executionTrace.networkTrafficTrace = list(urlPathTrace['recent'])
 
         executionTrace.startScreenshotHash = self.lastScreenshotHash
         executionTrace.finishScreenshotHash = screenHash
@@ -530,7 +531,7 @@ class WebEnvironmentSession:
         executionTrace.didCodeExecute = bool(len(filteredBranchTrace) > 0)
         executionTrace.didNewBranchesExecute = bool(newBranches)
 
-        executionTrace.hadNetworkTraffic = len(self.pathTracer.recentPaths) > 0
+        executionTrace.hadNetworkTraffic = len(urlPathTrace['recent']) > 0
         executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
         executionTrace.didScreenshotChange = screenHash != self.lastScreenshotHash
         executionTrace.isScreenshotNew = screenHash not in self.screenshotHashes
@@ -566,7 +567,7 @@ class WebEnvironmentSession:
         self.lastScreenshotHash = screenHash
         self.screenshotHashes.add(screenHash)
 
-        self.lastProxyPaths = set(self.pathTracer.seenPaths)
+        self.lastProxyPaths = set(urlPathTrace['seen'])
 
         self.frameNumber += 1
 

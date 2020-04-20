@@ -43,10 +43,8 @@ class WebEnvironment:
     def __init__(self, config, sessionLimit=None):
         self.config = config
 
-        self.startProxyServer()
-
         def createSession(number):
-            return WebEnvironmentSession(config, number, self.proxyPort, self.pathTracer)
+            return WebEnvironmentSession(config, number)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
             sessionCount = config['web_session_parallel_execution_sessions']
@@ -67,39 +65,6 @@ class WebEnvironment:
         for session in self.sessions:
             session.shutdown()
 
-    def startProxyServer(self):
-        self.proxyPort = self.findFreePort()
-
-        self.proxyThread = Thread(target=lambda: self.runProxyServer(), daemon=True)
-        self.proxyThread.start()
-
-        # Hack, wait for proxy thread to start
-        time.sleep(1)
-
-    def findFreePort(self):
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            s.bind(('', 0))
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            return s.getsockname()[1]
-
-    def runProxyServer(self):
-        from mitmproxy import proxy, options
-
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        self.codeRewriter = JSRewriteProxy(self.config)
-        self.pathTracer = PathTracer()
-
-        opts = options.Options(listen_port=self.proxyPort)
-        pconf = proxy.config.ProxyConfig(opts)
-
-        m = DumpMaster(opts, with_termlog=False, with_dumper=False)
-        m.server = proxy.server.ProxyServer(pconf)
-        m.addons.add(self.codeRewriter)
-        m.addons.add(self.pathTracer)
-
-        m.run()
 
     def screenshotSize(self):
         return self.sessions[0].screenshotSize()

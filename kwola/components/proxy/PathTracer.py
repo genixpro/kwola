@@ -25,7 +25,6 @@ class PathTracer:
         self.recentPaths = set()
 
     def request(self, flow):
-        # TODO: NEED A WAY TO SEPARATE OUT FLOWS FROM DIFFERENT TABS.
         self.seenPaths.add(flow.request.path)
         self.recentPaths.add(flow.request.path)
 
