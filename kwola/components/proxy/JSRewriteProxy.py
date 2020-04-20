@@ -27,6 +27,7 @@ import os.path
 import subprocess
 import base64
 import traceback
+import urllib.parse
 
 
 class JSRewriteProxy:
@@ -105,9 +106,11 @@ class JSRewriteProxy:
             return
 
         longFileHash, shortFileHash = self.computeHashes(bytes(flow.response.data.content))
-        fileName = flow.request.path.split("/")[-1]
+        fileName = urllib.parse.unquote(flow.request.path.split("/")[-1])
         if "?" in fileName:
             fileName = fileName.split("?")[0]
+        if "#" in fileName:
+            fileName = fileName.split("#")[0]
 
         try:
             if '.js' in fileName and not ".json" in fileName:
@@ -141,7 +144,11 @@ class JSRewriteProxy:
                         wrapperStart = wrapper[0]
                         wrapperEnd = wrapper[1]
 
-                result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', 'script'], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                sourceType = "script"
+                if b"\nexport " in jsFileContents or b"\nimport " in jsFileContents:
+                    sourceType = "module"
+
+                result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', sourceType], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
                 if result.returncode != 0:
                     print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most"
@@ -151,11 +158,11 @@ class JSRewriteProxy:
                                                               f" output:", flush=True)
 
                     if len(str(result.stdout, 'utf8')) > 0:
-                        print(str(result.stdout, 'utf8')[:500], flush=True)
+                        print(str(result.stdout, 'utf8')[:250], flush=True)
                     else:
                         print("No data in standard output", flush=True)
                     if len(str(result.stderr, 'utf8')) > 0:
-                        print(str(result.stderr, 'utf8')[:500], flush=True)
+                        print(str(result.stderr, 'utf8')[:250], flush=True)
                     else:
                         print("No data in standard error output", flush=True)
 

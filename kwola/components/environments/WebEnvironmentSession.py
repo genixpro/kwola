@@ -539,6 +539,10 @@ class WebEnvironmentSession:
             total += len(self.cumulativeBranchTrace[fileName])
             executedAtleastOnce += np.count_nonzero(self.cumulativeBranchTrace[fileName])
 
+        # Just an extra check here to cover our ass in case of division by zero
+        if total == 0:
+            total += 1
+
         executionTrace.cumulativeBranchCoverage = float(executedAtleastOnce) / float(total)
 
         for fileName in filteredBranchTrace.keys():
