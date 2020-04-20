@@ -69,9 +69,6 @@ class WebEnvironment:
     def screenshotSize(self):
         return self.sessions[0].screenshotSize()
 
-    def branchFeatureSize(self):
-        return self.sessions[0].branchFeatureSize()
-
     def getImages(self):
         imageFutures = []
 

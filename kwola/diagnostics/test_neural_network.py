@@ -27,11 +27,9 @@ import shutil
 
 def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
     try:
-        branchSize = 50
-
         agent = DeepLearningAgent(config=config, whichGpu=gpu)
 
-        agent.initialize(branchSize, enableTraining=True)
+        agent.initialize(enableTraining=True)
 
         if verbose:
             print("Saving and loading the network to disk")

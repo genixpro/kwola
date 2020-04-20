@@ -230,12 +230,6 @@ class WebEnvironmentSession:
 
         return result
 
-    def branchFeatureSize(self):
-        size = 0
-        for fileName in self.cumulativeBranchTrace.keys():
-            size += len(self.cumulativeBranchTrace[fileName])
-        return size
-
     def getActionMaps(self):
         elementActionMaps = self.driver.execute_script("""
             function isFunction(functionToCheck) {

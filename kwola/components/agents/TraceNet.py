@@ -23,7 +23,7 @@ import torch
 
 
 class TraceNet(torch.nn.Module):
-    def __init__(self, config, numActions, executionTracePredictorSize, executionFeaturePredictorSize, cursorCount):
+    def __init__(self, config, numActions, executionFeaturePredictorSize, cursorCount):
         super(TraceNet, self).__init__()
 
         self.config = config
@@ -201,7 +201,7 @@ class TraceNet(torch.nn.Module):
             self.predictedExecutionTraceLinear = torch.nn.Sequential(
                 torch.nn.Linear(
                     in_features=self.config['pixel_features'] + self.config['additional_features_stamp_depth_size'],
-                    out_features=executionTracePredictorSize
+                    out_features=self.config['symbol_embedding_size']
                 ),
                 torch.nn.ELU()
             )
@@ -268,6 +268,15 @@ class TraceNet(torch.nn.Module):
 
         if data["outputStamp"]:
             outputDict["stamp"] = stamp.detach()
+
+        if data['outputFutureSymbolEmbedding']:
+            # Compute the embedding based on the symbols provided for the future execution trace
+            decayingFutureSymbolEmbedding = self.symbolEmbedding(data['decayingFutureSymbolIndexes'],
+                                                    data['decayingFutureSymbolOffsets'],
+                                                    per_sample_weights=data['decayingFutureSymbolWeights'])
+
+
+            outputDict['decayingFutureSymbolEmbedding'] = decayingFutureSymbolEmbedding
 
         if data["computeActionProbabilities"]:
             actorLogProbs = self.actorConvolution(mergedPixelFeatureMap)

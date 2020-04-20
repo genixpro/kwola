@@ -137,9 +137,8 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
 
 def updateModelSymbols(config, testingStepId):
     # Load and save the agent to make sure all training subprocesses are synced
-    environment = WebEnvironment(config=config, sessionLimit=1)
     agent = DeepLearningAgent(config=config, whichGpu=None)
-    agent.initialize(environment.branchFeatureSize(), enableTraining=False)
+    agent.initialize(enableTraining=False)
     agent.load()
 
     testingStep = TestingStep.loadFromDisk(testingStepId, config)
@@ -237,12 +236,11 @@ def trainAgent(configDir, exitOnFail=False):
     config.getKwolaUserDataDirectory("bugs")
 
     # Load and save the agent to make sure all training subprocesses are synced
-    environment = WebEnvironment(config=config, sessionLimit=1)
     agent = DeepLearningAgent(config=config, whichGpu=None)
-    agent.initialize(environment.branchFeatureSize(), enableTraining=False)
+    agent.initialize(enableTraining=False)
     agent.load()
     agent.save()
-    del environment, agent
+    del agent
 
     trainingSequence = TrainingSequence(id=CustomIDField.generateNewUUID(TrainingSequence, config))
 

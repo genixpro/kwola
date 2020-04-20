@@ -94,11 +94,31 @@ class ExecutionTrace(Document):
     # This field is used by the training routine to track how much loss the network had on this execution trace.
     lastTrainingRewardLoss = FloatField(default=1.0)
 
-    # Cached cumulative branch trace vector. This is only "cached" because it can actually be recomputed on the fly
-    cachedCumulativeBranchTrace = DictField(ListField())
+    # Cached cumulative branch trace vector at the start of this trace, e.g. before the action was ran.
+    # This is only "cached" because it can actually be recomputed on the fly
+    cachedStartCumulativeBranchTrace = DictField(ListField())
 
-    # Cached decaying branch trace vector. This is only "cached" because it can actually be recomputed on the fly
-    cachedDecayingBranchTrace = DictField(ListField())
+    # Cached decaying branch trace vector at the start of this trace, e.g. before the action was ran.
+    # This is only "cached" because it can actually be recomputed on the fly
+    cachedStartDecayingBranchTrace = DictField(ListField())
+
+    # Cached cumulative branch trace vector at the end of this trace, e.g. after the action was ran.
+    # This is only "cached" because it can actually be recomputed on the fly
+    cachedEndCumulativeBranchTrace = DictField(ListField())
+
+    # Cached decaying branch trace vector at the end of this trace, e.g. after the action was ran.
+    # This is only "cached" because it can actually be recomputed on the fly
+    cachedEndDecayingBranchTrace = DictField(ListField())
+
+    # Cached decaying branch trace vector at the start of this trace, e.g. before the action was ran.
+    # This is only "cached" because it can actually be recomputed on the fly
+    # To be clear, this is a 'future' branch trace, so at the start of the trace,
+    # the future includes the actions being performed in this frame.
+    cachedStartDecayingFutureBranchTrace = DictField(ListField())
+
+    # Cached decaying branch trace vector at the end of this trace, e.g. after the action was ran.
+    # This is only "cached" because it can actually be recomputed on the fly
+    cachedEndDecayingFutureBranchTrace = DictField(ListField())
 
     # We use Python getter / setter methods to transparently compress and decompress
     # these fields as they go into and out of the database model.
@@ -174,8 +194,11 @@ class ExecutionTrace(Document):
         return numpy.array(newArray)
 
     def saveToDisk(self, config):
-        self.cachedCumulativeBranchTrace = None
-        self.cachedDecayingBranchTrace = None
+        self.cachedStartCumulativeBranchTrace = None
+        self.cachedStartDecayingBranchTrace = None
+        self.cachedEndCumulativeBranchTrace = None
+        self.cachedEndDecayingBranchTrace = None
+        self.cachedDecayingFutureBranchTrace = None
         saveObjectToDisk(self, "execution_traces", config)
 
 

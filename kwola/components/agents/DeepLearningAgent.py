@@ -360,15 +360,12 @@ class DeepLearningAgent:
 
         return device_ids
 
-    def initialize(self, branchFeatureSize, enableTraining=True):
+    def initialize(self, enableTraining=True):
         """
             Initializes the deep learning agent. This method is will actually create the neural network in memory.
             Technically you can create a DeepLearningAgent and use some of its methods without initializing it,
             but you will not be able to use the primary methods of nextBestActions or learnFromBatches. You must
             initialize the neural network before calling either of those methods.
-
-            :param branchFeatureSize: This should be the number of code branches that are being traced. It should be the
-                                      length of the return value from WebEnvironment.getBranchFeature.
 
             :param enableTraining: Indicates whether or not the agent should be initialized in training mode. Training mode
                                    costs more RAM, so you should avoid it if you can.
@@ -377,14 +374,12 @@ class DeepLearningAgent:
         devices = self.getTorchDevices()
         outputDevice = devices[0]
 
-        self.branchFeatureSize = branchFeatureSize
-
         # Create the primary torch model object
-        self.model = TraceNet(self.config, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+        self.model = TraceNet(self.config, len(self.actions), 12, len(self.cursors))
 
         # If training is enabled, we also have to create the target network
         if enableTraining:
-            self.targetNetwork = TraceNet(self.config, len(self.actions), branchFeatureSize, 12, len(self.cursors))
+            self.targetNetwork = TraceNet(self.config, len(self.actions), 12, len(self.cursors))
         else:
             self.targetNetwork = None
 
@@ -632,6 +627,7 @@ class DeepLearningAgent:
         for pastExecutionTraceList in pastExecutionTraces:
             self.computeCachedCumulativeBranchTraces(pastExecutionTraceList)
             self.computeCachedDecayingBranchTrace(pastExecutionTraceList)
+            self.computeCachedDecayingFutureBranchTrace(pastExecutionTraceList)
 
         # Process all of the images
         processedImages = self.processImages(rawImages)
@@ -786,6 +782,7 @@ class DeepLearningAgent:
                     "pixelActionMaps": pixelActionMapTensor,
                     "stepNumber": stepNumberTensor,
                     "outputStamp": False,
+                    "outputFutureSymbolEmbedding": False,
                     "computeExtras": False,
                     "computeRewards": False,
                     "computeActionProbabilities": True,
@@ -1209,6 +1206,7 @@ class DeepLearningAgent:
 
         self.computeCachedCumulativeBranchTraces(executionTraces)
         self.computeCachedDecayingBranchTrace(executionTraces)
+        self.computeCachedDecayingFutureBranchTrace(executionTraces)
 
         presentRewards = DeepLearningAgent.computePresentRewards(executionTracesFiltered, self.config)
 
@@ -1554,6 +1552,7 @@ class DeepLearningAgent:
                                             "pixelActionMaps": self.variableWrapperFunc(torch.FloatTensor, numpy.array([pixelActionMap])),
                                             "stepNumber": self.variableWrapperFunc(torch.FloatTensor, numpy.array([trace.frameNumber - 1])),
                                             "outputStamp": True,
+                                            "outputFutureSymbolEmbedding": False,
                                             "computeExtras": False,
                                             "computeRewards": True,
                                             "computeActionProbabilities": True,
@@ -1809,44 +1808,10 @@ class DeepLearningAgent:
 
         self.computeCachedCumulativeBranchTraces(executionTraces)
         self.computeCachedDecayingBranchTrace(executionTraces)
+        self.computeCachedDecayingFutureBranchTrace(executionTraces)
 
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
-
-        # Create the decaying future execution trace for the prediction algorithm
-        # The decaying future execution trace is basically a vector that describes
-        # what is going to happen in the future. Its similar to the decaying branch
-        # trace that is fed as an input to the algorithm. The difference is this.
-        # The decaying branch trace shows what happened in the past, with the lines
-        # of code that get executed set to 1 in the vector and then decaying thereafter.
-        # The decaying future trace is exactly the same but in reverse - it provides
-        # what is going to happen next after this trace. The lines of code which
-        # execute immediately next are set to 1, and ones that execute further in the
-        # future have some decayed value based on the decay rate. What this does is
-        # provide an additional, highly supervised target for a secondary loss function.
-        tracesReversed = list(copy.copy(executionTraces))
-        tracesReversed.reverse()
-        currentTrace = []
-        for fileName in executionTraces[-1].cachedCumulativeBranchTrace.keys():
-            currentTrace.extend([0] * len(executionTraces[-1].cachedCumulativeBranchTrace[fileName]))
-        currentTrace = numpy.array(currentTrace, dtype=numpy.float)
-        executionTraceDiscountRate = self.config['future_execution_trace_decay_rate']
-        decayingFutureBranchTraces = []
-        for trace in tracesReversed:
-            decayingFutureBranchTrace = []
-            for fileName in executionTraces[-1].cachedCumulativeBranchTrace.keys():
-                if fileName in trace.branchTrace and len(trace.branchTrace[fileName]) == len(executionTraces[-1].cachedCumulativeBranchTrace[fileName]):
-                    decayingFutureBranchTrace.extend(trace.branchTrace[fileName])
-                else:
-                    decayingFutureBranchTrace.extend([0] * len(executionTraces[-1].cachedCumulativeBranchTrace[fileName]))
-
-            decayingFutureBranchTrace = numpy.array(decayingFutureBranchTrace, dtype=numpy.float)
-
-            currentTrace *= executionTraceDiscountRate
-            currentTrace += numpy.minimum(decayingFutureBranchTrace, numpy.ones_like(decayingFutureBranchTrace))
-            decayingFutureBranchTraces.append(decayingFutureBranchTrace)
-
-        decayingFutureBranchTraces.reverse()
 
         # Here we construct a list containing the 'next' traces, that is, for every execution traces,
         # these are the execution traces and images that are immediately following.
@@ -1854,12 +1819,15 @@ class DeepLearningAgent:
         nextProcessedImages = list(processedImages)[1:]
 
         # Iterate over each trace along with all of the required data to compute the batch for that trace
-        for trace, nextTrace, processedImage, nextProcessedImage, presentReward, decayingFutureBranchTrace in zip(executionTraces, nextTraces, processedImages, nextProcessedImages, presentRewards, decayingFutureBranchTraces):
+        for trace, nextTrace, processedImage, nextProcessedImage, presentReward in zip(executionTraces, nextTraces, processedImages, nextProcessedImages, presentRewards):
             width = processedImage.shape[2]
             height = processedImage.shape[1]
 
             # Compute the symbols and weights for the current trace
             symbols, weights = self.computeAllSymbolsForTrace(trace)
+
+            # Compute the decaying future symbols and decaying future weights for the current trace
+            decayingFutureSymbolIndexes, decayingFutureSymbolWeights = self.computeDecayingFutureBranchTraceSymbolsList(trace)
 
             # We do the same for the next trace
             nextSymbols, nextWeights = self.computeAllSymbolsForTrace(nextTrace)
@@ -1922,8 +1890,8 @@ class DeepLearningAgent:
                 "actionTypes": [trace.actionPerformed.type],
                 "actionXs": numpy.array([int(trace.actionPerformed.x * self.config['model_image_downscale_ratio'])], dtype=numpy.int16),
                 "actionYs": numpy.array([int(trace.actionPerformed.y * self.config['model_image_downscale_ratio'])], dtype=numpy.int16),
-                "futureBranchTraces": numpy.array([decayingFutureBranchTrace], dtype=numpy.int8),
-
+                "decayingFutureSymbolIndexes": numpy.array([decayingFutureSymbolIndexes], dtype=numpy.int32),
+                "decayingFutureSymbolWeights": numpy.array([decayingFutureSymbolWeights], dtype=numpy.float16),
                 "presentRewards": numpy.array([presentReward], dtype=numpy.float32),
                 "rewardPixelMasks": numpy.array([rewardPixelMask], dtype=numpy.uint8),
                 "executionFeatures": numpy.array([executionFeatures], dtype=numpy.uint8),
@@ -1943,7 +1911,6 @@ class DeepLearningAgent:
         return {
                 "traceIds": ["test"] * self.config['batch_size'],
                 "processedImages": numpy.zeros([self.config['batch_size'], 1,  height, width], dtype=numpy.float16),
-                "additionalFeatures": numpy.zeros([self.config['batch_size'], self.branchFeatureSize * 2], dtype=numpy.float16),
                 "symbolIndexes": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
                 "symbolWeights": numpy.ones([self.config['batch_size']], dtype=numpy.float16),
                 "symbolOffsets": numpy.array(range(self.config['batch_size']), dtype=numpy.int32),
@@ -1960,7 +1927,10 @@ class DeepLearningAgent:
                 "actionTypes": [self.actionsSorted[0]] * self.config['batch_size'],
                 "actionXs": numpy.zeros([self.config['batch_size']], dtype=numpy.int16),
                 "actionYs": numpy.zeros([self.config['batch_size']], dtype=numpy.int16),
-                "futureBranchTraces": numpy.zeros([self.config['batch_size'], self.branchFeatureSize], dtype=numpy.int8),
+
+                "decayingFutureSymbolIndexes": numpy.zeros([self.config['batch_size']], dtype=numpy.int32),
+                "decayingFutureSymbolWeights": numpy.ones([self.config['batch_size']], dtype=numpy.float16),
+                "decayingFutureSymbolOffsets": numpy.array(range(self.config['batch_size']), dtype=numpy.int32),
 
                 "presentRewards": numpy.ones([self.config['batch_size']], dtype=numpy.float32),
                 "rewardPixelMasks": numpy.ones([self.config['batch_size'], height, width], dtype=numpy.uint8),
@@ -2048,9 +2018,16 @@ class DeepLearningAgent:
 
             # Only create the following tensors if the loss is actually enabled for them
             if self.config['enable_trace_prediction_loss']:
-                futureBranchTracesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['futureBranchTraces'])
+                decayingFutureSymbolIndexesTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(
+                    batch['decayingFutureSymbolIndexes']))
+                decayingFutureSymbolListOffsetsTensor = self.variableWrapperFunc(torch.LongTensor, numpy.array(
+                    batch['decayingFutureSymbolOffsets']))
+                decayingFutureSymbolWeightsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(
+                    batch['decayingFutureSymbolWeights']))
             else:
-                futureBranchTracesTensor = None
+                decayingFutureSymbolIndexesTensor = None
+                decayingFutureSymbolListOffsetsTensor = None
+                decayingFutureSymbolWeightsTensor = None
 
             if self.config['enable_execution_feature_prediction_loss']:
                 executionFeaturesTensor = self.variableWrapperFunc(torch.FloatTensor, batch['executionFeatures'])
@@ -2074,7 +2051,11 @@ class DeepLearningAgent:
                 "action_type": batch['actionTypes'],
                 "action_x": batch['actionXs'],
                 "action_y": batch['actionYs'],
+                "decayingFutureSymbolIndexes": decayingFutureSymbolIndexesTensor,
+                "decayingFutureSymbolWeights": decayingFutureSymbolWeightsTensor,
+                "decayingFutureSymbolOffsets": decayingFutureSymbolListOffsetsTensor,
                 "outputStamp": False,
+                "outputFutureSymbolEmbedding": True,
                 "computeExtras": True,
                 "computeActionProbabilities": True,
                 "computeStateValues": True,
@@ -2103,6 +2084,7 @@ class DeepLearningAgent:
                     "pixelActionMaps": nextStatePixelActionMaps,
                     "stepNumber": nextStepNumbers,
                     "outputStamp": False,
+                    "outputFutureSymbolEmbedding": False,
                     "computeExtras": False,
                     "computeActionProbabilities": False,
                     "computeStateValues": False,
@@ -2229,7 +2211,7 @@ class DeepLearningAgent:
             # These extra or secondary losses are just here to help stabilize / regularize the neural network and
             # help it to train faster.
             if self.config['enable_trace_prediction_loss']:
-                tracePredictionLoss = (currentStateOutputs['predictedTraces'] - futureBranchTracesTensor).abs().mean() * executionTraceLossWeightFloat
+                tracePredictionLoss = (currentStateOutputs['predictedTraces'] - currentStateOutputs['decayingFutureSymbolEmbedding']).pow(2).mean() * executionTraceLossWeightFloat
                 extraLosses.append(tracePredictionLoss.unsqueeze(0))
             else:
                 tracePredictionLoss = zeroTensor
@@ -2454,7 +2436,12 @@ class DeepLearningAgent:
         if len(executionTraces) == 0:
             return
 
-        executionTraces[0].cachedCumulativeBranchTrace = {
+        executionTraces[0].cachedStartCumulativeBranchTrace = {
+            name: numpy.zeros_like(numpy.array(value))
+            for name, value in executionTraces[0].branchTrace.items()
+        }
+
+        executionTraces[0].cachedEndCumulativeBranchTrace = {
             name: numpy.array(value)
             for name, value in executionTraces[0].branchTrace.items()
         }
@@ -2462,15 +2449,16 @@ class DeepLearningAgent:
         lastTrace = executionTraces[0]
 
         for trace in executionTraces[1:]:
-            if trace.cachedCumulativeBranchTrace is None:
-                trace.cachedCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedCumulativeBranchTrace)
+            if trace.cachedStartCumulativeBranchTrace is None:
+                trace.cachedStartCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedEndCumulativeBranchTrace)
+                trace.cachedEndCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedEndCumulativeBranchTrace)
 
                 for fileName in trace.branchTrace.keys():
-                    if fileName in trace.cachedCumulativeBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedCumulativeBranchTrace[fileName]):
-                            trace.cachedCumulativeBranchTrace[fileName] += numpy.array(trace.branchTrace[fileName])
+                    if fileName in trace.cachedEndCumulativeBranchTrace:
+                        if len(trace.branchTrace[fileName]) == len(trace.cachedEndCumulativeBranchTrace[fileName]):
+                            trace.cachedEndCumulativeBranchTrace[fileName] += numpy.array(trace.branchTrace[fileName])
                     else:
-                        trace.cachedCumulativeBranchTrace[fileName] = trace.branchTrace[fileName]
+                        trace.cachedEndCumulativeBranchTrace[fileName] = trace.branchTrace[fileName]
             lastTrace = trace
 
 
@@ -2478,37 +2466,95 @@ class DeepLearningAgent:
         if len(executionTraces) == 0:
             return
 
-        executionTraces[0].cachedDecayingBranchTrace = {
-            name: numpy.minimum(numpy.ones_like(value), numpy.array(value))
+        executionTraces[0].cachedStartDecayingBranchTrace = {
+            name: numpy.zeros_like(numpy.array(value))
+            for name, value in executionTraces[0].branchTrace.items()
+        }
+
+        executionTraces[0].cachedEndDecayingBranchTrace = {
+            name: numpy.minimum(numpy.ones_like(value), numpy.array(value)) * self.config['decaying_branch_trace_scale']
             for name, value in executionTraces[0].branchTrace.items()
         }
 
         lastTrace = executionTraces[0]
 
         for trace in executionTraces[1:]:
-            if trace.cachedDecayingBranchTrace is None:
-                trace.cachedDecayingBranchTrace = copy.deepcopy(lastTrace.cachedDecayingBranchTrace)
-                for fileName in trace.cachedDecayingBranchTrace.keys():
-                    trace.cachedDecayingBranchTrace[fileName] *= self.config['decaying_branch_trace_decay_rate']
+            if trace.cachedStartDecayingBranchTrace is None:
+                trace.cachedStartDecayingBranchTrace = copy.deepcopy(lastTrace.cachedEndDecayingBranchTrace)
+                trace.cachedEndDecayingBranchTrace = copy.deepcopy(lastTrace.cachedEndDecayingBranchTrace)
+
+                for fileName in trace.cachedEndDecayingBranchTrace.keys():
+                    trace.cachedEndDecayingBranchTrace[fileName] *= self.config['decaying_branch_trace_decay_rate']
 
                 for fileName in trace.branchTrace.keys():
                     branchesExecuted = numpy.minimum(numpy.ones_like(trace.branchTrace[fileName]),
                                                      numpy.array(trace.branchTrace[fileName]))*self.config['decaying_branch_trace_scale']
 
-                    if fileName in trace.cachedDecayingBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedDecayingBranchTrace[fileName]):
-                            trace.cachedDecayingBranchTrace[fileName] += branchesExecuted
+                    if fileName in trace.cachedEndDecayingBranchTrace:
+                        if len(trace.branchTrace[fileName]) == len(trace.cachedEndDecayingBranchTrace[fileName]):
+                            trace.cachedEndDecayingBranchTrace[fileName] += branchesExecuted
                     else:
-                        trace.cachedDecayingBranchTrace[fileName] = branchesExecuted
+                        trace.cachedEndDecayingBranchTrace[fileName] = branchesExecuted
 
             lastTrace = trace
+
+    def computeCachedDecayingFutureBranchTrace(self, executionTraces):
+        # Create the decaying future execution trace for the prediction algorithm
+        # The decaying future execution trace is basically a vector that describes
+        # what is going to happen in the future. Its similar to the decaying branch
+        # trace that is fed as an input to the algorithm. The difference is this.
+        # The decaying branch trace shows what happened in the past, with the lines
+        # of code that get executed set to 1 in the vector and then decaying thereafter.
+        # The decaying future trace is exactly the same but in reverse - it provides
+        # what is going to happen next after this trace. The lines of code which
+        # execute immediately next are set to 1, and ones that execute further in the
+        # future have some decayed value based on the decay rate. What this does is
+        # provide an additional, highly supervised target for a secondary loss function.
+
+        if len(executionTraces) == 0:
+            return
+
+        reversedExecutionTraces = list(executionTraces)
+        reversedExecutionTraces.reverse()
+
+        reversedExecutionTraces[0].cachedEndDecayingFutureBranchTrace = {
+            name: numpy.zeros_like(value)
+            for name, value in reversedExecutionTraces[0].branchTrace.items()
+        }
+
+        reversedExecutionTraces[0].cachedStartDecayingFutureBranchTrace = {
+            name: numpy.minimum(numpy.ones_like(value), numpy.array(value)) * self.config['decaying_future_branch_trace_scale']
+            for name, value in reversedExecutionTraces[0].branchTrace.items()
+        }
+
+        nextTrace = reversedExecutionTraces[0]
+
+        for trace in reversedExecutionTraces[1:]:
+            if trace.cachedStartDecayingFutureBranchTrace is None:
+                trace.cachedStartDecayingFutureBranchTrace = copy.deepcopy(nextTrace.cachedStartDecayingFutureBranchTrace)
+                trace.cachedEndDecayingFutureBranchTrace = copy.deepcopy(nextTrace.cachedStartDecayingFutureBranchTrace)
+
+                for fileName in trace.cachedStartDecayingFutureBranchTrace.keys():
+                    trace.cachedStartDecayingFutureBranchTrace[fileName] *= self.config['decaying_future_execution_trace_decay_rate']
+
+                for fileName in trace.branchTrace.keys():
+                    branchesExecuted = numpy.minimum(numpy.ones_like(trace.branchTrace[fileName]),
+                                                     numpy.array(trace.branchTrace[fileName])) * self.config['decaying_future_branch_trace_scale']
+
+                    if fileName in trace.cachedStartDecayingFutureBranchTrace:
+                        if len(trace.branchTrace[fileName]) == len(trace.cachedStartDecayingFutureBranchTrace[fileName]):
+                            trace.cachedStartDecayingFutureBranchTrace[fileName] += branchesExecuted
+                    else:
+                        trace.cachedStartDecayingFutureBranchTrace[fileName] = branchesExecuted
+
+            nextTrace = trace
 
     def computeCoverageSymbolsList(self, executionTrace):
         symbols = []
         weights = []
-        for fileName in executionTrace.cachedCumulativeBranchTrace:
-            for branchIndex in range(len(executionTrace.cachedCumulativeBranchTrace[fileName])):
-                if executionTrace.cachedCumulativeBranchTrace[fileName][branchIndex] > 0:
+        for fileName in executionTrace.cachedStartCumulativeBranchTrace:
+            for branchIndex in range(len(executionTrace.cachedStartCumulativeBranchTrace[fileName])):
+                if executionTrace.cachedStartCumulativeBranchTrace[fileName][branchIndex] > 0:
                     symbol = DeepLearningAgent.branchCoveredSymbol(fileName, branchIndex)
                     symbolIndex = self.symbolMap.get(symbol, -1)
                     if symbolIndex > 0:
@@ -2521,14 +2567,28 @@ class DeepLearningAgent:
     def computeDecayingBranchTraceSymbolsList(self, executionTrace):
         symbols = []
         weights = []
-        for fileName in executionTrace.cachedDecayingBranchTrace:
-            for branchIndex in range(len(executionTrace.cachedDecayingBranchTrace[fileName])):
-                if executionTrace.cachedDecayingBranchTrace[fileName][branchIndex] > self.config['decaying_branch_trace_minimum_weight_for_symbol_inclusion']:
+        for fileName in executionTrace.cachedStartDecayingBranchTrace:
+            for branchIndex in range(len(executionTrace.cachedStartDecayingBranchTrace[fileName])):
+                if executionTrace.cachedStartDecayingBranchTrace[fileName][branchIndex] > self.config['decaying_branch_trace_minimum_weight_for_symbol_inclusion']:
                     symbol = DeepLearningAgent.branchCoveredSymbol(fileName, branchIndex)
                     symbolIndex = self.symbolMap.get(symbol, -1)
                     if symbolIndex > 0:
                         symbols.append(symbolIndex)
-                        weights.append(executionTrace.cachedDecayingBranchTrace[fileName][branchIndex])
+                        weights.append(executionTrace.cachedStartDecayingBranchTrace[fileName][branchIndex])
+
+        return symbols, weights
+
+    def computeDecayingFutureBranchTraceSymbolsList(self, executionTrace):
+        symbols = []
+        weights = []
+        for fileName in executionTrace.cachedEndDecayingFutureBranchTrace:
+            for branchIndex in range(len(executionTrace.cachedEndDecayingFutureBranchTrace[fileName])):
+                if executionTrace.cachedEndDecayingFutureBranchTrace[fileName][branchIndex] > self.config['decaying_branch_trace_minimum_weight_for_symbol_inclusion']:
+                    symbol = DeepLearningAgent.branchCoveredSymbol(fileName, branchIndex)
+                    symbolIndex = self.symbolMap.get(symbol, -1)
+                    if symbolIndex > 0:
+                        symbols.append(symbolIndex)
+                        weights.append(executionTrace.cachedEndDecayingFutureBranchTrace[fileName][branchIndex])
 
         return symbols, weights
 

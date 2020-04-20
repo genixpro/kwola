@@ -196,7 +196,9 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
         batch = {}
         for key in samples[0].keys():
             # We have to do something special here since they are not concatenated the normal way
-            if key == "symbolIndexes" or key == 'symbolWeights' or key == "nextSymbolIndexes" or key == 'nextSymbolWeights':
+            if key == "symbolIndexes" or key == 'symbolWeights' \
+                    or key == "nextSymbolIndexes" or key == 'nextSymbolWeights' \
+                    or key == "decayingFutureSymbolIndexes" or key == 'decayingFutureSymbolWeights':
                 batch[key] = numpy.concatenate([sample[key][0] for sample in samples], axis=0)
 
                 currentOffset = 0
@@ -207,6 +209,8 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
 
                 if 'next' in key:
                     batch['nextSymbolOffsets'] = numpy.array(offsets)
+                elif 'decaying' in key:
+                    batch['decayingFutureSymbolOffsets'] = numpy.array(offsets)
                 else:
                     batch['symbolOffsets'] = numpy.array(offsets)
             else:
@@ -536,21 +540,14 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
         trainingStep.totalRebalancedLosses = []
         trainingStep.saveToDisk(config)
 
-        environment = WebEnvironment(config=config, sessionLimit=1)
-
         agent = DeepLearningAgent(config=config, whichGpu=gpu)
-        agent.initialize(environment.branchFeatureSize())
+        agent.initialize()
         agent.load()
-
-        environment.shutdown()
 
         # Haven't decided yet whether we should force Kwola to always write to disc or spool in memory
         # using /tmp. The following lines switch between the two approaches
         # batchDirectory = tempfile.mkdtemp(dir=getKwolaUserDataDirectory("batches"))
         batchDirectory = tempfile.mkdtemp()
-
-        # Force it to destroy now to save memory
-        del environment
 
         subProcessCommandQueues = []
         subProcessBatchResultQueues = []
@@ -571,7 +568,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None):
     except Exception as e:
         print(datetime.now(), f"[{os.getpid()}]", f"Error occurred during initiation of training!", flush=True)
         traceback.print_exc()
-        return {}
+        return {"success": False}
 
     try:
         totalBatchesNeeded = config['iterations_per_training_step'] * config['batches_per_iteration'] + int(config['training_surplus_batches'])

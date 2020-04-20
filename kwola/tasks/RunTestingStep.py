@@ -39,12 +39,12 @@ import time
 import traceback
 
 
-def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subProcessCommandQueue, subProcessResultQueue):
+def predictedActionSubProcess(configDir, shouldBeRandom, subProcessCommandQueue, subProcessResultQueue):
     config = Configuration(configDir)
 
     agent = DeepLearningAgent(config, whichGpu=None)
 
-    agent.initialize(branchFeatureSize, enableTraining=False)
+    agent.initialize(enableTraining=False)
     agent.load()
 
     while True:
@@ -69,11 +69,11 @@ def predictedActionSubProcess(configDir, shouldBeRandom, branchFeatureSize, subP
         subProcessResultQueue.put(resultFileName)
 
 
-def createDebugVideoSubProcess(configDir, branchFeatureSize, executionSessionId, name="", includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None, folder="debug_videos"):
+def createDebugVideoSubProcess(configDir, executionSessionId, name="", includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None, folder="debug_videos"):
     config = Configuration(configDir)
 
     agent = DeepLearningAgent(config, whichGpu=None)
-    agent.initialize(branchFeatureSize, enableTraining=False)
+    agent.initialize(enableTraining=False)
     agent.load()
 
     kwolaDebugVideoDirectory = config.getKwolaUserDataDirectory(folder)
@@ -160,7 +160,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         for n in range(config['testing_subprocess_pool_size']):
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessResultQueue = multiprocessing.Queue()
-            subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+            subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, subProcessCommandQueue, subProcessResultQueue))
             subProcess.start()
             atexit.register(lambda: subProcess.terminate())
 
@@ -217,7 +217,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
                 subProcessCommandQueue = multiprocessing.Queue()
                 subProcessResultQueue = multiprocessing.Queue()
-                subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, environment.branchFeatureSize(), subProcessCommandQueue, subProcessResultQueue))
+                subProcess = multiprocessing.Process(target=predictedActionSubProcess, args=(configDir, shouldBeRandom, subProcessCommandQueue, subProcessResultQueue))
                 subProcess.start()
                 atexit.register(lambda: subProcess.terminate())
 
@@ -273,7 +273,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 with open(bugVideoFilePath, 'wb') as cloneFile:
                     cloneFile.write(origFile.read())
 
-            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
+            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
             debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
@@ -293,7 +293,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
-            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[0].id), "prediction", True, True, "debug_videos"))
+            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[0].id), "prediction", True, True, "debug_videos"))
             debugVideoSubprocess1.start()
             atexit.register(lambda: debugVideoSubprocess1.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess1)
@@ -301,7 +301,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             # Leave a gap between the two to reduce collision
             time.sleep(5)
 
-            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, environment.branchFeatureSize(), str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, "debug_videos"))
+            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, "debug_videos"))
             debugVideoSubprocess2.start()
             atexit.register(lambda: debugVideoSubprocess2.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess2)
