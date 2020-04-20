@@ -45,8 +45,8 @@ class ManagedTaskSubprocess:
         self.logFilePath = os.path.join(config.getKwolaUserDataDirectory("logs"), logId + "_log.txt")
         self.currentLogSize = 0
 
-        processOutputFile = open(self.logFilePath, 'w')
-        self.process = subprocess.Popen(args, stdout=processOutputFile, stderr=None, stdin=subprocess.PIPE)
+        self.processOutputFile = open(self.logFilePath, 'w')
+        self.process = subprocess.Popen(args, stdout=self.processOutputFile, stderr=None, stdin=subprocess.PIPE)
 
         self.process.stdin.write(bytes(json.dumps(data) + "\n", "utf8"))
         self.process.stdin.flush()
@@ -60,6 +60,8 @@ class ManagedTaskSubprocess:
 
     def __del__(self):
         self.process.terminate()
+        self.processOutputFile.close()
+
 
     def getLatestLogOutput(self):
         newSize = os.stat(self.logFilePath).st_size
@@ -71,6 +73,7 @@ class ManagedTaskSubprocess:
             file.seek(self.currentLogSize)
             data = file.read()
             self.currentLogSize += len(data)
+            file.close()
             return data
 
 
