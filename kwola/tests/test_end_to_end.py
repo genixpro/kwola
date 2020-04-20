@@ -90,8 +90,8 @@ class TestEndToEnd(unittest.TestCase):
     def test_mayoclinic(self):
         self.run_click_only_test("https://mayoclinic.org/")
 
-    def test_mayquest(self):
-        self.run_click_only_test("https://mayquest.com/")
+    def test_mapquest(self):
+        self.run_click_only_test("https://mapquest.com/")
 
     def test_merriam_webster(self):
         self.run_click_only_test("https://merriam-webster.com/")

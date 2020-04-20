@@ -157,12 +157,12 @@ class JSRewriteProxy:
                                                               f" transpile the javascript for some other reason. See the following truncated"
                                                               f" output:", flush=True)
 
-                    if len(str(result.stdout, 'utf8')) > 0:
-                        print(str(result.stdout, 'utf8')[:250], flush=True)
+                    if len(result.stdout) > 0:
+                        print(result.stdout[:250], flush=True)
                     else:
                         print("No data in standard output", flush=True)
-                    if len(str(result.stderr, 'utf8')) > 0:
-                        print(str(result.stderr, 'utf8')[:250], flush=True)
+                    if len(result.stderr) > 0:
+                        print(result.stderr[:250], flush=True)
                     else:
                         print("No data in standard error output", flush=True)
 

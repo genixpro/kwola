@@ -26,6 +26,8 @@ import pkg_resources
 import re
 
 
+globalCachedPrebuiltConfigs = {}
+
 class Configuration:
     """
         This class represents the configuration for the Kwola model.
@@ -137,10 +139,20 @@ class Configuration:
 
     @staticmethod
     def getPrebuiltConfigData(prebuild):
+        global globalCachedPrebuiltConfigs
+
+        if prebuild in globalCachedPrebuiltConfigs:
+            return globalCachedPrebuiltConfigs[prebuild]
+
         localFilePath = f"{prebuild}.json"
         if os.path.exists(localFilePath):
             with open(localFilePath, 'rt') as f:
-                return json.load(f)
+                data = json.load(f)
+                globalCachedPrebuiltConfigs[prebuild] = data
+                return data
         else:
-            return json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
+            data = json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
+            globalCachedPrebuiltConfigs[prebuild] = data
+            return data
+
 
