@@ -84,7 +84,13 @@ class WebEnvironmentSession:
             window.kwolaExceptions = [];
             var currentOnError = window.onerror;
             window.onerror=function(msg, source, lineno, colno, error) {
-                window.kwolaExceptions.push([msg, source, lineno, colno, error.stack]);
+                let stack = null;
+                if (error)
+                {
+                    stack = error.stack;
+                }
+                
+                window.kwolaExceptions.push([msg, source, lineno, colno, stack]);
                 if (currentOnError)
                 {
                     currentOnError(msg, source, lineno, colno, error);
