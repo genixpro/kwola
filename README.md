@@ -147,9 +147,8 @@ it a second time without -g to install it in your local directory for safe measu
 We are still sorting out precisely what the cause of the issue is.
 
 Lastly, if you are interested in connecting and debugging URL's that will require a TLS connection (URLS with https://
-in part of it), then you will need to install the certificate that was generated when you installed kwola as a trusted
-root certificate. If you are on a computer with a full user interface with, you can do this easily using the following
-command:
+in part of it), then you will need to install the certificate for kwolas mitm proxy as a trusted
+root certificate. This certificate is generated fresh for each kwola installation for security purposes, so if you reinstall kwola, you must reinstall the certificate. If you are on a computer with a full user interface with, you can do this easily using the following command:
 
 `[user@localhost]$ kwola_install_proxy_cert`
 
