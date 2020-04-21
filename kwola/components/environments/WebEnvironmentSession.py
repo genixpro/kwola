@@ -442,6 +442,12 @@ class WebEnvironmentSession:
 
             success = False
 
+        # If there was an alert generated as a result of the action, then try to close it.
+        try:
+            self.driver.switch_to.alert.accept()
+        except selenium.common.exceptions.NoAlertPresentException:
+            pass
+
         executionTrace.didActionSucceed = success
 
         hadNewError = False
