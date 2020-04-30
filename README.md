@@ -24,7 +24,7 @@ Dependencies
 Please go to https://www.python.org/downloads/ to download and install Python. You should also install the Python 
 development headers, as some of our Python dependencies compile C / C++ code into Python modules.
 
-At this time, Kwola requries Python version 3.6 or higher. If you run into issues, make sure are using the latest python version.
+At this time, Kwola requires Python version 3.6 or higher. If you run into issues, make sure are using the latest python version.
 
 ** IMPORTANT ** If you are installing on Windows, there are several errors that can occur if you either have multiple versions of Python installed, or have the 32 bit version of Python installed. Ensure that you have only a single, 64 bit version of Python installed or Torch, the neural network library, will have errors. In some instances, we have had to take the following steps with Python to get Kwola to work on Windows:
 - fully uninstall all versions of Python
@@ -147,9 +147,8 @@ it a second time without -g to install it in your local directory for safe measu
 We are still sorting out precisely what the cause of the issue is.
 
 Lastly, if you are interested in connecting and debugging URL's that will require a TLS connection (URLS with https://
-in part of it), then you will need to install the certificate that was generated when you installed kwola as a trusted
-root certificate. If you are on a computer with a full user interface with, you can do this easily using the following
-command:
+in part of it), then you will need to install the certificate for kwolas mitm proxy as a trusted
+root certificate. This certificate is generated fresh for each kwola installation for security purposes, so if you reinstall kwola, you must reinstall the certificate. If you are on a computer with a full user interface with, you can do this easily using the following command:
 
 `[user@localhost]$ kwola_install_proxy_cert`
 
