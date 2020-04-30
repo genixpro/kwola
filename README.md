@@ -152,7 +152,17 @@ root certificate. This certificate is generated fresh for each kwola installatio
 
 `[user@localhost]$ kwola_install_proxy_cert`
 
-If you are on a server machine, its a bit more complicated. You will have to read this page and follow the instructions:
+If you are on a server machine, its a bit more complicated. On Ubuntu & RedHat systems, you can use the following
+commands to get the cert installed. First, generate the cert using the same install proxy cert command, but with a
+1 at the end. The 1 forces it to exit immediately. 
+
+`[user@localhost]$ kwola_install_proxy_cert 1`
+
+Next, use the certutil program to install the certificate into Chromes certificate repository:
+
+`[user@localhost]$ certutil -d sql:~/.pki/nssdb -A -n 'mitm.it cert authority' -i ~/.mitmproxy/mitmproxy-ca-cert.cer -t TCP,TCP,TCP`
+
+If you have issues, you can read more on the webiste for mitmproxy:
 
 https://docs.mitmproxy.org/stable/concepts-certificates/
 
