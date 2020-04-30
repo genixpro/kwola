@@ -76,7 +76,8 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                         'small',
                         'medium',
                         'large',
-                        'testing'
+                        'testing',
+                        'pure_random'
                     ]).ask()  # returns value of selection
 
             if configName is None:

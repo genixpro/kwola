@@ -242,6 +242,13 @@ def trainAgent(configDir, exitOnFail=False):
     agent.save()
     del agent
 
+    # Create and destroy an environment, which forces a lot of the initial javascript in the application
+    # to be loaded and translated. It also just verifies that the system can access the target URL prior
+    # to trying to run a full sequence
+    environment = WebEnvironment(config, sessionLimit=1)
+    environment.shutdown()
+    del environment
+
     trainingSequence = TrainingSequence(id=CustomIDField.generateNewUUID(TrainingSequence, config))
 
     trainingSequence.startTime = datetime.now()
