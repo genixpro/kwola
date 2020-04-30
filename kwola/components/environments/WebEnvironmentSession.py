@@ -81,6 +81,9 @@ class WebEnvironmentSession:
         # HACK! give time for page to load before proceeding.
         time.sleep(2)
 
+        if self.config.autologin:
+            self.runAutoLogin()
+
         # Inject bug detection script
         self.driver.execute_script("""
             window.kwolaExceptions = [];
@@ -117,7 +120,7 @@ class WebEnvironmentSession:
         self.allUrls.add(self.driver.current_url)
 
         screenHash = self.addScreenshot()
-        self.frameNumber += 1
+        self.frameNumber = 1
         self.screenshotHashes.add(screenHash)
         self.lastScreenshotHash = screenHash
 
@@ -181,6 +184,73 @@ class WebEnvironmentSession:
             print(str(result.stderr, 'utf8'))
 
         return self.movieFilePath()
+
+    def runAutoLogin(self):
+        """
+            This method is used to perform the automatic heuristic based login.
+        """
+        actionMaps = self.getActionMaps()
+
+        # First, try to find the email, password, and submit inputs
+        emailInput = None
+        passwordInput = None
+        loginButton = None
+
+        emailKeywords = ['use', 'mail', 'name']
+        passwordKeywords = ['pass']
+        loginKeywords = ['log', 'sub']
+
+        for map in actionMaps:
+            for matchKeyword in emailKeywords:
+                if matchKeyword in map.keywords and map.elementType == "input":
+                    emailInput = map
+                    break
+            for matchKeyword in passwordKeywords:
+                if matchKeyword in map.keywords and map.elementType == "input":
+                    passwordInput = map
+                    break
+            for matchKeyword in loginKeywords:
+                if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
+                    loginButton = map
+                    break
+
+        if emailInput is None or passwordInput is None or loginButton is None:
+            print(datetime.now(), f"[{os.getpid()}]", "Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.", flush=True)
+            return
+
+        emailTypeAction = TypeAction(x=emailInput.left + 1,
+                                     y=emailInput.top + 1,
+                                     source="autologin",
+                                     label="email",
+                                     text=self.config.email,
+                                     type="typeEmail")
+
+        passwordTypeAction = TypeAction(x=passwordInput.left + 1,
+                                        y=passwordInput.top + 1,
+                                        source="autologin",
+                                        label="password",
+                                        text=self.config.password,
+                                        type="typePassword")
+
+        loginClickAction = ClickTapAction(x=loginButton.left + 1,
+                                          y=loginButton.top + 1,
+                                          source="autologin",
+                                          times=1,
+                                          type="click")
+
+        success1 = self.performActionInBrowser(emailTypeAction)
+        success2 = self.performActionInBrowser(passwordTypeAction)
+        success3 = self.performActionInBrowser(loginClickAction)
+
+        if success1 and success2 and success3:
+            print(datetime.now(), f"[{os.getpid()}]",
+                  "Heuristic autologin appears to have worked!",
+                  flush=True)
+        else:
+            print(datetime.now(), f"[{os.getpid()}]",
+                  "There was an error running one of the actions required for the heuristic auto login.",
+                  flush=True)
+
 
     def extractBranchTrace(self):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
@@ -351,18 +421,7 @@ class WebEnvironmentSession:
         actionMaps = [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
         return actionMaps
 
-    def runAction(self, action, executionSessionId):
-        executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
-        executionTrace.time = datetime.now()
-        executionTrace.actionPerformed = action
-        executionTrace.errorsDetected = []
-        executionTrace.startURL = self.driver.current_url
-        executionTrace.actionMaps = self.getActionMaps()
-
-        startLogCount = len(self.driver.get_log('browser'))
-
-        self.proxy.resetPathTrace()
-
+    def performActionInBrowser(self, action):
         uiReactionWaitTime = 0.50
 
         success = True
@@ -371,11 +430,6 @@ class WebEnvironmentSession:
             element = self.driver.execute_script("""
             return document.elementFromPoint(arguments[0], arguments[1]);
             """, action.x, action.y)
-
-            if element is not None:
-                executionTrace.cursor = element.value_of_css_property("cursor")
-            else:
-                executionTrace.cursor = None
 
             if isinstance(action, ClickTapAction):
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
@@ -447,6 +501,31 @@ class WebEnvironmentSession:
             self.driver.switch_to.alert.accept()
         except selenium.common.exceptions.NoAlertPresentException:
             pass
+
+        return success
+
+    def runAction(self, action, executionSessionId):
+        executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
+        executionTrace.time = datetime.now()
+        executionTrace.actionPerformed = action
+        executionTrace.errorsDetected = []
+        executionTrace.startURL = self.driver.current_url
+        executionTrace.actionMaps = self.getActionMaps()
+
+        startLogCount = len(self.driver.get_log('browser'))
+
+        self.proxy.resetPathTrace()
+
+        element = self.driver.execute_script("""
+        return document.elementFromPoint(arguments[0], arguments[1]);
+        """, action.x, action.y)
+
+        if element is not None:
+            executionTrace.cursor = element.value_of_css_property("cursor")
+        else:
+            executionTrace.cursor = None
+
+        success = self.performActionInBrowser(action)
 
         executionTrace.didActionSucceed = success
 

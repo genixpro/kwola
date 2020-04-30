@@ -119,6 +119,17 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
             enableDoubleClickCommand = bool(commandChoices[4] in results)
             enableRightClickCommand = bool(commandChoices[5] in results)
 
+            autologin = questionary.select(
+                "Do you want Kwola to attempt automatic heuristic email/password login upon landing at the given URL?",
+                choices=[
+                    'yes',
+                    'no'
+                ]).ask()  # returns value of selection
+            if autologin is None:
+                exit(0)
+
+            autologin = bool(autologin == 'yes')
+
             configDir = Configuration.createNewLocalKwolaConfigDir(configName,
                                                                    url=url,
                                                                    email=email,
@@ -130,7 +141,8 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                    enableRandomMathCommand=enableRandomMathCommand,
                                                                    enableRandomOtherSymbolCommand=enableRandomOtherSymbolCommand,
                                                                    enableDoubleClickCommand=enableDoubleClickCommand,
-                                                                   enableRightClickCommand=enableRightClickCommand
+                                                                   enableRightClickCommand=enableRightClickCommand,
+                                                                   autologin=autologin
                                                                    )
             if askTuneQuestion:
                 needToChange = questionary.select(

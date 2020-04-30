@@ -1,4 +1,5 @@
 {
+  "autologin": false,
   "actor_convolution_kernel_size": 3,
   "actor_convolution_padding": 1,
   "actor_convolution_stride": 1,
