@@ -22,7 +22,7 @@ class TestEndToEnd(unittest.TestCase):
                                                                enableRightClickCommand=False
                                                                )
         try:
-            TrainAgentLoop.trainAgent(configDir)
+            TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
             print(f"Click-only test for URL {url} has completed successfully")
         except Exception:
             print(f"Click-only test for URL {url} has failed.")
