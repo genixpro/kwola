@@ -20,7 +20,7 @@ class TestTrainingLoop(unittest.TestCase):
                                                                enableRightClickCommand=False
                                                                )
         try:
-            TrainAgentLoop.trainAgent(configDir)
+            TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
         finally:
             shutil.rmtree(configDir)
 
@@ -39,6 +39,6 @@ class TestTrainingLoop(unittest.TestCase):
                                                                enableRightClickCommand=True
                                                                )
         try:
-            TrainAgentLoop.trainAgent(configDir)
+            TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
         finally:
             shutil.rmtree(configDir)

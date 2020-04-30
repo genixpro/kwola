@@ -258,10 +258,10 @@ def trainAgent(configDir, exitOnFail=False):
 
     testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
     if len(testingSteps) == 0:
-        runRandomInitialization(config, trainingSequence, exitOnFail=True)
+        runRandomInitialization(config, trainingSequence, exitOnFail=exitOnFail)
         trainingSequence.saveToDisk(config)
 
-    runMainTrainingLoop(config, trainingSequence, exitOnFail=True)
+    runMainTrainingLoop(config, trainingSequence, exitOnFail=exitOnFail)
 
     trainingSequence.status = "completed"
     trainingSequence.endTime = datetime.now()
