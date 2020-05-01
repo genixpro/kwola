@@ -270,7 +270,7 @@ Or alternatively just throw up a pull-request. That always gets peoples attentio
 Authors and acknowledgment
 ==========================
 
-The project was founded by Quinn Lawson, Bradley Arsenault and Daniel Shakmundes.
+The project was founded by Quinn Lawson, Bradley Arsenault and Daniel Shakhmundes.
 
 License
 =======
