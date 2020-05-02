@@ -19,6 +19,7 @@
 #
 
 import unittest
+import testtools
 from ..diagnostics.test_installation import testInstallation
 
 def main():
@@ -31,9 +32,18 @@ def main():
             "There appears to be a problem with your Kwola installation or environment. Exiting.")
         exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=3)
+    suites = []
 
-    runner.run(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop"))
-    runner.run(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_end_to_end.TestEndToEnd"))
+    suites.append(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop"))
+    suites.append(unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_end_to_end.TestEndToEnd"))
 
+    cases = [(case, None) for suite in suites for case in suite]
 
+    casesAtOnce = 8
+
+    while len(cases) > 0:
+        casesNow = cases[:casesAtOnce]
+        cases = cases[casesAtOnce:]
+
+        concurrent_suite = testtools.ConcurrentStreamTestSuite(lambda: casesNow)
+        concurrent_suite.run(testtools.StreamResult())

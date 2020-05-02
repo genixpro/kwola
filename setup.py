@@ -38,6 +38,7 @@ requirements = [
     "scikit-learn",
     "scipy",
     "selenium",
+    "testtools",
     "torch"
 ]
 
