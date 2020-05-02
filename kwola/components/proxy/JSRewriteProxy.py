@@ -28,6 +28,7 @@ import subprocess
 import base64
 import traceback
 import urllib.parse
+import gzip
 
 
 class JSRewriteProxy:
@@ -128,8 +129,20 @@ class JSRewriteProxy:
                 fileNameForBabel = shortFileHash + "-" + fileName
 
                 originalFileContents = bytes(flow.response.data.content)
-
                 jsFileContents = bytes(flow.response.data.content).strip()
+
+                gzipped = False
+                # Special - check to see if the file might be gzipped
+                if len(jsFileContents) > 10 and \
+                    jsFileContents[0] == 0x1f and \
+                        jsFileContents[1] == 0x8b:
+                    try:
+                        jsFileContents = gzip.decompress(jsFileContents)
+                        gzipped = True
+                    except gzip.BadGzipFile:
+                        pass
+
+
                 strictMode = False
                 if jsFileContents.startswith(b"'use strict';") or jsFileContents.startswith(b'"use strict";'):
                     strictMode = True
@@ -174,6 +187,9 @@ class JSRewriteProxy:
 
                     if strictMode:
                         transformed = b'"use strict";\n' + transformed
+
+                    if gzipped:
+                        transformed = gzip.compress(transformed, compresslevel=9)
 
                     self.saveInCache(shortFileHash, fileName, transformed)
                     self.memoryCache[longFileHash] = transformed

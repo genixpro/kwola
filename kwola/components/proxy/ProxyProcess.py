@@ -22,6 +22,7 @@ from ...components.proxy.JSRewriteProxy import JSRewriteProxy
 from ...components.proxy.PathTracer import PathTracer
 from contextlib import closing
 from mitmproxy.tools.dump import DumpMaster
+import mitmproxy.exceptions
 from threading import Thread
 import asyncio
 import multiprocessing
@@ -36,22 +37,22 @@ class ProxyProcess:
 
     def __init__(self, config):
         self.config = config
-        self.port = self.findFreePort()
         self.commandQueue = multiprocessing.Queue()
         self.resultQueue = multiprocessing.Queue()
 
-        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.port, self.commandQueue, self.resultQueue))
+        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue))
         self.proxyProcess.start()
 
         # Wait for the result indicating that the proxy process is ready
-        self.resultQueue.get()
+        self.port = self.resultQueue.get()
         time.sleep(0.1)
 
     def __del__(self):
         if self.proxyProcess is not None:
             self.proxyProcess.terminate()
 
-    def findFreePort(self):
+    @staticmethod
+    def findFreePort():
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             s.bind(('', 0))
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -65,11 +66,11 @@ class ProxyProcess:
         self.commandQueue.put("resetPathTrace")
 
     @staticmethod
-    def runProxyServerSubprocess(config, port, commandQueue, resultQueue):
+    def runProxyServerSubprocess(config, commandQueue, resultQueue):
         codeRewriter = JSRewriteProxy(config)
         pathTracer = PathTracer()
 
-        proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(port, codeRewriter, pathTracer, resultQueue), daemon=True)
+        proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(codeRewriter, pathTracer, resultQueue), daemon=True)
         proxyThread.start()
 
         while True:
@@ -90,19 +91,26 @@ class ProxyProcess:
 
 
     @staticmethod
-    def runProxyServerThread(port, codeRewriter, pathTracer, resultQueue):
+    def runProxyServerThread(codeRewriter, pathTracer, resultQueue):
         from mitmproxy import proxy, options
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        opts = options.Options(listen_port=port)
-        pconf = proxy.config.ProxyConfig(opts)
+        # We have a retry mechanism here because it may take multiple attempts to get a free port
+        while True:
+            try:
+                port = ProxyProcess.findFreePort()
+                opts = options.Options(listen_port=port)
+                pconf = proxy.config.ProxyConfig(opts)
 
-        m = DumpMaster(opts, with_termlog=False, with_dumper=False)
-        m.server = proxy.server.ProxyServer(pconf)
-        m.addons.add(codeRewriter)
-        m.addons.add(pathTracer)
+                m = DumpMaster(opts, with_termlog=False, with_dumper=False)
+                m.server = proxy.server.ProxyServer(pconf)
+                m.addons.add(codeRewriter)
+                m.addons.add(pathTracer)
+                break
+            except mitmproxy.exceptions.ServerException:
+                pass
 
-        resultQueue.put("ready")
+        resultQueue.put(port)
         m.run()

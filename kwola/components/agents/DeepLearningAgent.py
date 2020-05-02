@@ -864,12 +864,15 @@ class DeepLearningAgent:
                     # tend to be very narrowly focused - assigning almost all of the probability to the same handful of
                     # pixels. The advantage values give provide a better way of weighting the various pixels.
                     reshaped = numpy.array(sampleAdvantageValues.data).reshape([len(self.actionsSorted) * height * width])
+
+                    # Ensure all of the values are positive by shifting it so the minimum value is 0
+                    reshaped = reshaped - numpy.min(reshaped)
+
                     # Here we resize the array so that it adds up to 1.
                     reshapedSum = numpy.sum(reshaped)
                     if reshapedSum > 0:
                         reshaped = reshaped / reshapedSum
 
-                    try:
                         # Choose the random action. What we get back is an index for that action in the original array
                         actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
 
@@ -891,10 +894,9 @@ class DeepLearningAgent:
                         actionX = int(actionX / modelDownscale)
                         actionY = int(actionY / modelDownscale)
 
-                    except ValueError:
-                        # If there is any problem, just override back to a fully random action without predictions involved
-                        print(datetime.now(), f"[{os.getpid()}]", "Error in weighted random choice! Probabilities do not all add up to 1. Picking a random action.", flush=True)
-                        # This usually occurs when all the probabilities do not add up to 1, due to floating point error.
+                    else:
+                        # This usually occurs when all the probabilities do not add up to 1, generally this only happens when the neural network
+                        # isn't trained yet
                         # So instead we just pick an action randomly.
                         actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, samplePixelActionMap)
                         source = "random"
@@ -2055,7 +2057,7 @@ class DeepLearningAgent:
                 "decayingFutureSymbolWeights": decayingFutureSymbolWeightsTensor,
                 "decayingFutureSymbolOffsets": decayingFutureSymbolListOffsetsTensor,
                 "outputStamp": False,
-                "outputFutureSymbolEmbedding": True,
+                "outputFutureSymbolEmbedding": self.config['enable_trace_prediction_loss'],
                 "computeExtras": True,
                 "computeActionProbabilities": True,
                 "computeStateValues": True,

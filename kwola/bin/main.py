@@ -119,16 +119,30 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
             enableDoubleClickCommand = bool(commandChoices[4] in results)
             enableRightClickCommand = bool(commandChoices[5] in results)
 
-            autologin = questionary.select(
-                "Do you want Kwola to attempt automatic heuristic email/password login upon landing at the given URL?",
+            autologin = False
+
+            if email and password:
+                autologin = questionary.select(
+                    "Do you want Kwola to attempt automatic heuristic email/password login upon landing at the given URL?",
+                    choices=[
+                        'yes',
+                        'no'
+                    ]).ask()  # returns value of selection
+                if autologin is None:
+                    exit(0)
+
+            autologin = bool(autologin == 'yes')
+
+            prevent_offsite_links = questionary.select(
+                "Do you want Kwola to stay on the website it starts on (prevent offsite links)?",
                 choices=[
                     'yes',
                     'no'
                 ]).ask()  # returns value of selection
-            if autologin is None:
+            if prevent_offsite_links is None:
                 exit(0)
 
-            autologin = bool(autologin == 'yes')
+            prevent_offsite_links = bool(prevent_offsite_links == 'yes')
 
             configDir = Configuration.createNewLocalKwolaConfigDir(configName,
                                                                    url=url,
@@ -142,7 +156,8 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                    enableRandomOtherSymbolCommand=enableRandomOtherSymbolCommand,
                                                                    enableDoubleClickCommand=enableDoubleClickCommand,
                                                                    enableRightClickCommand=enableRightClickCommand,
-                                                                   autologin=autologin
+                                                                   autologin=autologin,
+                                                                   prevent_offsite_links=prevent_offsite_links
                                                                    )
             if askTuneQuestion:
                 needToChange = questionary.select(
