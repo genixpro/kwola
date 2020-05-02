@@ -27,9 +27,11 @@ import os.path
 import subprocess
 import base64
 import traceback
+import re
 import urllib.parse
 import gzip
-
+import filetype
+import json
 
 class JSRewriteProxy:
     def __init__(self, config):
@@ -43,7 +45,12 @@ class JSRewriteProxy:
         ]
 
     def getCacheFileName(self, fileHash, fileName):
-        cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("javascript"), fileHash + "_" + fileName)
+        badChars = "%=~`!@#$^&*(){}[]\\|'\":;,<>/?+"
+        for char in badChars:
+            fileName = fileName.replace(char, "-")
+
+        cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("javascript"), fileHash + "_" + fileName[:100])
+
         return cacheFileName
 
 
@@ -64,11 +71,22 @@ class JSRewriteProxy:
         flow.request.headers['Accept-Encoding'] = 'identity'
 
 
+    @concurrent
     def responseheaders(self, flow):
         """
             The full HTTP response has been read.
         """
-        pass
+
+        # Check to see if there is an integrity verification header, if so, delete it
+        headers = set(flow.response.headers.keys())
+        #
+        # if "Integrity" in headers:
+        #     print("Deleting an Integrity header")
+        #     del flow.response.headers['Integrity']
+        # if "integrity" in headers:
+        #     print("Deleting an Integrity header")
+        #     del flow.response.headers['integrity']
+
 
     def computeHashes(self, data):
         """
@@ -82,7 +100,7 @@ class JSRewriteProxy:
 
             @returns (longHash, shortHash) a tuple with two strings
         """
-        hasher = hashlib.md5()
+        hasher = hashlib.sha256()
         hasher.update(data)
 
         base64ExtraCharacters = bytes("--", 'utf8')
@@ -95,6 +113,169 @@ class JSRewriteProxy:
 
         return longHash, shortHash
 
+    def decompressDataIfNeeded(self, data):
+        gzipped = False
+
+        data = bytes(data)
+
+        kind = filetype.guess(data)
+        mime = ''
+        if kind is not None:
+            mime = kind.mime
+
+        # Decompress the file if it appears to be a gzip archive
+        if mime == "application/gzip":
+            try:
+                data = gzip.decompress(data)
+                gzipped = True
+            except OSError:
+                pass
+
+        return data, gzipped
+
+    def doesFlowLooksLikeJavascriptFile(self, flow):
+        fileName = self.getCleanedFileName(flow)
+
+        contentType = flow.response.headers.get('Content-Type')
+        if contentType is None:
+            contentType = flow.response.headers.get('content-type')
+
+        jsMimeTypes = [
+            "application/x-javascript",
+            "application/javascript",
+            "application/ecmascript",
+            "text/javascript",
+            "text/ecmascript"
+        ]
+
+        if ('.js' in fileName and not ".json" in fileName and not ".jsp" in fileName and not fileName.endswith(".css")) or str(contentType).strip().lower() in jsMimeTypes:
+            fileContents, gzipped = self.decompressDataIfNeeded(flow.response.data.content)
+
+            kind = filetype.guess(fileContents)
+            mime = ''
+            if kind is not None:
+                mime = kind.mime
+
+            # Next, check to see that we haven't gotten an image or something else that we should ignore. This happens, surprisingly.
+            if mime.startswith("image/") or mime.startswith("video/") or mime.startswith("audio/") or mime.startswith("application/"):
+                return False
+
+            # For some reason, some websites send JSON data in files labelled as javascript files.
+            # So we have to double check to make sure we aren't looking at JSON data
+            try:
+                json.loads(str(fileContents, 'utf8').lower())
+                return False
+            except json.JSONDecodeError:
+                pass
+            except UnicodeDecodeError:
+                pass
+
+            if fileContents.startswith(b"<html>"):
+                return False
+
+            return True
+        else:
+            return False
+
+    def doesFlowLooksLikeHTML(self, flow):
+        fileName = self.getCleanedFileName(flow)
+
+        if '.js' not in fileName and not ".json" in fileName and ".css" not in fileName:
+            fileContents, gzipped = self.decompressDataIfNeeded(flow.response.data.content)
+
+            kind = filetype.guess(fileContents)
+            mime = ''
+            if kind is not None:
+                mime = kind.mime
+
+            # Next, check to see that we haven't gotten an image or something else that we should ignore.
+            if mime.startswith("image/") or mime.startswith("video/") or mime.startswith("audio/") or (mime.startswith("application/") and not mime.startswith("application/html")):
+                return False
+
+            try:
+                stringFileContents = str(fileContents, 'utf8').lower()
+            except UnicodeDecodeError:
+                return False
+
+            if "</html" in stringFileContents or "</body" in stringFileContents:
+                return True
+            else:
+                return False
+        else:
+            return False
+
+    def getCleanedFileName(self, flow):
+        fileName = urllib.parse.unquote(flow.request.path.split("/")[-1])
+        if "?" in fileName:
+            fileName = fileName.split("?")[0]
+        if "#" in fileName:
+            fileName = fileName.split("#")[0]
+        return fileName
+
+    def rewriteJavascript(self, data, fileName, fileNameForBabel):
+        jsFileContents = data.strip()
+        strictMode = False
+        if jsFileContents.startswith(b"'use strict';") or jsFileContents.startswith(b'"use strict";'):
+            strictMode = True
+            jsFileContents = jsFileContents.replace(b"'use strict';", b"")
+            jsFileContents = jsFileContents.replace(b'"use strict";', b"")
+
+        wrapperStart = b""
+        wrapperEnd = b""
+        for wrapper in self.knownResponseWrappers:
+            if jsFileContents.startswith(wrapper[0]) and jsFileContents.endswith(wrapper[1]):
+                jsFileContents = jsFileContents[len(wrapper[0]):-len(wrapper[1])]
+                wrapperStart = wrapper[0]
+                wrapperEnd = wrapper[1]
+
+        result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', "script"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if result.returncode != 0 and "'import' and 'export' may appear only with" in str(result.stderr, 'utf8'):
+            result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', "module"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if result.returncode != 0:
+            cutoffLength = 250
+
+            kind = filetype.guess(data)
+            mime = ''
+            if kind is not None:
+                mime = kind.mime
+
+            print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most"
+                                                      f" likely this is because Babel thinks your javascript has invalid syntax, or that"
+                                                      f" babel is not working / not able to find the babel-plugin-kwola / unable to"
+                                                      f" transpile the javascript for some other reason. See the following truncated"
+                                                      f" output:", flush=True)
+
+            if len(result.stdout) > 0:
+                print(result.stdout[:cutoffLength], flush=True)
+            else:
+                print("No data in standard output", flush=True)
+            if len(result.stderr) > 0:
+                print(result.stderr[:cutoffLength], flush=True)
+            else:
+                print("No data in standard error output", flush=True)
+
+            return data
+        else:
+            print(datetime.now(), f"[{os.getpid()}]", f"Successfully translated {fileName} with Kwola branch counting and event tracing.", flush=True)
+            transformed = wrapperStart + result.stdout + wrapperEnd
+
+            if strictMode:
+                transformed = b'"use strict";\n' + transformed
+
+            return transformed
+
+    def rewriteHTML(self, data):
+        stringData = str(data, 'utf8')
+
+        # We want to strip out any "integrity" attributes that we see on html elements
+        integrityRegex = re.compile(r"integrity\w*=\w*['\"]sha\d\d?\d?-[a-zA-Z0-9+/=]+['\"]")
+
+        stringData = re.sub(integrityRegex, "", stringData)
+        bytesData = bytes(stringData, "utf8")
+
+        return bytesData
 
     @concurrent
     def response(self, flow):
@@ -102,99 +283,57 @@ class JSRewriteProxy:
             The full HTTP response has been read.
         """
 
-        # Ignore it if its a 304 not modified error. These are fine.
-        if flow.response.status_code == 304:
+        # Ignore it if its not a 2xx
+        if flow.response.status_code < 200 or flow.response.status_code >= 300:
             return
 
         longFileHash, shortFileHash = self.computeHashes(bytes(flow.response.data.content))
-        fileName = urllib.parse.unquote(flow.request.path.split("/")[-1])
-        if "?" in fileName:
-            fileName = fileName.split("?")[0]
-        if "#" in fileName:
-            fileName = fileName.split("#")[0]
+        fileName = self.getCleanedFileName(flow)
+
+        cached = self.memoryCache.get(longFileHash)
+        if cached is None:
+            cached = self.findInCache(shortFileHash, fileName)
+            if cached is not None:
+                self.memoryCache[longFileHash] = cached
+
+        if cached is not None:
+            flow.response.data.headers['Content-Length'] = str(len(cached))
+            flow.response.data.content = cached
+            return
 
         try:
-            if '.js' in fileName and not ".json" in fileName:
-                cached = self.memoryCache.get(longFileHash)
-                if cached is None:
-                    cached = self.findInCache(shortFileHash, fileName)
-                    if cached is not None:
-                        self.memoryCache[longFileHash] = cached
+            originalFileContents = bytes(flow.response.data.content)
 
-                if cached is not None:
-                    flow.response.data.headers['Content-Length'] = str(len(cached))
-                    flow.response.data.content = cached
-                    return
-
+            if self.doesFlowLooksLikeJavascriptFile(flow):
                 fileNameForBabel = shortFileHash + "-" + fileName
 
-                originalFileContents = bytes(flow.response.data.content)
-                jsFileContents = bytes(flow.response.data.content).strip()
+                jsFileContents, gzipped = self.decompressDataIfNeeded(originalFileContents)
 
-                gzipped = False
-                # Special - check to see if the file might be gzipped
-                if len(jsFileContents) > 10 and \
-                    jsFileContents[0] == 0x1f and \
-                        jsFileContents[1] == 0x8b:
-                    try:
-                        jsFileContents = gzip.decompress(jsFileContents)
-                        gzipped = True
-                    except gzip.BadGzipFile:
-                        pass
+                transformed = self.rewriteJavascript(jsFileContents, fileName, fileNameForBabel)
 
+                if gzipped:
+                    transformed = gzip.compress(transformed, compresslevel=9)
 
-                strictMode = False
-                if jsFileContents.startswith(b"'use strict';") or jsFileContents.startswith(b'"use strict";'):
-                    strictMode = True
-                    jsFileContents = jsFileContents.replace(b"'use strict';", b"")
-                    jsFileContents = jsFileContents.replace(b'"use strict";', b"")
+                self.saveInCache(shortFileHash, fileName, transformed)
+                self.memoryCache[longFileHash] = transformed
 
-                wrapperStart = b""
-                wrapperEnd = b""
-                for wrapper in self.knownResponseWrappers:
-                    if jsFileContents.startswith(wrapper[0]) and jsFileContents.endswith(wrapper[1]):
-                        jsFileContents = jsFileContents[len(wrapper[0]):-len(wrapper[1])]
-                        wrapperStart = wrapper[0]
-                        wrapperEnd = wrapper[1]
+                flow.response.data.headers['Content-Length'] = str(len(transformed))
+                flow.response.data.content = transformed
+            elif self.doesFlowLooksLikeHTML(flow):
+                htmlFileContents, gzipped = self.decompressDataIfNeeded(originalFileContents)
 
-                sourceType = "script"
-                if b"\nexport " in jsFileContents or b"\nimport " in jsFileContents:
-                    sourceType = "module"
+                transformed = self.rewriteHTML(htmlFileContents)
 
-                result = subprocess.run(['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type', sourceType], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if gzipped:
+                    transformed = gzip.compress(transformed, compresslevel=9)
 
-                if result.returncode != 0:
-                    print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most"
-                                                              f" likely this is because Babel thinks your javascript has invalid syntax, or that"
-                                                              f" babel is not working / not able to find the babel-plugin-kwola / unable to"
-                                                              f" transpile the javascript for some other reason. See the following truncated"
-                                                              f" output:", flush=True)
+                self.saveInCache(shortFileHash, fileName, transformed)
+                self.memoryCache[longFileHash] = transformed
 
-                    if len(result.stdout) > 0:
-                        print(result.stdout[:250], flush=True)
-                    else:
-                        print("No data in standard output", flush=True)
-                    if len(result.stderr) > 0:
-                        print(result.stderr[:250], flush=True)
-                    else:
-                        print("No data in standard error output", flush=True)
-
-                    self.saveInCache(shortFileHash, fileName, originalFileContents)
-                    self.memoryCache[longFileHash] = originalFileContents
-                else:
-                    print(datetime.now(), f"[{os.getpid()}]", f"Successfully translated {fileName} with Kwola branch counting and event tracing.", flush=True)
-                    transformed = wrapperStart + result.stdout + wrapperEnd
-
-                    if strictMode:
-                        transformed = b'"use strict";\n' + transformed
-
-                    if gzipped:
-                        transformed = gzip.compress(transformed, compresslevel=9)
-
-                    self.saveInCache(shortFileHash, fileName, transformed)
-                    self.memoryCache[longFileHash] = transformed
-
-                    flow.response.data.headers['Content-Length'] = str(len(transformed))
-                    flow.response.data.content = transformed
+                flow.response.data.headers['Content-Length'] = str(len(transformed))
+                flow.response.data.content = transformed
+            else:
+                self.saveInCache(shortFileHash, fileName, originalFileContents)
+                self.memoryCache[longFileHash] = originalFileContents
         except Exception as e:
             traceback.print_exc()

@@ -1,9 +1,7 @@
-server/node_modules
 .idea
-server/package-lock.json
-server/venv
+package-lock.json
 *.egg-info
 *__pycache__*
-client/node_modules
-
-
+venv
+dist
+node_modules

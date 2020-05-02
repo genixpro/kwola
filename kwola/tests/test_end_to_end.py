@@ -3,6 +3,7 @@ import unittest
 from ..tasks import TrainAgentLoop
 from ..config.config import Configuration
 import shutil
+import traceback
 
 class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):
@@ -26,6 +27,7 @@ class TestEndToEnd(unittest.TestCase):
             print(f"Click-only test for URL {url} has completed successfully")
         except Exception:
             print(f"Click-only test for URL {url} has failed.")
+            traceback.print_exc()
             raise
         finally:
             shutil.rmtree(configDir)

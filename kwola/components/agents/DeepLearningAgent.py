@@ -1710,6 +1710,12 @@ class DeepLearningAgent:
             :return: A numpy array, in the shape of [height, width] with 1's for all of the pixels that are
                      included in this reward mask, and 0's everywhere else.
         """
+        width = processedImage.shape[2]
+        height = processedImage.shape[1]
+
+        x = min(width - 1, x)
+        y = min(height - 1, y)
+
         # We use flood-segmentation on the original image to select which pixels we will update reward values for.
         # This works great on UIs because the elements always have big areas of solid-color which respond in the same
         # way.
@@ -2180,9 +2186,9 @@ class DeepLearningAgent:
                 actionProbabilityLossMap = (actionProbabilityTargetImage - actionProbabilityImage) * pixelActionMap
 
                 # Here we compute an average loss value for all pixels in the reward pixel mask.
-                presentRewardLoss = presentRewardLossMap.pow(2).sum() / countPixelMask
-                discountedFutureRewardLoss = discountedFutureRewardLossMap.pow(2).sum() / countPixelMask
-                advantageLoss = advantageLossMap.pow(2).sum() / countPixelMask
+                presentRewardLoss = torch.true_divide(presentRewardLossMap.pow(2).sum(), countPixelMask)
+                discountedFutureRewardLoss = torch.true_divide(discountedFutureRewardLossMap.pow(2).sum(), countPixelMask)
+                advantageLoss = torch.true_divide(advantageLossMap.pow(2).sum(), countPixelMask)
                 actionProbabilityLoss = actionProbabilityLossMap.abs().sum()
                 # Additionally, we calculate a loss for the 'state' value, which is the average value the neural network
                 # is expected to produce no matter what action it takes. We calculate a loss but the assumption is that

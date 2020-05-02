@@ -39,6 +39,7 @@ import os.path
 import time
 import torch.cuda
 import traceback
+import random
 
 
 def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
@@ -90,13 +91,14 @@ def runRandomInitialization(config, trainingSequence, exitOnFail=True):
     print(datetime.now(), f"[{os.getpid()}]", "Random initialization completed", flush=True)
 
 
-def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber):
+def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber, coordinatorTempFileName):
     try:
         process = ManagedTaskSubprocess(["python3", "-m", "kwola.tasks.RunTrainingStep"], {
             "configDir": config.configurationDirectory,
             "trainingSequenceId": str(trainingSequence.id),
             "trainingStepIndex": trainingStepIndex,
-            "gpu": gpuNumber
+            "gpu": gpuNumber,
+            "coordinatorTempFileName": coordinatorTempFileName
         }, timeout=config['training_step_timeout'], config=config, logId=str(trainingSequence.id + "_training_step_" + str(trainingStepIndex)))
 
         result = process.waitForProcessResult()
@@ -124,7 +126,7 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         "configDir": config.configurationDirectory,
         "testingStepId": str(testingStep.id),
         "shouldBeRandom": False,
-        "generateDebugVideo": generateDebugVideo
+        "generateDebugVideo": generateDebugVideo and config['enable_debug_videos']
     }, timeout=config['training_step_timeout'], config=config, logId=testingStep.id)
     result = process.waitForProcessResult()
 
@@ -169,19 +171,21 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
 
     while stepsCompleted < config['training_steps_needed']:
         with ThreadPoolExecutor(max_workers=(config['testing_sequences_in_parallel_per_training_step'] + numberOfTrainingStepsInParallel)) as executor:
-            if os.path.exists("/tmp/kwola_distributed_coordinator"):
-                os.unlink("/tmp/kwola_distributed_coordinator")
+            coordinatorTempFileName = "kwola_distributed_coordinator-" + str(random.randint(0, 1e8))
+            coordinatorTempFilePath = "/tmp/" + coordinatorTempFileName
+            if os.path.exists(coordinatorTempFilePath):
+                os.unlink(coordinatorTempFilePath)
 
             allFutures = []
             testStepFutures = []
 
             if torch.cuda.device_count() > 0:
                 for gpu in range(numberOfTrainingStepsInParallel):
-                    trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=gpu)
+                    trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=gpu, coordinatorTempFileName=coordinatorTempFileName)
                     allFutures.append(trainingFuture)
                     trainingStepsLaunched += 1
             else:
-                trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=None)
+                trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=None, coordinatorTempFileName=coordinatorTempFileName)
                 allFutures.append(trainingFuture)
                 trainingStepsLaunched += 1
 

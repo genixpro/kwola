@@ -18,15 +18,18 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
+import datetime
 
 class PathTracer:
     def __init__(self):
         self.seenPaths = set()
         self.recentPaths = set()
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
     def request(self, flow):
         self.seenPaths.add(flow.request.path)
         self.recentPaths.add(flow.request.path)
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
 
 addons = [

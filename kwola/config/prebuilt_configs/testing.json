@@ -64,6 +64,7 @@
   "enable_cursor_prediction_loss": true,
   "enable_execution_feature_prediction_loss": true,
   "enable_trace_prediction_loss": true,
+  "enable_debug_videos": true,
   "iterations_between_db_saves": 5,
   "iterations_per_training_step": 10,
   "layer_1_dilation": 1,
@@ -212,5 +213,10 @@
   "web_session_max_startup_workers": 1,
   "web_session_parallel_execution_sessions": 1,
   "web_session_print_every_action": true,
-  "web_session_print_every_action_failure": true
+  "web_session_print_every_action_failure": true,
+  "web_session_width": 800,
+  "web_session_height": 600,
+  "web_session_no_network_activity_wait_time": 2.0,
+  "web_session_no_network_activity_timeout": 30,
+  "web_session_perform_action_wait_time": 0.5
 }

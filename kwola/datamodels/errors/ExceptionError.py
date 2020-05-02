@@ -40,7 +40,7 @@ class ExceptionError(BaseError):
     columnNumber = IntField()
 
     def computeHash(self):
-        hasher = hashlib.md5()
+        hasher = hashlib.sha256()
         hasher.update(bytes(self.stacktrace, "utf8"))
 
         return hasher.hexdigest()

@@ -70,6 +70,9 @@ class Configuration:
         It will ensure the path exists prior to returning
         """
 
+        if not os.path.exists(self.configurationDirectory):
+            os.mkdir(self.configurationDirectory)
+
         subDirectory = os.path.join(self.configurationDirectory, subDirName)
         if not os.path.exists(subDirectory):
             try:

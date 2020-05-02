@@ -284,7 +284,7 @@ class TraceNet(torch.nn.Module):
             actorProbExp = torch.exp(actorLogProbs) * data['pixelActionMaps']
             actorProbSums = torch.sum(actorProbExp.reshape(shape=[-1, width * height * self.numActions]), dim=1).unsqueeze(1).unsqueeze(1).unsqueeze(1)
             actorProbSums = torch.max((actorProbSums == 0) * 1e-8, actorProbSums)
-            actorActionProbs = actorProbExp / actorProbSums
+            actorActionProbs = torch.true_divide(actorProbExp, actorProbSums)
             actorActionProbs = actorActionProbs.reshape([-1, self.numActions, height, width])
 
             outputDict["actionProbabilities"] = actorActionProbs
@@ -293,8 +293,8 @@ class TraceNet(torch.nn.Module):
             shrunkTrainingWidth = int(self.config['training_crop_width'] / 8)
             shrunkTrainingHeight = int(self.config['training_crop_width'] / 8)
 
-            centerCropLeft = torch.div((torch.div(width, 8) - shrunkTrainingWidth), 2)
-            centerCropTop = torch.div((torch.div(height, 8) - shrunkTrainingHeight), 2)
+            centerCropLeft = torch.floor_divide((torch.div(width, 8) - shrunkTrainingWidth), 2)
+            centerCropTop = torch.floor_divide((torch.div(height, 8) - shrunkTrainingHeight), 2)
 
             centerCropRight = torch.add(centerCropLeft, shrunkTrainingWidth)
             centerCropBottom = torch.add(centerCropTop, shrunkTrainingHeight)
@@ -332,7 +332,7 @@ class TraceNet(torch.nn.Module):
 
             forwardFeaturesForAuxillaryLosses = []
             for sampleIndex, action_type, action_x, action_y in zip(range(len(action_types)), action_types, action_xs, action_ys):
-                featuresForAuxillaryLosses = mergedPixelFeatureMap[sampleIndex, :, int(action_y / 8), int(action_x / 8)].unsqueeze(0)
+                featuresForAuxillaryLosses = mergedPixelFeatureMap[sampleIndex, :, int(torch.floor_divide(action_y, 8)), int(torch.floor_divide(action_x, 8))].unsqueeze(0)
                 forwardFeaturesForAuxillaryLosses.append(featuresForAuxillaryLosses)
 
             joinedFeatures = torch.cat(forwardFeaturesForAuxillaryLosses, dim=0)

@@ -65,6 +65,10 @@ class ProxyProcess:
     def resetPathTrace(self):
         self.commandQueue.put("resetPathTrace")
 
+    def getMostRecentNetworkActivityTime(self):
+        self.commandQueue.put("getMostRecentNetworkActivityTime")
+        return self.resultQueue.get()
+
     @staticmethod
     def runProxyServerSubprocess(config, commandQueue, resultQueue):
         codeRewriter = JSRewriteProxy(config)
@@ -89,9 +93,19 @@ class ProxyProcess:
 
                 resultQueue.put(pathTrace)
 
+            if message == "getMostRecentNetworkActivityTime":
+                resultQueue.put(pathTracer.mostRecentNetworkActivityTime)
 
     @staticmethod
     def runProxyServerThread(codeRewriter, pathTracer, resultQueue):
+        while True:
+            try:
+                ProxyProcess.runProxyServerOnce(codeRewriter, pathTracer, resultQueue)
+            except Exception:
+                pass
+
+    @staticmethod
+    def runProxyServerOnce(codeRewriter, pathTracer, resultQueue):
         from mitmproxy import proxy, options
 
         loop = asyncio.new_event_loop()

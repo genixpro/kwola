@@ -37,7 +37,7 @@ class LogError(BaseError):
 
 
     def computeHash(self):
-        hasher = hashlib.md5()
+        hasher = hashlib.sha256()
         hasher.update(bytes(self.message, "utf8"))
         hasher.update(bytes(self.logLevel, "utf8"))
 

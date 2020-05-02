@@ -37,7 +37,7 @@ class HttpError(BaseError):
     message = StringField()
 
     def computeHash(self):
-        hasher = hashlib.md5()
+        hasher = hashlib.sha256()
         hasher.update(bytes(self.path, "utf8"))
         hasher.update(bytes(str(self.statusCode), "utf8"))
         hasher.update(bytes(self.message, "utf8"))

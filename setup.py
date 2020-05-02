@@ -39,7 +39,8 @@ requirements = [
     "scipy",
     "selenium",
     "testtools",
-    "torch"
+    "torch",
+    "filetype"
 ]
 
 setup(

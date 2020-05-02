@@ -47,7 +47,7 @@ import tempfile
 import time
 import pickle
 import urllib.parse
-
+import urllib3
 
 class WebEnvironmentSession:
     """
@@ -78,12 +78,14 @@ class WebEnvironmentSession:
         window_size = self.driver.execute_script("""
             return [window.outerWidth - window.innerWidth + arguments[0],
               window.outerHeight - window.innerHeight + arguments[1]];
-            """, 800, 600)
+            """, self.config['web_session_width'], self.config['web_session_height'])
         self.driver.set_window_size(*window_size)
-        self.driver.get(self.targetURL)
+        try:
+            self.driver.get(self.targetURL)
+        except selenium.common.exceptions.TimeoutException:
+            raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
 
-        # HACK! give time for page to load before proceeding.
-        time.sleep(2)
+        self.waitUntilNoNetworkActivity()
 
         if self.config.autologin:
             self.runAutoLogin()
@@ -91,7 +93,7 @@ class WebEnvironmentSession:
         # Inject bug detection script
         self.driver.execute_script("""
             window.kwolaExceptions = [];
-            var currentOnError = window.onerror;
+            var kwolaCurrentOnError = window.onerror;
             window.onerror=function(msg, source, lineno, colno, error) {
                 let stack = null;
                 if (error)
@@ -100,9 +102,9 @@ class WebEnvironmentSession:
                 }
                 
                 window.kwolaExceptions.push([msg, source, lineno, colno, stack]);
-                if (currentOnError)
+                if (kwolaCurrentOnError)
                 {
-                    currentOnError(msg, source, lineno, colno, error);
+                    kwolaCurrentOnError(msg, source, lineno, colno, error);
                 }
             }
         """)
@@ -132,15 +134,27 @@ class WebEnvironmentSession:
 
         self.errorHashes = set()
 
+        self.kwolaJSRewriteErrorDetectionStrings = [
+            "globalKwola",
+            "kwolaError",
+            "global_removeEventListener",
+            "global_addEventListener",
+        ]
+
     def __del__(self):
         self.shutdown()
 
     def getHostRoot(self, url):
-        host = urllib.parse.urlparse(url).hostname
+        host = str(urllib.parse.urlparse(url).hostname)
 
         hostParts = host.split(".")
 
-        return ".".join(hostParts[-2:])
+        if ".com." in host or ".co." in host:
+            hostRoot = ".".join(hostParts[-3:])
+        else:
+            hostRoot = ".".join(hostParts[-2:])
+
+        return hostRoot
 
     def shutdown(self):
         # Cleanup the screenshot files
@@ -169,7 +183,7 @@ class WebEnvironmentSession:
 
         self.driver.save_screenshot(filePath)
 
-        hasher = hashlib.md5()
+        hasher = hashlib.sha256()
         with open(filePath, 'rb') as imageFile:
             buf = imageFile.read()
             hasher.update(buf)
@@ -179,6 +193,20 @@ class WebEnvironmentSession:
         self.screenshotPaths.append(filePath)
 
         return screenshotHash
+
+    def waitUntilNoNetworkActivity(self):
+        startTime = datetime.now()
+        elapsedTime = 0
+        while abs((self.proxy.getMostRecentNetworkActivityTime() - datetime.now()).total_seconds()) < self.config['web_session_no_network_activity_wait_time']:
+            time.sleep(0.10)
+            elapsedTime = abs((datetime.now() - startTime).total_seconds())
+            if elapsedTime > self.config['web_session_no_network_activity_timeout']:
+                print(datetime.now(), f"[{os.getpid()}]",
+                      "Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
+                      " stop network activity all on its own? Try the config variable tweaking web_session_no_network_activity_wait_time down"
+                      " if constant network activity is the expected behaviour.",
+                      flush=True)
+                break
 
     def movieFileName(self):
         return f"kwola-video-{self.tabNumber}.mp4"
@@ -282,7 +310,10 @@ class WebEnvironmentSession:
             '});'
         )
 
-        self.driver.execute_script(injected_javascript)
+        try:
+            self.driver.execute_script(injected_javascript)
+        except selenium.common.exceptions.TimeoutException:
+            print(datetime.now(), f"[{os.getpid()}]", "Warning, timeout while running the script to reset the kwola line counters.")
 
         if result is not None:
             # Cast everything to a numpy array so we don't have to do it later
@@ -433,8 +464,6 @@ class WebEnvironmentSession:
         return actionMaps
 
     def performActionInBrowser(self, action):
-        uiReactionWaitTime = 0.50
-
         success = True
 
         try:
@@ -449,12 +478,12 @@ class WebEnvironmentSession:
                     if self.config['web_session_print_every_action']:
                         print(datetime.now(), f"[{os.getpid()}]", "Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.click(on_element=element)
-                    actionChain.pause(uiReactionWaitTime)
+                    actionChain.pause(self.config.web_session_perform_action_wait_time)
                 elif action.times == 2:
                     if self.config['web_session_print_every_action']:
                         print(datetime.now(), f"[{os.getpid()}]", "Double Clicking", action.x, action.y, action.source, flush=True)
                     actionChain.double_click(on_element=element)
-                    actionChain.pause(uiReactionWaitTime)
+                    actionChain.pause(self.config.web_session_perform_action_wait_time)
 
                 actionChain.perform()
 
@@ -464,7 +493,7 @@ class WebEnvironmentSession:
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
-                actionChain.pause(uiReactionWaitTime)
+                actionChain.pause(self.config.web_session_perform_action_wait_time)
                 actionChain.perform()
 
             if isinstance(action, TypeAction):
@@ -473,9 +502,9 @@ class WebEnvironmentSession:
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
-                actionChain.pause(uiReactionWaitTime)
+                actionChain.pause(self.config.web_session_perform_action_wait_time)
                 actionChain.send_keys_to_element(element, action.text)
-                actionChain.pause(uiReactionWaitTime)
+                actionChain.pause(self.config.web_session_perform_action_wait_time)
                 actionChain.perform()
 
             if isinstance(action, ClearFieldAction):
@@ -489,21 +518,36 @@ class WebEnvironmentSession:
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MoveTargetOutOfBoundsException exception!", flush=True)
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a StaleElementReferenceException!", flush=True)
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a InvalidElementStateException!", flush=True)
+
+            success = False
+        except selenium.common.exceptions.TimeoutException as e:
+            if self.config['web_session_print_every_action_failure']:
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a TimeoutException!", flush=True)
+
+            success = False
+        except selenium.common.exceptions.JavascriptException as e:
+            if self.config['web_session_print_every_action_failure']:
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a JavascriptException!", flush=True)
+
+            success = False
+        except urllib3.exceptions.MaxRetryError as e:
+            if self.config['web_session_print_every_action_failure']:
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MaxRetryError!", flush=True)
 
             success = False
         except AttributeError as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running action {action.type} {action.source} at {action.x},{action.y} failed!", flush=True)
+                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to an AttributeError!", flush=True)
 
             success = False
 
@@ -513,9 +557,35 @@ class WebEnvironmentSession:
         except selenium.common.exceptions.NoAlertPresentException:
             pass
 
+        self.waitUntilNoNetworkActivity()
+
         return success
 
+    def checkOffsite(self, priorURL):
+        self.waitUntilNoNetworkActivity()
+
+        try:
+            # If the browser went off site and off site links are disabled, then we send it back to the url it started from
+            if self.config['prevent_offsite_links']:
+                if self.driver.current_url != "data:," and self.getHostRoot(self.driver.current_url) != self.targetHostRoot:
+                    print(datetime.now(), f"[{os.getpid()}]", f"The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
+                    self.driver.get(priorURL)
+                    self.waitUntilNoNetworkActivity()
+        except selenium.common.exceptions.TimeoutException:
+            pass
+
+    def checkLoadFailure(self):
+        try:
+            if self.driver.current_url == "data:,":
+                print(datetime.now(), f"[{os.getpid()}]", f"The browser session needed to be reset back to the origin url {self.targetURL}")
+                self.driver.get(self.targetURL)
+                self.waitUntilNoNetworkActivity()
+        except selenium.common.exceptions.TimeoutException:
+            pass
+
     def runAction(self, action, executionSessionId):
+        self.checkOffsite(priorURL=self.targetURL)
+
         executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
         executionTrace.time = datetime.now()
         executionTrace.actionPerformed = action
@@ -527,32 +597,43 @@ class WebEnvironmentSession:
 
         self.proxy.resetPathTrace()
 
-        element = self.driver.execute_script("""
-        return document.elementFromPoint(arguments[0], arguments[1]);
-        """, action.x, action.y)
+        try:
+            element = self.driver.execute_script("""
+            return document.elementFromPoint(arguments[0], arguments[1]);
+            """, action.x, action.y)
 
-        if element is not None:
-            executionTrace.cursor = element.value_of_css_property("cursor")
-        else:
+            if element is not None:
+                executionTrace.cursor = element.value_of_css_property("cursor")
+            else:
+                executionTrace.cursor = None
+
+        except selenium.common.exceptions.StaleElementReferenceException as e:
             executionTrace.cursor = None
 
         success = self.performActionInBrowser(action)
 
         executionTrace.didActionSucceed = success
 
-        # If the browser went off site and offsite links are prevent, then we send it back to the url it started from
-        if self.config['prevent_offsite_links']:
-            if self.getHostRoot(self.driver.current_url) != self.targetHostRoot:
-                print(datetime.now(), f"[{os.getpid()}]", f"The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {executionTrace.startURL}")
-                self.driver.get(executionTrace.startURL)
+        self.checkOffsite(priorURL=executionTrace.startURL)
+        self.checkLoadFailure()
 
         hadNewError = False
         exceptions = self.extractExceptions()
         for exception in exceptions:
             msg, source, lineno, colno, stack = tuple(exception)
 
-            combinedMessage = str(msg) + str(source) + str(stack)
-            if "kwola" in combinedMessage.lower():
+            msg = str(msg)
+            source = str(source)
+            stack = str(stack)
+
+            combinedMessage = msg + source + stack
+
+            kwolaJSRewriteErrorFound = False
+            for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
+                if detectionString in combinedMessage:
+                    kwolaJSRewriteErrorFound = True
+
+            if kwolaJSRewriteErrorFound:
                 print(datetime.now(), f"[{os.getpid()}]", f"Error. There was a bug generated by the underlying javascript application, "
                                                           f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola "
                                                           f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting "
@@ -577,7 +658,13 @@ class WebEnvironmentSession:
             if log['level'] == 'SEVERE':
                 message = str(log['message'])
                 message = message.replace("\\n", "\n")
-                if "kwola" in message.lower():
+
+                kwolaJSRewriteErrorFound = False
+                for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
+                    if detectionString in message:
+                        kwolaJSRewriteErrorFound = True
+
+                if kwolaJSRewriteErrorFound:
                     print(datetime.now(), f"[{os.getpid()}]", f"Error. There was a bug generated by the underlying javascript application, "
                                                               f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola "
                                                               f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting "
