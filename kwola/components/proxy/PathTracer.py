@@ -26,11 +26,25 @@ class PathTracer:
         self.recentPaths = set()
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
+    def http_connect(self, flow):
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
+
+    def requestheaders(self, flow):
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
+
     def request(self, flow):
         self.seenPaths.add(flow.request.path)
         self.recentPaths.add(flow.request.path)
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
+    def responseheaders(self, flow):
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
+
+    def response(self, flow):
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
+
+    def error(self):
+        self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
 addons = [
     PathTracer()
