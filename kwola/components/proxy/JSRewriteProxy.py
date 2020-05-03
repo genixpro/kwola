@@ -177,6 +177,13 @@ class JSRewriteProxy:
         else:
             return False
 
+    def findMatchingJavascriptFilenameIgnoreKeyword(self, fileName):
+        for ignoreKeyword in self.config['web_session_ignored_javascript_file_keywords']:
+            if ignoreKeyword in fileName:
+                return ignoreKeyword
+
+        return None
+
     def doesFlowLooksLikeHTML(self, flow):
         fileName = self.getCleanedFileName(flow)
 
@@ -305,20 +312,32 @@ class JSRewriteProxy:
             originalFileContents = bytes(flow.response.data.content)
 
             if self.doesFlowLooksLikeJavascriptFile(flow):
-                fileNameForBabel = shortFileHash + "-" + fileName
+                ignoreKeyword = self.findMatchingJavascriptFilenameIgnoreKeyword(fileName)
+                if ignoreKeyword is None:
+                    fileNameForBabel = shortFileHash + "-" + fileName
 
-                jsFileContents, gzipped = self.decompressDataIfNeeded(originalFileContents)
+                    jsFileContents, gzipped = self.decompressDataIfNeeded(originalFileContents)
 
-                transformed = self.rewriteJavascript(jsFileContents, fileName, fileNameForBabel)
+                    transformed = self.rewriteJavascript(jsFileContents, fileName, fileNameForBabel)
 
-                if gzipped:
-                    transformed = gzip.compress(transformed, compresslevel=9)
+                    if gzipped:
+                        transformed = gzip.compress(transformed, compresslevel=9)
 
-                self.saveInCache(shortFileHash, fileName, transformed)
-                self.memoryCache[longFileHash] = transformed
+                    self.saveInCache(shortFileHash, fileName, transformed)
+                    self.memoryCache[longFileHash] = transformed
 
-                flow.response.data.headers['Content-Length'] = str(len(transformed))
-                flow.response.data.content = transformed
+                    flow.response.data.headers['Content-Length'] = str(len(transformed))
+                    flow.response.data.content = transformed
+                else:
+                    print(datetime.now(), f"[{os.getpid()}]", f"Warning: Ignoring the javascript file {fileName} because it matches the javascript ignore keyword {ignoreKeyword}. "
+                                                              f"This means that no learnings will take place on the code in this file. If this file is actually part of your "
+                                                              f"application and should be learned on, then please modify your config file kwola.json and remove the ignore "
+                                                              f"keyword {ignoreKeyword} from the variable 'web_session_ignored_javascript_file_keywords'. This file will be "
+                                                              f"cached without Kwola line counting installed. Its faster to install line counting only in the files that need "
+                                                              f"it.", flush=True)
+
+                    self.saveInCache(shortFileHash, fileName, originalFileContents)
+                    self.memoryCache[longFileHash] = originalFileContents
             elif self.doesFlowLooksLikeHTML(flow):
                 htmlFileContents, gzipped = self.decompressDataIfNeeded(originalFileContents)
 

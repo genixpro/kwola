@@ -111,6 +111,8 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
         else:
             print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
 
+        result['finishTime'] = datetime.now()
+
         return result
 
     except Exception as e:
@@ -134,6 +136,8 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
     testingStep = TestingStep.loadFromDisk(testingStep.id, config)
     trainingSequence.testingSteps.append(testingStep)
     trainingSequence.saveToDisk(config)
+
+    result['finishTime'] = datetime.now()
 
     return result
 
@@ -178,15 +182,18 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
 
             allFutures = []
             testStepFutures = []
+            trainStepFutures = []
 
             if torch.cuda.device_count() > 0:
                 for gpu in range(numberOfTrainingStepsInParallel):
                     trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=gpu, coordinatorTempFileName=coordinatorTempFileName)
                     allFutures.append(trainingFuture)
+                    trainStepFutures.append(trainingFuture)
                     trainingStepsLaunched += 1
             else:
                 trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepsLaunched, gpuNumber=None, coordinatorTempFileName=coordinatorTempFileName)
                 allFutures.append(trainingFuture)
+                trainStepFutures.append(trainingFuture)
                 trainingStepsLaunched += 1
 
             for testingStepNumber in range(config['testing_sequences_per_training_step']):
@@ -216,6 +223,24 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                     result = future.result()
                     testingStepId = result['testingStepId']
                     updateModelSymbols(config, testingStepId)
+
+                # Here, we dynamically adjust the number of iterations to be executed in a training step
+                # so that it aligns automatically with the time needed to complete the testing steps
+                lastTestFinish = None
+                lastTrainFinish = None
+                for future in testStepFutures:
+                    if lastTestFinish is None or lastTestFinish < future.result()['finishTime']:
+                        lastTestFinish = future.result()['finishTime']
+
+                for future in trainStepFutures:
+                    if lastTrainFinish is None or lastTrainFinish < future.result()['finishTime']:
+                        lastTrainFinish = future.result()['finishTime']
+
+                if lastTestFinish > lastTrainFinish:
+                    config['iterations_per_training_step'] += config['iterations_per_training_step_adjustment_size_per_loop']
+                else:
+                    config['iterations_per_training_step'] = max(5, config['iterations_per_training_step'] - config['iterations_per_training_step_adjustment_size_per_loop'])
+                config.saveConfig()
 
             print(datetime.now(), f"[{os.getpid()}]", "Completed one parallel training & testing step! Hooray!", flush=True)
 

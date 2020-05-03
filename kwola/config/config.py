@@ -35,8 +35,10 @@ class Configuration:
     def __init__(self, configurationDirectory):
         self.configFileName = os.path.join(configurationDirectory, "kwola.json")
         self.configurationDirectory = configurationDirectory
+        self.configData = {}
 
-        data = json.load(open(self.configFileName, "rt"))
+        with open(self.configFileName, "rt") as f:
+            data = json.load(f)
 
         if 'profile' not in data:
             data['profile'] = 'medium'
@@ -57,9 +59,7 @@ class Configuration:
             # Print an error message and ignore it.
             print(f"Was unable to find the prebuilt configuration file for {data['profile']}. Skipping loading default values.")
 
-
-        for key, value in data.items():
-            setattr(self, key, value)
+        self.configData = data
 
 
 
@@ -82,10 +82,22 @@ class Configuration:
 
         return subDirectory
 
-
     def __getitem__(self, key):
-        return getattr(self, key)
+        return self.configData[key]
 
+    def __setitem__(self, key, value):
+        self.configData[key] = value
+
+    def __getattr__(self, name):
+        if name != "configData" and name in self.configData:
+            return self.configData[name]
+        else:
+            # Default behaviour
+            raise AttributeError
+
+    def saveConfig(self):
+        with open(self.configFileName, "wt") as f:
+            json.dump(self.configData, f)
 
     @staticmethod
     def checkDirectoryContainsKwolaConfig(directory):
