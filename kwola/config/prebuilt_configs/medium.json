@@ -235,7 +235,7 @@
     "cleave",
     "collect",
     "cufon",
-    "d3",
+    "d3.js",
     "date.js",
     "dojo",
     "ember",
@@ -244,6 +244,7 @@
     "ga.js",
     "glimmer",
     "granim",
+    "graph",
     "ionic",
     "jasmine",
     "jest",
@@ -288,6 +289,7 @@
     "vendor",
     "verge",
     "vue",
-    "webix"
+    "webix",
+    "webworker"
   ]
 }

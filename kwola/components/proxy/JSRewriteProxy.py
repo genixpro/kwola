@@ -329,10 +329,10 @@ class JSRewriteProxy:
                     flow.response.data.headers['Content-Length'] = str(len(transformed))
                     flow.response.data.content = transformed
                 else:
-                    print(datetime.now(), f"[{os.getpid()}]", f"Warning: Ignoring the javascript file {fileName} because it matches the javascript ignore keyword {ignoreKeyword}. "
+                    print(datetime.now(), f"[{os.getpid()}]", f"Warning: Ignoring the javascript file '{fileName}' because it matches the javascript ignore keyword '{ignoreKeyword}'. "
                                                               f"This means that no learnings will take place on the code in this file. If this file is actually part of your "
                                                               f"application and should be learned on, then please modify your config file kwola.json and remove the ignore "
-                                                              f"keyword {ignoreKeyword} from the variable 'web_session_ignored_javascript_file_keywords'. This file will be "
+                                                              f"keyword '{ignoreKeyword}' from the variable 'web_session_ignored_javascript_file_keywords'. This file will be "
                                                               f"cached without Kwola line counting installed. Its faster to install line counting only in the files that need "
                                                               f"it.", flush=True)
 
