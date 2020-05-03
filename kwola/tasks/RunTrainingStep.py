@@ -475,11 +475,17 @@ def loadExecutionTraceWeightData(traceId, sessionId, configDir):
 
     weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceId + ".json")
 
+    data = {}
+    useDefault = True
     if os.path.exists(weightFile):
+        useDefault = False
         with open(weightFile, "rt") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                useDefault = True
 
-            data = json.load(f)
-    else:
+    if useDefault:
         data = {
             "id": traceId,
             "executionSessionId": sessionId,

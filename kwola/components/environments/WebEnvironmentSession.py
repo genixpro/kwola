@@ -237,21 +237,24 @@ class WebEnvironmentSession:
 
         emailKeywords = ['use', 'mail', 'name']
         passwordKeywords = ['pass']
-        loginKeywords = ['log', 'sub']
+        loginKeywords = ['log', 'sub', 'sign']
 
         for map in actionMaps:
-            for matchKeyword in emailKeywords:
-                if matchKeyword in map.keywords and map.elementType == "input":
-                    emailInput = map
-                    break
-            for matchKeyword in passwordKeywords:
-                if matchKeyword in map.keywords and map.elementType == "input":
-                    passwordInput = map
-                    break
-            for matchKeyword in loginKeywords:
-                if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
-                    loginButton = map
-                    break
+            if emailInput is None:
+                for matchKeyword in emailKeywords:
+                    if matchKeyword in map.keywords and map.elementType == "input":
+                        emailInput = map
+                        break
+            if passwordInput is None:
+                for matchKeyword in passwordKeywords:
+                    if matchKeyword in map.keywords and map.elementType == "input":
+                        passwordInput = map
+                        break
+            if loginButton is None:
+                for matchKeyword in loginKeywords:
+                    if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
+                        loginButton = map
+                        break
 
         if emailInput is None or passwordInput is None or loginButton is None:
             print(datetime.now(), f"[{os.getpid()}]", "Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.", flush=True)
@@ -354,6 +357,12 @@ class WebEnvironmentSession:
             for(let element of domElements)
             {
                 const bounds = element.getBoundingClientRect();
+               
+                if (bounds.bottom < 0 || bounds.right < 0)
+                    continue;
+                    
+                if (bounds.top > window.innerHeight || bounds.right > window.innerWidth)
+                    continue;
                 
                 const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
                 const paddingRight = Number(window.getComputedStyle(element, null).getPropertyValue('padding-right').replace("px", ""));
@@ -460,7 +469,14 @@ class WebEnvironmentSession:
             return actionMaps;
         """)
 
-        actionMaps = [ActionMap(**actionMapData) for actionMapData in elementActionMaps]
+        actionMaps = []
+
+        for actionMapData in elementActionMaps:
+            actionMap = ActionMap(**actionMapData)
+            # Cut the keywords off at 1024 characters to prevent too much memory / storage usage
+            actionMap.keywords = actionMap.keywords[:self.config['web_session_action_map_max_keyword_size']]
+            actionMaps.append(actionMap)
+
         return actionMaps
 
     def performActionInBrowser(self, action):

@@ -10,7 +10,7 @@
   "advantage_convolution_stride": 1,
   "batch_size": 64,
   "batches_per_iteration": 2,
-  "data_compress_level": 5,
+  "data_compress_level": 0,
   "data_serialization_method": "pickle",
   "debug_video_action_prediction_circle_1_radius":10,
   "debug_video_action_prediction_circle_2_radius":5,
@@ -218,5 +218,6 @@
   "web_session_height": 600,
   "web_session_no_network_activity_wait_time": 2.0,
   "web_session_no_network_activity_timeout": 30,
-  "web_session_perform_action_wait_time": 0.5
+  "web_session_perform_action_wait_time": 0.5,
+  "web_session_action_map_max_keyword_size": 1024
 }

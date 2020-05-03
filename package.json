@@ -5,7 +5,7 @@
   "dependencies": {
     "@babel/cli": "^7.0.0",
     "@babel/core": "^7.0.0",
-    "babel-plugin-kwola": "0.0.14"
+    "babel-plugin-kwola": "0.0.15"
   },
   "license": "GPLv3 Affero"
 }
