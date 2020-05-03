@@ -43,7 +43,7 @@ class PathTracer:
     def response(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
-    def error(self):
+    def error(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
 addons = [
