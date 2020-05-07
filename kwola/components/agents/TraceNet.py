@@ -345,3 +345,11 @@ class TraceNet(torch.nn.Module):
                 outputDict['predictedCursor'] = self.predictedCursorLinear(joinedFeatures)
 
         return outputDict
+
+    def initialize(self):
+        # Mostly use torches default initialization, except on the final conv of the discounted future rewards, where we initialize with a very tiny gain,
+        # this is because this particular layer is known to cause instability when initialized with too large of a value
+        layer = list(self.discountedFutureRewardConvolution.modules())[-2]
+        torch.nn.init.xavier_uniform_(layer.weight, gain=0.01)
+        torch.nn.init.xavier_uniform_(layer.bias, gain=0.01)
+

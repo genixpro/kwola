@@ -316,6 +316,9 @@ class DeepLearningAgent:
             # for the updates made to the main model.
             if self.targetNetwork is not None:
                 self.targetNetwork.load_state_dict(stateDict)
+        else:
+            # This is a fresh network, initialize it.
+            self.model.initialize()
 
         # We also need to load the symbol map - this is the mapping between symbol strings
         # and their index values within the embedding structure
