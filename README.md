@@ -32,6 +32,8 @@ At this time, Kwola requires Python version 3.6 or higher. If you run into issue
 - find anything python related in the AppData folder of the user (such as 'pip' and "Programs\Python") and delete them
 - reinstall a fresh copy of the latest version of python, and specifically grab the 64bit only binary from the "Additional Downloads" section of the python website. When installing, use the "Custom" install, make sure pip is selected and that you want to install Python for all users.
 
+On Ubuntu 18 LTS:  `sudo apt-get install python3-venv python3-dev`
+
 2) NodeJS
 
 Please go to https://nodejs.org/en/ to install NodeJS or install it through a package manager
