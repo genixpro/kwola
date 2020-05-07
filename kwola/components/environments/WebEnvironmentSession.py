@@ -64,6 +64,8 @@ class WebEnvironmentSession:
 
         chrome_options = Options()
         chrome_options.headless = config['web_session_headless']
+        chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
+        chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
 
         capabilities = webdriver.DesiredCapabilities.CHROME
         capabilities['loggingPrefs'] = {'browser': 'ALL'}
