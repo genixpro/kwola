@@ -164,7 +164,7 @@ Next, use the certutil program to install the certificate into Chromes certifica
 
 `[user@localhost]$ certutil -d sql:~/.pki/nssdb -A -n 'mitm.it cert authority' -i ~/.mitmproxy/mitmproxy-ca-cert.cer -t TCP,TCP,TCP`
 
-If you have issues, you can read more on the webiste for mitmproxy:
+If you have issues, you can read more on the website for mitmproxy:
 
 https://docs.mitmproxy.org/stable/concepts-certificates/
 
