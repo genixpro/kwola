@@ -59,10 +59,15 @@ def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, over
             with LockedFile(fileName, 'wb') as f:
                 f.write(gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression))
 
+    elif saveFormat == "mongo":
+        targetObject.save()
 
 
 def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True):
     try:
+        if config.data_serialization_method == "mongo":
+            return modelClass.objects(id=id).first()
+
         object = None
         pickleFileName = ''
         gzipPickleFileName = ''

@@ -32,13 +32,17 @@ class Configuration:
     """
         This class represents the configuration for the Kwola model.
     """
-    def __init__(self, configurationDirectory):
-        self.configFileName = os.path.join(configurationDirectory, "kwola.json")
-        self.configurationDirectory = configurationDirectory
-        self.configData = {}
+    def __init__(self, configurationDirectory = None, configData = None):
+        if configurationDirectory is not None:
+            self.configFileName = os.path.join(configurationDirectory, "kwola.json")
+            self.configurationDirectory = configurationDirectory
+            self.configData = {}
 
-        with open(self.configFileName, "rt") as f:
-            data = json.load(f)
+            with open(self.configFileName, "rt") as f:
+                data = json.load(f)
+        else:
+            data = configData
+
 
         if 'profile' not in data:
             data['profile'] = 'medium'
