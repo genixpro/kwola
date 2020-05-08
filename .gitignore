@@ -5,4 +5,4 @@ package-lock.json
 venv
 dist
 node_modules
-kwola_run_*
+kwola_run_0**
