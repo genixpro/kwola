@@ -82,7 +82,8 @@ setup(
             'kwola_test_ffmpeg = kwola.bin.test_ffmpeg:main',
             'kwola_test_neural_network = kwola.bin.test_neural_network:main',
             'kwola_test_installation = kwola.bin.test_installation:main',
-            'kwola_install_proxy_cert = kwola.bin.install_proxy_cert:main'
+            'kwola_install_proxy_cert = kwola.bin.install_proxy_cert:main',
+            'kwola_website_check = kwola.bin.website_check:main'
         ]
     }
 )
