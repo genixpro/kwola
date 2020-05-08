@@ -263,8 +263,10 @@ class WebEnvironmentSession:
         # check to see if there is a "login" button that we need to click first to expose
         # the login form
         if (len(emailInputs) == 0) and (len(passwordInputs) == 0) and len(loginButtons) > 0:
-            loginClickAction = ClickTapAction(x=loginButtons[0].left + 1,
-                                              y=loginButtons[0].top + 1,
+            loginTriggerButton = loginButtons[0]
+
+            loginClickAction = ClickTapAction(x=loginTriggerButton.left + 1,
+                                              y=loginTriggerButton.top + 1,
                                               source="autologin",
                                               times=1,
                                               type="click")
@@ -272,10 +274,14 @@ class WebEnvironmentSession:
 
             emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
 
+            loginButtons = list(filter(lambda button: button.keywords != loginTriggerButton.keywords, loginButtons))
+
 
         if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
             print(datetime.now(), f"[{os.getpid()}]", "Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.", flush=True)
             return
+
+        startURL = self.driver.current_url
 
         emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
                                      y=emailInputs[0].top + 1,
@@ -301,15 +307,23 @@ class WebEnvironmentSession:
         success2 = self.performActionInBrowser(passwordTypeAction)
         success3 = self.performActionInBrowser(loginClickAction)
 
+        time.sleep(1)
+
+        didURLChange = bool(startURL != self.driver.current_url)
+
         if success1 and success2 and success3:
-            print(datetime.now(), f"[{os.getpid()}]",
-                  "Heuristic autologin appears to have worked!",
-                  flush=True)
+            if didURLChange:
+                print(datetime.now(), f"[{os.getpid()}]",
+                      "Heuristic autologin appears to have worked!",
+                      flush=True)
+            else:
+                print(datetime.now(), f"[{os.getpid()}]",
+                      "Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.",
+                      flush=True)
         else:
             print(datetime.now(), f"[{os.getpid()}]",
                   "There was an error running one of the actions required for the heuristic auto login.",
                   flush=True)
-
 
     def extractBranchTrace(self):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
