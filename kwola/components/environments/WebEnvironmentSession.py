@@ -226,58 +226,73 @@ class WebEnvironmentSession:
 
         return self.movieFilePath()
 
-    def runAutoLogin(self):
-        """
-            This method is used to perform the automatic heuristic based login.
-        """
+    def findElementsForAutoLogin(self):
         actionMaps = self.getActionMaps()
 
         # First, try to find the email, password, and submit inputs
-        emailInput = None
-        passwordInput = None
-        loginButton = None
+        emailInputs = []
+        passwordInputs = []
+        loginButtons = []
 
         emailKeywords = ['use', 'mail', 'name']
         passwordKeywords = ['pass']
         loginKeywords = ['log', 'sub', 'sign']
 
         for map in actionMaps:
-            if emailInput is None:
-                for matchKeyword in emailKeywords:
-                    if matchKeyword in map.keywords and map.elementType == "input":
-                        emailInput = map
-                        break
-            if passwordInput is None:
-                for matchKeyword in passwordKeywords:
-                    if matchKeyword in map.keywords and map.elementType == "input":
-                        passwordInput = map
-                        break
-            if loginButton is None:
-                for matchKeyword in loginKeywords:
-                    if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
-                        loginButton = map
-                        break
+            for matchKeyword in emailKeywords:
+                if matchKeyword in map.keywords and map.elementType == "input":
+                    emailInputs.append(map)
+                    break
+            for matchKeyword in passwordKeywords:
+                if matchKeyword in map.keywords and map.elementType == "input":
+                    passwordInputs.append(map)
+                    break
+            for matchKeyword in loginKeywords:
+                if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
+                    loginButtons.append(map)
+                    break
 
-        if emailInput is None or passwordInput is None or loginButton is None:
+        return emailInputs, passwordInputs, loginButtons
+
+    def runAutoLogin(self):
+        """
+            This method is used to perform the automatic heuristic based login.
+        """
+        emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
+
+        # check to see if there is a "login" button that we need to click first to expose
+        # the login form
+        if (len(emailInputs) == 0) and (len(passwordInputs) == 0) and len(loginButtons) > 0:
+            loginClickAction = ClickTapAction(x=loginButtons[0].left + 1,
+                                              y=loginButtons[0].top + 1,
+                                              source="autologin",
+                                              times=1,
+                                              type="click")
+            success = self.performActionInBrowser(loginClickAction)
+
+            emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
+
+
+        if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
             print(datetime.now(), f"[{os.getpid()}]", "Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.", flush=True)
             return
 
-        emailTypeAction = TypeAction(x=emailInput.left + 1,
-                                     y=emailInput.top + 1,
+        emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
+                                     y=emailInputs[0].top + 1,
                                      source="autologin",
                                      label="email",
                                      text=self.config.email,
                                      type="typeEmail")
 
-        passwordTypeAction = TypeAction(x=passwordInput.left + 1,
-                                        y=passwordInput.top + 1,
+        passwordTypeAction = TypeAction(x=passwordInputs[0].left + 1,
+                                        y=passwordInputs[0].top + 1,
                                         source="autologin",
                                         label="password",
                                         text=self.config.password,
                                         type="typePassword")
 
-        loginClickAction = ClickTapAction(x=loginButton.left + 1,
-                                          y=loginButton.top + 1,
+        loginClickAction = ClickTapAction(x=loginButtons[0].left + 1,
+                                          y=loginButtons[0].top + 1,
                                           source="autologin",
                                           times=1,
                                           type="click")
