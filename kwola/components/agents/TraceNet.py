@@ -124,6 +124,7 @@ class TraceNet(torch.nn.Module):
                 padding=self.config['present_reward_convolution_padding'],
                 bias=False
             ),
+            torch.nn.Sigmoid(),
             torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
@@ -146,6 +147,7 @@ class TraceNet(torch.nn.Module):
                 padding=self.config['discounted_future_reward_convolution_padding'],
                 bias=False
             ),
+            torch.nn.Sigmoid(),
             torch.nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False)
         )
 
@@ -256,8 +258,23 @@ class TraceNet(torch.nn.Module):
         outputDict = {}
 
         if data['computeRewards']:
-            presentRewards = self.presentRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
-            discountFutureRewards = self.discountedFutureRewardConvolution(mergedPixelFeatureMap) * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
+            presentRewardLowBound, presentRewardHighBound = self.computePresentRewardBounds()
+            discountedFutureRewardLowBound, discountedFutureRewardHighBound = self.computeDiscountedFutureRewardBounds()
+
+            presentRewardHighBound += 1e-6
+            presentRewardLowBound -= 1e-6
+
+            discountedFutureRewardHighBound += 1e-6
+            discountedFutureRewardLowBound -= 1e-6
+
+            presentRewardPredictions = self.presentRewardConvolution(mergedPixelFeatureMap)
+            discountFutureRewardPredictions = self.discountedFutureRewardConvolution(mergedPixelFeatureMap)
+
+            presentRewardPredictions = presentRewardPredictions * (presentRewardHighBound - presentRewardLowBound) + presentRewardLowBound
+            discountFutureRewardPredictions = discountFutureRewardPredictions * (discountedFutureRewardHighBound - discountedFutureRewardLowBound) + discountedFutureRewardLowBound
+
+            presentRewards = presentRewardPredictions * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
+            discountFutureRewards = discountFutureRewardPredictions * data['pixelActionMaps'] + (1.0 - data['pixelActionMaps']) * self.config['reward_impossible_action']
 
             totalReward = (presentRewards + discountFutureRewards)
 
@@ -347,11 +364,70 @@ class TraceNet(torch.nn.Module):
         return outputDict
 
     def initialize(self):
-        # Mostly use torches default initialization, except on the final conv of the discounted future rewards, where we initialize with a very tiny gain,
-        # this is because this particular layer is known to cause instability when initialized with too large of a value
-        layer = list(self.discountedFutureRewardConvolution.modules())[-2]
-        if layer.weight is not None:
-            torch.nn.init.xavier_uniform_(layer.weight, gain=0.1000)
-        if layer.bias is not None:
-            torch.nn.init.xavier_uniform_(layer.bias, gain=0.1000)
+        pass
+
+    def computePresentRewardBounds(self):
+        if hasattr(self, 'bestPossibleReward'):
+            return self.worstPossibleReward, self.bestPossibleReward
+
+        bestPossibleReward = 0.0
+        worstPossibleReward = 0.0
+        config = self.config
+
+        bestPossibleReward += max(0.0, config['reward_action_success'])
+        bestPossibleReward += max(0.0, config['reward_action_failure'])
+        bestPossibleReward += max(0.0, config['reward_code_executed'])
+        bestPossibleReward += max(0.0, config['reward_no_code_executed'])
+        bestPossibleReward += max(0.0, config['reward_new_code_executed'])
+        bestPossibleReward += max(0.0, config['reward_no_new_code_executed'])
+        bestPossibleReward += max(0.0, config['reward_network_traffic'])
+        bestPossibleReward += max(0.0, config['reward_no_network_traffic'])
+        bestPossibleReward += max(0.0, config['reward_new_network_traffic'])
+        bestPossibleReward += max(0.0, config['reward_no_new_network_traffic'])
+        bestPossibleReward += max(0.0, config['reward_screenshot_changed'])
+        bestPossibleReward += max(0.0, config['reward_no_screenshot_change'])
+        bestPossibleReward += max(0.0, config['reward_new_screenshot'])
+        bestPossibleReward += max(0.0, config['reward_no_new_screenshot'])
+        bestPossibleReward += max(0.0, config['reward_url_changed'])
+        bestPossibleReward += max(0.0, config['reward_no_url_change'])
+        bestPossibleReward += max(0.0, config['reward_new_url'])
+        bestPossibleReward += max(0.0, config['reward_no_new_url'])
+        bestPossibleReward += max(0.0, config['reward_log_output'])
+        bestPossibleReward += max(0.0, config['reward_no_log_output'])
+        bestPossibleReward += max(0.0, config['reward_impossible_action'])
+
+        worstPossibleReward += min(0.0, config['reward_action_success'])
+        worstPossibleReward += min(0.0, config['reward_action_failure'])
+        worstPossibleReward += min(0.0, config['reward_code_executed'])
+        worstPossibleReward += min(0.0, config['reward_no_code_executed'])
+        worstPossibleReward += min(0.0, config['reward_new_code_executed'])
+        worstPossibleReward += min(0.0, config['reward_no_new_code_executed'])
+        worstPossibleReward += min(0.0, config['reward_network_traffic'])
+        worstPossibleReward += min(0.0, config['reward_no_network_traffic'])
+        worstPossibleReward += min(0.0, config['reward_new_network_traffic'])
+        worstPossibleReward += min(0.0, config['reward_no_new_network_traffic'])
+        worstPossibleReward += min(0.0, config['reward_screenshot_changed'])
+        worstPossibleReward += min(0.0, config['reward_no_screenshot_change'])
+        worstPossibleReward += min(0.0, config['reward_new_screenshot'])
+        worstPossibleReward += min(0.0, config['reward_no_new_screenshot'])
+        worstPossibleReward += min(0.0, config['reward_url_changed'])
+        worstPossibleReward += min(0.0, config['reward_no_url_change'])
+        worstPossibleReward += min(0.0, config['reward_new_url'])
+        worstPossibleReward += min(0.0, config['reward_no_new_url'])
+        worstPossibleReward += min(0.0, config['reward_log_output'])
+        worstPossibleReward += min(0.0, config['reward_no_log_output'])
+        worstPossibleReward += min(0.0, config['reward_impossible_action'])
+
+        self.bestPossibleReward = bestPossibleReward
+        self.worstPossibleReward = worstPossibleReward
+
+        return worstPossibleReward, bestPossibleReward 
+
+    def computeDiscountedFutureRewardBounds(self):
+        oneFrameBounds = self.computePresentRewardBounds()
+
+        low = oneFrameBounds[0] / (1.0 - self.config['reward_discount_rate'])
+        high = oneFrameBounds[1] / (1.0 - self.config['reward_discount_rate'])
+
+        return low, high
 
