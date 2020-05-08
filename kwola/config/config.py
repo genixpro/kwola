@@ -101,7 +101,7 @@ class Configuration:
 
     def saveConfig(self):
         with open(self.configFileName, "wt") as f:
-            json.dump(self.configData, f)
+            json.dump(self.configData, f, indent=4, sort_keys=True)
 
     @staticmethod
     def checkDirectoryContainsKwolaConfig(directory):
