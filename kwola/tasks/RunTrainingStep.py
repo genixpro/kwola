@@ -33,6 +33,7 @@ import concurrent.futures
 import gzip
 import json
 import billiard as multiprocessing
+import billiard.pool as multiprocessingpool
 import numpy
 import os
 import pickle
@@ -304,8 +305,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         print(datetime.now(), f"[{os.getpid()}]", "Finished initialization for batch preparation sub process.", flush=True)
 
-        processPool = multiprocessing.pool.Pool(processes=config['training_initial_batch_prep_workers'])
-        backgroundTraceSaveProcessPool = multiprocessing.pool.Pool(processes=config['training_background_trace_save_workers'])
+        processPool = multiprocessingpool.Pool(processes=config['training_initial_batch_prep_workers'])
+        backgroundTraceSaveProcessPool = multiprocessingpool.Pool(processes=config['training_background_trace_save_workers'])
         executionTraceSaveFutures = {}
 
         batchCount = 0
@@ -370,7 +371,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
                         print(datetime.now(), f"[{os.getpid()}]", f"Resetting batch prep process pool. Cache full state. New workers: {config['training_cache_full_batch_prep_workers']}")
 
-                        processPool = multiprocessing.pool.Pool(processes=config['training_cache_full_batch_prep_workers'])
+                        processPool = multiprocessingpool.Pool(processes=config['training_cache_full_batch_prep_workers'])
 
                         cacheFullState = True
                     # Otherwise we have a full sized process pool so we can plow through all the results.
@@ -381,7 +382,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
                         print(datetime.now(), f"[{os.getpid()}]", f"Resetting batch prep process pool. Cache starved state. New workers: {config['training_max_batch_prep_workers']}")
 
-                        processPool = multiprocessing.pool.Pool(processes=config['training_max_batch_prep_workers'])
+                        processPool = multiprocessingpool.Pool(processes=config['training_max_batch_prep_workers'])
 
                         cacheFullState = False
 
