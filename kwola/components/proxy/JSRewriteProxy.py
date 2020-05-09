@@ -57,14 +57,19 @@ class JSRewriteProxy:
     def findInCache(self, fileHash, fileName):
         cacheFileName = self.getCacheFileName(fileHash, fileName)
         if os.path.exists(cacheFileName):
-            with open(cacheFileName, 'rb') as f:
-                return f.read()
-
+            try:
+                with open(cacheFileName, 'rb') as f:
+                    return f.read()
+            except OSError:
+                return
 
     def saveInCache(self, fileHash, fileName, data):
         cacheFileName = self.getCacheFileName(fileHash, fileName)
-        with open(cacheFileName, 'wb') as f:
-            return f.write(data)
+        try:
+            with open(cacheFileName, 'wb') as f:
+                return f.write(data)
+        except FileExistsError:
+            pass
 
 
     def request(self, flow):

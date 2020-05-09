@@ -33,7 +33,7 @@ from .RunTrainingStep import loadAllTestingSteps
 from concurrent.futures import as_completed, wait
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-import multiprocessing
+import billiard as multiprocessing
 import os
 import os.path
 import time

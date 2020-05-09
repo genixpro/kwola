@@ -30,7 +30,7 @@ from ..datamodels.TestingStepModel import TestingStep
 from .RunTrainingStep import addExecutionSessionToSampleCache
 from datetime import datetime
 import atexit
-import multiprocessing
+import billiard as multiprocessing
 import numpy
 import os
 import pickle
@@ -110,7 +110,10 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
     returnValue = {'success': True}
 
     try:
-        multiprocessing.set_start_method('spawn')
+        try:
+            multiprocessing.set_start_method('spawn')
+        except RuntimeError:
+            pass
 
         config = Configuration(configDir)
 

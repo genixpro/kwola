@@ -32,8 +32,7 @@ import atexit
 import concurrent.futures
 import gzip
 import json
-import multiprocessing
-import multiprocessing.pool
+import billiard as multiprocessing
 import numpy
 import os
 import pickle
@@ -522,7 +521,10 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
         print(datetime.now(), f"[{os.getpid()}]", "Cuda Ready on GPU", gpu, flush=True)
 
     try:
-        multiprocessing.set_start_method('spawn')
+        try:
+            multiprocessing.set_start_method('spawn')
+        except RuntimeError:
+            pass
 
         print(datetime.now(), f"[{os.getpid()}]", "Starting Training Step", flush=True)
         testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]

@@ -25,7 +25,7 @@ from mitmproxy.tools.dump import DumpMaster
 import mitmproxy.exceptions
 from threading import Thread
 import asyncio
-import multiprocessing
+import billiard as multiprocessing
 import socket
 import time
 

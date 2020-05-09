@@ -40,7 +40,9 @@ requirements = [
     "selenium",
     "testtools",
     "torch",
-    "filetype"
+    "filetype",
+    "billiard",
+    "wheel"
 ]
 
 setup(
