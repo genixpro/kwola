@@ -308,6 +308,7 @@ class WebEnvironmentSession:
         success3 = self.performActionInBrowser(loginClickAction)
 
         time.sleep(1)
+        self.waitUntilNoNetworkActivity()
 
         didURLChange = bool(startURL != self.driver.current_url)
 
