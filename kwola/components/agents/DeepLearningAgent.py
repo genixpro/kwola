@@ -1234,7 +1234,7 @@ class DeepLearningAgent:
                     if hilightStepNumber is not None:
                         dist = abs(hilightStepNumber - (trace.frameNumber - 1))
 
-                        hilight = 1 / (dist+1)
+                        hilight = 1 / ((dist/3)+1)
 
                     future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, pickle.dumps(trace), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart, hilight)
                     futures.append(future)
