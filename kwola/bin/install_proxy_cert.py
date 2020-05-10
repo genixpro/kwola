@@ -68,6 +68,11 @@ def main():
     proxyConfig.http_proxy = f"localhost:{proxyPort}"
     proxyConfig.add_to_capabilities(capabilities)
 
+    chrome_options = webdriver.chrome.options.Options()
+    if len(commandArgs) > 0:
+        chrome_options.headless = True
+    chrome_options.add_argument(f"--no-sandbox")
+
     driver = webdriver.Chrome(desired_capabilities=capabilities)
 
     driver.get("http://mitm.it/")
