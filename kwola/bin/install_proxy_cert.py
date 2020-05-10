@@ -73,7 +73,7 @@ def main():
         chrome_options.headless = True
     chrome_options.add_argument(f"--no-sandbox")
 
-    driver = webdriver.Chrome(desired_capabilities=capabilities)
+    driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
 
     driver.get("http://mitm.it/")
 
