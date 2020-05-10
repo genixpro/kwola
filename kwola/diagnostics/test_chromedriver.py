@@ -37,6 +37,7 @@ def testChromedriver(verbose=True):
 
     chrome_options = selenium.webdriver.chrome.options.Options()
     chrome_options.headless = True
+    chrome_options.add_argument(f"--no-sandbox")
 
     capabilities = selenium.webdriver.DesiredCapabilities.CHROME
     capabilities['loggingPrefs'] = {'browser': 'ALL'}
