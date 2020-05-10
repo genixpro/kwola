@@ -163,7 +163,8 @@ class WebEnvironmentSession:
         # Cleanup the screenshot files
         if hasattr(self, "screenshotPaths"):
             for filePath in self.screenshotPaths:
-                os.unlink(filePath)
+                if os.path.exists(filePath):
+                    os.unlink(filePath)
 
             self.screenshotPaths = []
             if hasattr(self, "tabNumber") and os.path.exists(self.movieFilePath()):
