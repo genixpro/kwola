@@ -88,6 +88,8 @@ class WebEnvironmentSession:
         except selenium.common.exceptions.TimeoutException:
             raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
 
+        time.sleep(2)
+
         self.waitUntilNoNetworkActivity()
 
         if self.config.autologin:
@@ -219,7 +221,7 @@ class WebEnvironmentSession:
         return os.path.join(self.screenshotDirectory, self.movieFileName())
 
     def createMovie(self):
-        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         if result.returncode != 0:
             print(f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:")

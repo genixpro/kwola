@@ -32,6 +32,8 @@ class BugModel(Document):
 
     testingStepId = StringField()
 
+    testingRunId = StringField(required=False)
+
     executionSessionId = StringField()
 
     stepNumber = IntField()

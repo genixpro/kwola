@@ -70,6 +70,8 @@ class JSRewriteProxy:
                 return f.write(data)
         except FileExistsError:
             pass
+        except OSError:
+            pass
 
 
     def request(self, flow):
@@ -222,6 +224,7 @@ class JSRewriteProxy:
             fileName = fileName.split("?")[0]
         if "#" in fileName:
             fileName = fileName.split("#")[0]
+        fileName = fileName.replace(".", "_")
         return fileName
 
     def rewriteJavascript(self, data, fileName, fileNameForBabel):

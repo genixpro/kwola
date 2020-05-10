@@ -1230,9 +1230,11 @@ class DeepLearningAgent:
             futures = []
             for trace, rawImage in zip(executionTraces, rawImages):
                 if trace is not None:
-                    hilight = False
-                    if hilightStepNumber is not None and hilightStepNumber == (trace.frameNumber - 1):
-                        hilight = True
+                    hilight = 0
+                    if hilightStepNumber is not None:
+                        dist = abs(hilightStepNumber - (trace.frameNumber - 1))
+
+                        hilight = 1 / (dist+1)
 
                     future = executor.submit(self.createDebugImagesForExecutionTrace, str(executionSession.id), debugImageIndex, pickle.dumps(trace), rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts, includeNetPresentRewardChart, hilight)
                     futures.append(future)
@@ -1242,7 +1244,7 @@ class DeepLearningAgent:
 
             concurrent.futures.wait(futures)
 
-        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-crf', '15', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
 
@@ -1253,7 +1255,7 @@ class DeepLearningAgent:
 
         return videoData
 
-    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilight=False):
+    def createDebugImagesForExecutionTrace(self, executionSessionId, debugImageIndex, trace, rawImage, lastRawImage, presentRewards, discountedFutureRewards, tempScreenshotDirectory, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilight=0):
         """
             This method is used to generate a single debug image for a single execution trace. Technically this method actually
             generates two debug images. The first shows what action is being performed, and the second shows what happened after
@@ -1269,7 +1271,7 @@ class DeepLearningAgent:
             :param tempScreenshotDirectory: A string containing the path of the directory where the images will be saved
             :param includeNeuralNetworkCharts: A boolean indicating whether to include charts showing the neural network predictions in the debug video
             :param includeNetPresentRewardChart: A boolean indicating whether to include the net present reward chart at the bottom of the debug video
-            :param hilight: A boolean indicating whether this frame should be hilighted or not. Hilighting a frame will change the background color
+            :param hilight: A float from 0 to 1 indicating how much hilighting to apply to this frame, 0 being no hilight and 1 being full hilight. Hilighting a frame will change the background color
 
             :return: None
         """
@@ -1659,8 +1661,11 @@ class DeepLearningAgent:
             extraHeight = topSize + bottomSize
 
             newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
-            if hilight:
-                newImage[:, :] = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
+            if hilight > 0:
+                hilightColor = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
+                newImage[:] *= (1.0 - hilight)
+                newImage[:, :] += hilightColor * hilight
+
             newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
             addDebugTextToImage(newImage, trace)
             addDebugCircleToImage(newImage, trace)
@@ -1675,8 +1680,11 @@ class DeepLearningAgent:
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
             newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
-            if hilight:
-                newImage[:, :] = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
+            if hilight > 0:
+                hilightColor = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
+                newImage[:] *= (1.0 - hilight)
+                newImage[:, :] += hilightColor * hilight
+
             addDebugTextToImage(newImage, trace)
 
             newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage

@@ -133,6 +133,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             ExecutionSession(
                 id=str(testingStepId) + "_session_" + str(sessionN),
                 testingStepId=str(testingStepId),
+                testingRunId=testStep.testingRunId,
                 startTime=datetime.now(),
                 endTime=None,
                 tabNumber=sessionN,
@@ -257,6 +258,12 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         debugVideoSubprocesses = []
 
+        for session in executionSessions:
+            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(session.id), "", False, False, None, "annotated_videos"))
+            debugVideoSubprocess.start()
+            atexit.register(lambda: debugVideoSubprocess.terminate())
+            debugVideoSubprocesses.append(debugVideoSubprocess)
+
         print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
         for errorIndex, error, executionSessionId, stepNumber in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds, newErrorOriginalStepNumbers):
             bug = BugModel()
@@ -265,6 +272,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             bug.executionSessionId = executionSessionId
             bug.stepNumber = stepNumber
             bug.error = error
+            bug.testingRunId = testStep.testingRunId
             bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
 
             bugTextFile = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")

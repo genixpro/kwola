@@ -28,6 +28,8 @@ class ExecutionSession(Document):
 
     testingStepId = StringField()
 
+    testingRunId = StringField(required=False)
+
     startTime = DateTimeField(max_length=200, required=False)
 
     endTime = DateTimeField(max_length=200, required=False)
