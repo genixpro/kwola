@@ -26,6 +26,8 @@ from mongoengine import *
 class TrainingStep(Document):
     id = CustomIDField()
 
+    owner = StringField()
+
     applicationId = StringField()
 
     trainingSequenceId = StringField()

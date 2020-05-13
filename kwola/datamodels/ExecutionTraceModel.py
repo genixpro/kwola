@@ -30,6 +30,8 @@ import numpy
 class ExecutionTrace(Document):
     id = CustomIDField()
 
+    owner = StringField()
+
     time = DateField()
 
     executionSessionId = StringField()

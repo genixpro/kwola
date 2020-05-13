@@ -28,6 +28,8 @@ from mongoengine import *
 class BugModel(Document):
     id = CustomIDField()
 
+    owner = StringField()
+
     applicationId = StringField()
 
     testingStepId = StringField()

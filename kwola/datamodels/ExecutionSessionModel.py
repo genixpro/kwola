@@ -26,6 +26,8 @@ from mongoengine import *
 class ExecutionSession(Document):
     id = CustomIDField()
 
+    owner = StringField()
+
     testingStepId = StringField()
 
     testingRunId = StringField(required=False)

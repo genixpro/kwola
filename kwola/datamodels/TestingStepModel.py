@@ -28,6 +28,8 @@ import datetime
 class TestingStep(Document):
     id = CustomIDField()
 
+    owner = StringField()
+
     version = StringField(required=False)
 
     startTime = DateTimeField(required=False)

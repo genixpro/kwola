@@ -28,6 +28,8 @@ from mongoengine import *
 class TrainingSequence(Document):
     id = CustomIDField()
 
+    owner = StringField()
+
     applicationId = StringField()
 
     status = StringField()
