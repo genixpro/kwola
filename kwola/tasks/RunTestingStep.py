@@ -304,7 +304,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
-            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[0].id), "prediction", True, True, "debug_videos"))
+            debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[0].id), "prediction", True, True, None, "debug_videos"))
             debugVideoSubprocess1.start()
             atexit.register(lambda: debugVideoSubprocess1.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess1)
@@ -312,7 +312,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             # Leave a gap between the two to reduce collision
             time.sleep(5)
 
-            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, "debug_videos"))
+            debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, None, "debug_videos"))
             debugVideoSubprocess2.start()
             atexit.register(lambda: debugVideoSubprocess2.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess2)
