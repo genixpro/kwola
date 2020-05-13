@@ -24,6 +24,12 @@ from .DiskUtilities import saveObjectToDisk, loadObjectFromDisk
 from mongoengine import *
 
 class TrainingStep(Document):
+    meta = {
+        'indexes': [
+            ('owner',),
+        ]
+    }
+
     id = CustomIDField()
 
     owner = StringField()

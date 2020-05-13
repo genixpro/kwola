@@ -28,6 +28,14 @@ from mongoengine import *
 import numpy
 
 class ExecutionTrace(Document):
+    meta = {
+        'indexes': [
+            ('owner',),
+            ('owner', 'executionSessionId'),
+            ('owner', 'testingStepId')
+        ]
+    }
+
     id = CustomIDField()
 
     owner = StringField()

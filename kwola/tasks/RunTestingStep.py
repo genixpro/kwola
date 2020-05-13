@@ -135,7 +135,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         executionSessions = [
             ExecutionSession(
                 id=str(testingStepId) + "_session_" + str(sessionN),
-                owner=testStep.ower,
+                owner=testStep.owner,
                 testingStepId=str(testingStepId),
                 testingRunId=testStep.testingRunId,
                 startTime=datetime.now(),

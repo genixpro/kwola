@@ -26,6 +26,12 @@ from mongoengine import *
 import datetime
 
 class TestingStep(Document):
+    meta = {
+        'indexes': [
+            ('owner',)
+        ]
+    }
+
     id = CustomIDField()
 
     owner = StringField()

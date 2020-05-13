@@ -24,6 +24,14 @@ from .DiskUtilities import saveObjectToDisk, loadObjectFromDisk
 from mongoengine import *
 
 class ExecutionSession(Document):
+    meta = {
+        'indexes': [
+            ('owner',),
+            ('owner', 'testingStepId', 'startTime'),
+            ('owner', 'testingRunId', 'startTime')
+        ]
+    }
+
     id = CustomIDField()
 
     owner = StringField()

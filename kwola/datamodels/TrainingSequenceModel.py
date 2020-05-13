@@ -26,6 +26,12 @@ from mongoengine import *
 
 
 class TrainingSequence(Document):
+    meta = {
+        'indexes': [
+            ('owner',),
+        ]
+    }
+
     id = CustomIDField()
 
     owner = StringField()
