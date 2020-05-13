@@ -99,7 +99,10 @@ def loadAllBugs(config):
             bugId = bugId.replace(".gz", "")
             bugId = bugId.replace(".pickle", "")
 
-            bugs.append(BugModel.loadFromDisk(bugId, config))
+            bug = BugModel.loadFromDisk(bugId, config)
+
+            if bug is not None:
+                bugs.append(bug)
 
     return bugs
 
@@ -274,6 +277,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             bug.error = error
             bug.testingRunId = testStep.testingRunId
             bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
+            bug.saveToDisk(config)
 
             bugTextFile = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")
             with open(bugTextFile, "wt") as file:

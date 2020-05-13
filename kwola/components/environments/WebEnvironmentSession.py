@@ -262,6 +262,9 @@ class WebEnvironmentSession:
         """
             This method is used to perform the automatic heuristic based login.
         """
+        time.sleep(2)
+        self.waitUntilNoNetworkActivity()
+
         emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
 
         # check to see if there is a "login" button that we need to click first to expose
@@ -311,7 +314,7 @@ class WebEnvironmentSession:
         success2 = self.performActionInBrowser(passwordTypeAction)
         success3 = self.performActionInBrowser(loginClickAction)
 
-        time.sleep(1)
+        time.sleep(2)
         self.waitUntilNoNetworkActivity()
 
         didURLChange = bool(startURL != self.driver.current_url)
