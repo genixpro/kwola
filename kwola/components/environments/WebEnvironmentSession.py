@@ -64,8 +64,10 @@ class WebEnvironmentSession:
 
         chrome_options = Options()
         chrome_options.headless = config['web_session_headless']
-        chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
-        chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
+        if config['web_session_enable_shared_chrome_cache']:
+            chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
+            chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
+
         chrome_options.add_argument(f"--no-sandbox")
 
         capabilities = webdriver.DesiredCapabilities.CHROME
