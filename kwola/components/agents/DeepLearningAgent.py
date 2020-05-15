@@ -20,6 +20,7 @@
 
 
 from ...config.config import Configuration
+from ...config.logger import getLogger
 from ...datamodels.actions.ClickTapAction import ClickTapAction
 from ...datamodels.actions.ClearFieldAction import ClearFieldAction
 from ...datamodels.actions.RightClickAction import RightClickAction
@@ -956,11 +957,11 @@ class DeepLearningAgent:
 
             # We give the user a warning since this situation should be pretty rare. If its coming up a lot,
             # that would indicate something ver wrong.
-            print(datetime.now(), f"[{os.getpid()}]", "Warning, there were no action maps to choose from when"
+            getLogger().warning(f"[{os.getpid()}] Warning, there were no action maps to choose from when"
                                                       " selecting a random action. Choosing a random x,y coordinate"
                                                       " completely at random, anywhere on the screen and choosing"
                                                       " any random action to execute at that coordinate. Its the"
-                                                      " only available option.", flush=True)
+                                                      " only available option.")
 
             return actionX, actionY, actionType
 
@@ -1697,10 +1698,9 @@ class DeepLearningAgent:
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
 
-            print(datetime.now(), f"[{os.getpid()}]", "Completed debug image", fileName, flush=True)
+            getLogger().info(f"[{os.getpid()}] Completed debug image {fileName}")
         except Exception:
-            traceback.print_exc()
-            print(datetime.now(), f"[{os.getpid()}]", "Failed to create debug image!", flush=True)
+            getLogger().error(f"[{os.getpid()}] Failed to create debug image!\n{traceback.format_exc()}")
 
     def createRewardPixelMask(self, processedImage, x, y):
         """
@@ -2298,25 +2298,29 @@ class DeepLearningAgent:
             # The optimizer will update based on all of the accumulated gradients from the loops above.
             self.optimizer.step()
         else:
+            message = ""
+
             # This else statement should only happen if there is a significant error in the neural network
             # itself that is leading to NaN values in the results. So here, we print out all of the loss
             # values for all of the batchs to help you track down where the error is.
-            print(datetime.now(), f"[{os.getpid()}]", "ERROR! NaN detected in loss calculation. Skipping optimization step.")
+            message += f"[{os.getpid()}] ERROR! NaN detected in loss calculation. Skipping optimization step."
             for batchIndex, batchResult in batchResultTensors:
                 presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
                 advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
                 predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
                 totalSampleLosses, batch = batchResult
 
-                print(datetime.now(), f"[{os.getpid()}]", "Batch", batchIndex)
-                print(datetime.now(), f"[{os.getpid()}]", "presentRewardLoss", float(presentRewardLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "discountedFutureRewardLoss", float(discountedFutureRewardLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "stateValueLoss", float(stateValueLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "advantageLoss", float(advantageLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "actionProbabilityLoss", float(actionProbabilityLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "tracePredictionLoss", float(tracePredictionLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "predictedExecutionFeaturesLoss", float(predictedExecutionFeaturesLoss.data.item()))
-                print(datetime.now(), f"[{os.getpid()}]", "predictedCursorLoss", float(predictedCursorLoss.data.item()), flush=True)
+                message += f"[{os.getpid()}] Batch {batchIndex}"
+                message += f"[{os.getpid()}] presentRewardLoss {float(presentRewardLoss.data.item())}"
+                message += f"[{os.getpid()}] discountedFutureRewardLoss {float(discountedFutureRewardLoss.data.item())}"
+                message += f"[{os.getpid()}] stateValueLoss {float(stateValueLoss.data.item())}"
+                message += f"[{os.getpid()}] advantageLoss {float(advantageLoss.data.item())}"
+                message += f"[{os.getpid()}] actionProbabilityLoss {float(actionProbabilityLoss.data.item())}"
+                message += f"[{os.getpid()}] tracePredictionLoss {float(tracePredictionLoss.data.item())}"
+                message += f"[{os.getpid()}] predictedExecutionFeaturesLoss {float(predictedExecutionFeaturesLoss.data.item())}"
+                message += f"[{os.getpid()}] predictedCursorLoss {float(predictedCursorLoss.data.item())}"
+
+            getLogger().critical(message)
 
             return
 
@@ -2445,7 +2449,7 @@ class DeepLearningAgent:
 
 
         if tooManyCount > 0:
-            print(f"Warning: The number of symbols detected in the application has exceeded the size of the dictionary by {tooManyCount} symbols. "
+            getLogger().warning(f"Warning: The number of symbols detected in the application has exceeded the size of the dictionary by {tooManyCount} symbols. "
                   "These are not able to be added to the dictionary and thus won't be considered by the model. Try increasing the symbol_dictionary_size "
                   "parameter.")
 

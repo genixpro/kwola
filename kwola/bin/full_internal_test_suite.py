@@ -20,11 +20,14 @@
 
 import unittest
 from ..diagnostics.test_installation import testInstallation
+from ..config.logger import getLogger
+import logging
 
 def main():
     """
         This is the entry point for for the kwola full testing sequence.
     """
+    getLogger().setLevel(logging.INFO)
     success = testInstallation(verbose=True)
     if not success:
         print(

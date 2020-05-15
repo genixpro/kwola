@@ -19,6 +19,7 @@
 #
 
 
+from ..config.logger import getLogger
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.ManagedTaskSubprocess import ManagedTaskSubprocess
@@ -62,7 +63,7 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
 
 
 def runRandomInitialization(config, trainingSequence, exitOnFail=True):
-    print(datetime.now(), f"[{os.getpid()}]", "Starting random testing sequences for initialization", flush=True)
+    getLogger().info(f"[{os.getpid()}] Starting random testing sequences for initialization")
 
     trainingSequence.initializationTestingSteps = []
 
@@ -84,11 +85,11 @@ def runRandomInitialization(config, trainingSequence, exitOnFail=True):
             else:
                 updateModelSymbols(config, result['testingStepId'])
 
-            print(datetime.now(), f"[{os.getpid()}]", "Random Testing Sequence Completed", flush=True)
+            getLogger().info(f"[{os.getpid()}] Random Testing Sequence Completed")
 
     # Save the training sequence with all the data on the initialization sequences
     trainingSequence.saveToDisk(config)
-    print(datetime.now(), f"[{os.getpid()}]", "Random initialization completed", flush=True)
+    getLogger().info(f"[{os.getpid()}] Random initialization completed")
 
 
 def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber, coordinatorTempFileName):
@@ -109,15 +110,14 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
             trainingSequence.trainingSteps.append(trainingStep)
             trainingSequence.saveToDisk(config)
         else:
-            print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
+            getLogger().error(f"[{os.getpid()}] Training task subprocess appears to have failed")
 
         result['finishTime'] = datetime.now()
 
         return result
 
     except Exception as e:
-        traceback.print_exc()
-        print(datetime.now(), f"[{os.getpid()}]", "Training task subprocess appears to have failed", flush=True)
+        getLogger().error(f"[{os.getpid()}] Training task subprocess appears to have failed. {traceback.format_exc()}")
 
 
 def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugVideo=False):
@@ -159,7 +159,7 @@ def updateModelSymbols(config, testingStepId):
 
         totalNewSymbols += agent.assignNewSymbols(traces)
 
-    print(datetime.now(), f"[{os.getpid()}]", f"Added {totalNewSymbols} new symbols from testing step {testingStepId}", flush=True)
+    getLogger().info(f"[{os.getpid()}] Added {totalNewSymbols} new symbols from testing step {testingStepId}")
 
     agent.save()
 
@@ -218,7 +218,7 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                 raise RuntimeError("One of the testing / training loops failed and did not return successfully. Exiting the training loop.")
 
             if not anyFailures:
-                print(datetime.now(), f"[{os.getpid()}]", "Updating the symbols table", flush=True)
+                getLogger().info(f"[{os.getpid()}] Updating the symbols table")
                 for future in testStepFutures:
                     result = future.result()
                     testingStepId = result['testingStepId']
@@ -242,7 +242,7 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                     config['iterations_per_training_step'] = max(5, config['iterations_per_training_step'] - config['iterations_per_training_step_adjustment_size_per_loop'])
                 config.saveConfig()
 
-            print(datetime.now(), f"[{os.getpid()}]", "Completed one parallel training & testing step! Hooray!", flush=True)
+            getLogger().info(f"[{os.getpid()}] Completed one parallel training & testing step! Hooray!")
 
             stepsCompleted += 1
 

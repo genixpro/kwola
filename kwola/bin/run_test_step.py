@@ -25,11 +25,14 @@ from ..datamodels.TestingStepModel import TestingStep
 from ..tasks import RunTestingStep
 from .main import getConfigurationDirFromCommandLineArgs
 from ..diagnostics.test_installation import testInstallation
+from ..config.logger import getLogger
+import logging
 
 def main():
     """
         This is the entry point for the Kwola secondary command, kwola_run_test_step.
     """
+    getLogger().setLevel(logging.INFO)
     success = testInstallation(verbose=True)
     if not success:
         print("Refusing to start testing step. There appears to be a problem with your Kwola installation or environment.")

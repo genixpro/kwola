@@ -19,6 +19,7 @@
 #
 
 
+from ..config.logger import getLogger
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.TaskProcess import TaskProcess
@@ -108,7 +109,7 @@ def loadAllBugs(config):
 
 
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
-    print(datetime.now(), f"[{os.getpid()}]", "Starting New Testing Sequence", flush=True)
+    getLogger().info(f"[{os.getpid()}] Starting New Testing Sequence")
 
     returnValue = {'success': True}
 
@@ -196,7 +197,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             os.unlink(resultFileName)
 
             if stepsRemaining % config['testing_print_every'] == 0:
-                print(datetime.now(), f"[{os.getpid()}]", f"Finished {step + 1} testing actions.", flush=True)
+                getLogger().info(f"[{os.getpid()}] Finished {step + 1} testing actions.")
 
             traces = environment.runActions(actions, [executionSession.id for executionSession in executionSessions])
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
@@ -234,13 +235,12 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
             step += 1
             del traces
-            print("", end="", sep="", flush=True)
 
         for subProcessCommandQueue, subProcessResultQueue, subProcess in subProcesses:
             subProcessCommandQueue.put("quit")
             subProcess.join()
 
-        print(datetime.now(), f"[{os.getpid()}]", f"Creating movies for the execution sessions of this testing sequence.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Creating movies for the execution sessions of this testing sequence.")
         videoPaths = environment.createMovies()
 
         kwolaVideoDirectory = config.getKwolaUserDataDirectory("videos")
@@ -252,11 +252,11 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         totalRewards = []
         for session in executionSessions:
-            print(datetime.now(), f"[{os.getpid()}]", f"Session {session.tabNumber} finished with total reward: {session.totalReward:.2f}", flush=True)
+            getLogger().info(f"[{os.getpid()}] Session {session.tabNumber} finished with total reward: {session.totalReward:.3f}")
             session.saveToDisk(config)
             totalRewards.append(session.totalReward)
 
-        print(datetime.now(), f"[{os.getpid()}]", f"Mean total reward of all sessions: ", numpy.mean(totalRewards), flush=True)
+        getLogger().info(f"[{os.getpid()}] Mean total reward of all sessions: {numpy.mean(totalRewards):.3f}")
 
         testStep.bugsFound = len(newErrorsThisTestingStep)
         testStep.errors = newErrorsThisTestingStep
@@ -269,7 +269,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
-        print(datetime.now(), f"[{os.getpid()}]", f"Found {len(newErrorsThisTestingStep)} new unique errors this session.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Found {len(newErrorsThisTestingStep)} new unique errors this session.")
         for errorIndex, error, executionSessionId, stepNumber in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds, newErrorOriginalStepNumbers):
             bug = BugModel()
             bug.id = CustomIDField.generateNewUUID(BugModel, config)
@@ -296,10 +296,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
-            print(datetime.now(), f"[{os.getpid()}]", f"")
-            print(datetime.now(), f"[{os.getpid()}]", f"Bug #{errorIndex + 1}:")
-            print(datetime.now(), f"[{os.getpid()}]", bug.generateBugText(), flush=True)
-            print(datetime.now(), f"[{os.getpid()}]", f"")
+            getLogger().info(f"\n\n[{os.getpid()}] Bug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
 
 
         testStep.status = "completed"
@@ -329,19 +326,18 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         del environment
 
         for session in executionSessions:
-            print(datetime.now(), f"[{os.getpid()}]", f"Preparing samples for {session.id} and adding them to the sample cache.", flush=True)
+            getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
             addExecutionSessionToSampleCache(session.id, config)
 
         for debugVideoSubprocess in debugVideoSubprocesses:
             debugVideoSubprocess.join()
 
     except Exception as e:
-        traceback.print_exc()
-        print(datetime.now(), f"[{os.getpid()}]", "Unhandled exception occurred during testing sequence", flush=True)
+        getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
         returnValue['success'] = False
 
     # This print statement will trigger the parent manager process to kill this process.
-    print(datetime.now(), f"[{os.getpid()}]", "Finished Running Testing Sequence!", flush=True)
+    getLogger().info(f"[{os.getpid()}] Finished Running Testing Sequence!")
 
     return returnValue
 

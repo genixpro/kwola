@@ -18,7 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-
+from ..config.logger import getLogger
 from ..tasks.TaskProcess import TaskProcess
 from datetime import datetime
 import atexit
@@ -109,7 +109,7 @@ class ManagedTaskSubprocess:
 
     def extractResultFromOutput(self):
         if TaskProcess.resultStartString not in self.output or TaskProcess.resultFinishString not in self.output:
-            print(datetime.now(), f"[{os.getpid()}]", "Error! Unable to extract result from the subprocess. Its possible the subprocess may have died", flush=True)
+            getLogger().error(f"[{os.getpid()}] Error! Unable to extract result from the subprocess. Its possible the subprocess may have died")
             return None
         else:
             resultStart = self.output.index(TaskProcess.resultStartString)
@@ -149,18 +149,16 @@ class ManagedTaskSubprocess:
             else:
                 time.sleep(waitBetweenStdoutUpdates)
 
-        print(datetime.now(), f"[{os.getpid()}]", "Terminating task subprocess, task finished.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Terminating task subprocess, task finished.")
         self.alive = False
         self.stopProcessBothMethods()
 
         additionalOutput = self.getLatestLogOutput()
         if additionalOutput is not None:
             self.output += additionalOutput
-            print(additionalOutput, sep="", end="", flush=True)
 
         result = self.extractResultFromOutput()
-        print(datetime.now(), f"[{os.getpid()}]", "Task Subprocess finished and gave back result", flush=True)
-        print(json.dumps(result, indent=4), flush=True)
+        getLogger().info(f"[{os.getpid()}] Task Subprocess finished and gave back result:\n{json.dumps(result, indent=4)}")
 
         return result
 
@@ -170,7 +168,7 @@ class ManagedTaskSubprocess:
         while self.alive:
             elapsedSeconds = (datetime.now() - self.startTime).total_seconds()
             if elapsedSeconds > self.timeout:
-                print(datetime.now(), f"[{os.getpid()}]", "Killing Process due to too much time elapsed", flush=True)
+                getLogger().error(f"[{os.getpid()}] Killing Process due to too much time elapsed")
                 self.stopProcessBothMethods()
 
             time.sleep(1)

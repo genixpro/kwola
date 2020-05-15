@@ -19,6 +19,7 @@
 #
 
 
+from ...config.logger import getLogger
 from ...components.proxy.JSRewriteProxy import JSRewriteProxy
 from ...components.proxy.PathTracer import PathTracer
 from .WebEnvironmentSession import WebEnvironmentSession
@@ -51,7 +52,7 @@ class WebEnvironment:
             if sessionLimit is not None:
                 sessionCount = min(sessionLimit, sessionCount)
 
-            print(datetime.now(), f"[{os.getpid()}]", f"Starting up {sessionCount} parallel browser sessions.")
+            getLogger().info(f"[{os.getpid()}] Starting up {sessionCount} parallel browser sessions.")
 
             sessionFutures = [
                 executor.submit(createSession, sessionNumber) for sessionNumber in range(sessionCount)

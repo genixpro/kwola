@@ -19,6 +19,7 @@
 #
 
 
+from ...config.logger import getLogger
 from ...datamodels.ActionMapModel import ActionMap
 from ...datamodels.actions.ClearFieldAction import ClearFieldAction
 from ...datamodels.actions.ClickTapAction import ClickTapAction
@@ -209,11 +210,9 @@ class WebEnvironmentSession:
             time.sleep(0.10)
             elapsedTime = abs((datetime.now() - startTime).total_seconds())
             if elapsedTime > self.config['web_session_no_network_activity_timeout']:
-                print(datetime.now(), f"[{os.getpid()}]",
-                      "Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
+                getLogger().warning(f"[{os.getpid()}] Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
                       " stop network activity all on its own? Try the config variable tweaking web_session_no_network_activity_wait_time down"
-                      " if constant network activity is the expected behaviour.",
-                      flush=True)
+                      " if constant network activity is the expected behaviour.")
                 break
 
     def movieFileName(self):
@@ -226,9 +225,10 @@ class WebEnvironmentSession:
         result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         if result.returncode != 0:
-            print(f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:")
-            print(str(result.stdout, 'utf8'))
-            print(str(result.stderr, 'utf8'))
+            errorMsg = f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:\n"
+            errorMsg += str(result.stdout, 'utf8') + "\n"
+            errorMsg += str(result.stderr, 'utf8') + "\n"
+            getLogger().error(errorMsg)
 
         return self.movieFilePath()
 
@@ -287,7 +287,7 @@ class WebEnvironmentSession:
 
 
         if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
-            print(datetime.now(), f"[{os.getpid()}]", "Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.", flush=True)
+            getLogger().warning(f"[{os.getpid()}] Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.")
             return
 
         startURL = self.driver.current_url
@@ -323,17 +323,11 @@ class WebEnvironmentSession:
 
         if success1 and success2 and success3:
             if didURLChange:
-                print(datetime.now(), f"[{os.getpid()}]",
-                      "Heuristic autologin appears to have worked!",
-                      flush=True)
+                getLogger().info(f"[{os.getpid()}] Heuristic autologin appears to have worked!")
             else:
-                print(datetime.now(), f"[{os.getpid()}]",
-                      "Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.",
-                      flush=True)
+                getLogger().warning(f"[{os.getpid()}] Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
         else:
-            print(datetime.now(), f"[{os.getpid()}]",
-                  "There was an error running one of the actions required for the heuristic auto login.",
-                  flush=True)
+            getLogger().warning(f"[{os.getpid()}] There was an error running one of the actions required for the heuristic auto login.")
 
     def extractBranchTrace(self):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
@@ -357,14 +351,14 @@ class WebEnvironmentSession:
         try:
             self.driver.execute_script(injected_javascript)
         except selenium.common.exceptions.TimeoutException:
-            print(datetime.now(), f"[{os.getpid()}]", "Warning, timeout while running the script to reset the kwola line counters.")
+            getLogger().warning(f"[{os.getpid()}] Warning, timeout while running the script to reset the kwola line counters.")
 
         if result is not None:
             # Cast everything to a numpy array so we don't have to do it later
             for fileName, vector in result.items():
                 result[fileName] = numpy.array(vector)
         else:
-            print(datetime.now(), f"[{os.getpid()}]", "Warning, did not find the kwola line counter object in the browser. This usually "
+            getLogger().warning(f"[{os.getpid()}] Warning, did not find the kwola line counter object in the browser. This usually "
                   "indicates that there was an error either in translating the javascript, an error "
                   "in loading the page, or that the page has absolutely no javascript. "
                   f"On page: {self.driver.current_url}")
@@ -539,12 +533,12 @@ class WebEnvironmentSession:
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
                     if self.config['web_session_print_every_action']:
-                        print(datetime.now(), f"[{os.getpid()}]", "Clicking", action.x, action.y, action.source, flush=True)
+                        getLogger().info(f"[{os.getpid()}] Clicking {action.x} {action.y} from {action.source}")
                     actionChain.click(on_element=element)
                     actionChain.pause(self.config.web_session_perform_action_wait_time)
                 elif action.times == 2:
                     if self.config['web_session_print_every_action']:
-                        print(datetime.now(), f"[{os.getpid()}]", "Double Clicking", action.x, action.y, action.source, flush=True)
+                        getLogger().info(f"[{os.getpid()}] Double Clicking {action.x} {action.y} from {action.source}")
                     actionChain.double_click(on_element=element)
                     actionChain.pause(self.config.web_session_perform_action_wait_time)
 
@@ -552,7 +546,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), f"[{os.getpid()}]", "Right Clicking", action.x, action.y, action.source, flush=True)
+                    getLogger().info(f"[{os.getpid()}] Right Clicking {action.x} {action.y} from {action.source}")
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
@@ -561,7 +555,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), f"[{os.getpid()}]", "Typing", action.text, "at", action.x, action.y, action.source, flush=True)
+                    getLogger().info(f"[{os.getpid()}] Typing {action.text} at {action.x} {action.y} from {action.source}")
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
@@ -572,45 +566,45 @@ class WebEnvironmentSession:
 
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
-                    print(datetime.now(), f"[{os.getpid()}]", "Clearing field at", action.x, action.y, action.source, flush=True)
+                    getLogger().info(f"[{os.getpid()}] Clearing field at {action.x} {action.y} from {action.source}")
                 element.clear()
 
             if isinstance(action, WaitAction):
-                print(datetime.now(), f"[{os.getpid()}]", "Waiting for ", action.time, "at", action.x, action.y, action.source)
+                getLogger().info(f"[{os.getpid()}] Waiting for {action.time} at {action.x} {action.y} from {action.source}")
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MoveTargetOutOfBoundsException exception!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MoveTargetOutOfBoundsException exception!")
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a StaleElementReferenceException!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a StaleElementReferenceException!")
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a InvalidElementStateException!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a InvalidElementStateException!")
 
             success = False
         except selenium.common.exceptions.TimeoutException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a TimeoutException!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a TimeoutException!")
 
             success = False
         except selenium.common.exceptions.JavascriptException as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a JavascriptException!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a JavascriptException!")
 
             success = False
         except urllib3.exceptions.MaxRetryError as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MaxRetryError!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MaxRetryError!")
 
             success = False
         except AttributeError as e:
             if self.config['web_session_print_every_action_failure']:
-                print(datetime.now(), f"[{os.getpid()}]", f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to an AttributeError!", flush=True)
+                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to an AttributeError!")
 
             success = False
 
@@ -631,7 +625,7 @@ class WebEnvironmentSession:
             # If the browser went off site and off site links are disabled, then we send it back to the url it started from
             if self.config['prevent_offsite_links']:
                 if self.driver.current_url != "data:," and self.getHostRoot(self.driver.current_url) != self.targetHostRoot:
-                    print(datetime.now(), f"[{os.getpid()}]", f"The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
+                    getLogger().info(f"[{os.getpid()}] The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
                     self.driver.get(priorURL)
                     self.waitUntilNoNetworkActivity()
         except selenium.common.exceptions.TimeoutException:
@@ -640,7 +634,7 @@ class WebEnvironmentSession:
     def checkLoadFailure(self):
         try:
             if self.driver.current_url == "data:,":
-                print(datetime.now(), f"[{os.getpid()}]", f"The browser session needed to be reset back to the origin url {self.targetURL}")
+                getLogger().warning(f"[{os.getpid()}] The browser session needed to be reset back to the origin url {self.targetURL}")
                 self.driver.get(self.targetURL)
                 self.waitUntilNoNetworkActivity()
         except selenium.common.exceptions.TimeoutException:
@@ -697,21 +691,27 @@ class WebEnvironmentSession:
                     kwolaJSRewriteErrorFound = True
 
             if kwolaJSRewriteErrorFound:
-                print(datetime.now(), f"[{os.getpid()}]", f"Error. There was a bug generated by the underlying javascript application, "
-                                                          f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola "
-                                                          f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting "
-                                                          f"issue.")
-                print(datetime.now(), f"[{os.getpid()}]", f"{msg} at line {lineno} column {colno} in {source}")
-                print(datetime.now(), f"[{os.getpid()}]", str(stack), flush=True)
+                logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
+                          f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
+                          f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
+                          f"issue. \n"
+                
+                logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
+                
+                logMsgString += f"{str(stack)}\n"
+                
+                getLogger().error(logMsgString)
             else:
                 error = ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
                 executionTrace.errorsDetected.append(error)
                 errorHash = error.computeHash()
 
                 if errorHash not in self.errorHashes:
-                    print(datetime.now(), f"[{os.getpid()}]", "An unhandled exception was detected in client application:")
-                    print(datetime.now(), f"[{os.getpid()}]", f"{msg} at line {lineno} column {colno} in {source}")
-                    print(datetime.now(), f"[{os.getpid()}]", str(stack), flush=True)
+                    logMsgString = f"[{os.getpid()}] An unhandled exception was detected in client application:\n"
+                    logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
+                    logMsgString += f"{str(stack)}"
+                    
+                    getLogger().info(logMsgString)
 
                     self.errorHashes.add(errorHash)
                     hadNewError = True
@@ -728,20 +728,25 @@ class WebEnvironmentSession:
                         kwolaJSRewriteErrorFound = True
 
                 if kwolaJSRewriteErrorFound:
-                    print(datetime.now(), f"[{os.getpid()}]", f"Error. There was a bug generated by the underlying javascript application, "
-                                                              f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola "
-                                                              f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting "
-                                                              f"issue.")
-                    print(datetime.now(), f"[{os.getpid()}]", message, flush=True)
+                    logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
+                              f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
+                              f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
+                              f"issue.\n"
+                    
+                    logMsgString += f"{message}\n"
+                    
+                    getLogger().error(logMsgString)
                 else:
                     error = LogError(message=message, logLevel=log['level'])
                     executionTrace.errorsDetected.append(error)
                     errorHash = error.computeHash()
 
                     if errorHash not in self.errorHashes:
-                        print(datetime.now(), f"[{os.getpid()}]", "A log error was detected in client application:")
-                        print(datetime.now(), f"[{os.getpid()}]", message, flush=True)
-
+                        logMsgString = f"[{os.getpid()}] A log error was detected in client application:\n"                        
+                        logMsgString += f"{message}\n"
+                        
+                        getLogger().info(logMsgString)
+                        
                         self.errorHashes.add(errorHash)
                         hadNewError = True
 
@@ -820,7 +825,7 @@ class WebEnvironmentSession:
                 if len(branchTrace[fileName]) == len(self.cumulativeBranchTrace[fileName]):
                     self.cumulativeBranchTrace[fileName] += branchTrace[fileName]
                 else:
-                    print(f"Warning! The file with fileName {fileName} has changed the size of its trace vector. This "
+                    getLogger().warning(f"Warning! The file with fileName {fileName} has changed the size of its trace vector. This "
                           f"is very unusual and could indicate some strange situation with dynamically loaded javascript")
             else:
                 self.cumulativeBranchTrace[fileName] = branchTrace[fileName]

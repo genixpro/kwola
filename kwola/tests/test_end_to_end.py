@@ -4,10 +4,11 @@ from ..tasks import TrainAgentLoop
 from ..config.config import Configuration
 import shutil
 import traceback
+from ..config.logger import getLogger
 
 class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):
-        print(f"\nStarting a click-only test targeting the URL {url}")
+        getLogger().info(f"\nStarting a click-only test targeting the URL {url}")
 
         configDir = Configuration.createNewLocalKwolaConfigDir("testing",
                                                                url=url,
@@ -24,10 +25,9 @@ class TestEndToEnd(unittest.TestCase):
                                                                )
         try:
             TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
-            print(f"Click-only test for URL {url} has completed successfully")
+            getLogger().info(f"Click-only test for URL {url} has completed successfully")
         except Exception:
-            print(f"Click-only test for URL {url} has failed.")
-            traceback.print_exc()
+            getLogger().error(f"Click-only test for URL {url} has failed. {traceback.format_exc()}")
             raise
         finally:
             shutil.rmtree(configDir)

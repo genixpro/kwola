@@ -19,6 +19,7 @@
 #
 
 
+from ..config.logger import getLogger
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.TaskProcess import TaskProcess
@@ -141,8 +142,7 @@ def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessio
 
         return fileName, cacheHit
     except Exception:
-        traceback.print_exc()
-        print("", flush=True)
+        getLogger().critical(traceback.format_exc())
         raise
 
 
@@ -229,8 +229,7 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
 
         return cacheHitRate
     except Exception:
-        traceback.print_exc()
-        print("prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue", flush=True)
+        getLogger().error(f"prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue.\n{traceback.format_exc()}")
         subProcessCommandQueue.put(("batch", {}))
         return 1.0
 
@@ -263,13 +262,13 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
     try:
         config = Configuration(configDir)
 
-        print(datetime.now(), f"[{os.getpid()}]", "Starting initialization for batch preparation sub process.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Starting initialization for batch preparation sub process.")
 
         testingSteps = sorted([step for step in loadAllTestingSteps(config) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
         testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
 
         if len(testingSteps) == 0:
-            print(datetime.now(), f"[{os.getpid()}]", "Error, no test sequences to train on for training step.", flush=True)
+            getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
             return
 
         # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
@@ -284,7 +283,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
-        print(datetime.now(), f"[{os.getpid()}]", "Starting loading of execution trace weight datas.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Starting loading of execution trace weight datas.")
 
         executionTraceWeightDatas = []
         executionTraceWeightDataIdMap = {}
@@ -300,10 +299,10 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                     executionTraceWeightDatas.append(traceWeightData)
                     executionTraceWeightDataIdMap[str(traceWeightData['id'])] = traceWeightData
 
-        print(datetime.now(), f"[{os.getpid()}]", f"Finished loading of weight datas for {len(executionTraceWeightDatas)} execution traces.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Finished loading of weight datas for {len(executionTraceWeightDatas)} execution traces.")
 
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
-        print(datetime.now(), f"[{os.getpid()}]", "Finished initialization for batch preparation sub process.", flush=True)
+        getLogger().info(f"[{os.getpid()}] Finished initialization for batch preparation sub process.")
 
         processPool = multiprocessingpool.Pool(processes=config['training_initial_batch_prep_workers'])
         backgroundTraceSaveProcessPool = multiprocessingpool.Pool(processes=config['training_background_trace_save_workers'])
@@ -369,7 +368,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                         lastProcessPoolFutures = list(currentProcessPoolFutures)
                         currentProcessPoolFutures = []
 
-                        print(datetime.now(), f"[{os.getpid()}]", f"Resetting batch prep process pool. Cache full state. New workers: {config['training_cache_full_batch_prep_workers']}")
+                        getLogger().debug(f"[{os.getpid()}] Resetting batch prep process pool. Cache full state. New workers: {config['training_cache_full_batch_prep_workers']}")
 
                         processPool = multiprocessingpool.Pool(processes=config['training_cache_full_batch_prep_workers'])
 
@@ -380,7 +379,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
                         lastProcessPoolFutures = list(currentProcessPoolFutures)
                         currentProcessPoolFutures = []
 
-                        print(datetime.now(), f"[{os.getpid()}]", f"Resetting batch prep process pool. Cache starved state. New workers: {config['training_max_batch_prep_workers']}")
+                        getLogger().debug(f"[{os.getpid()}] Resetting batch prep process pool. Cache starved state. New workers: {config['training_max_batch_prep_workers']}")
 
                         processPool = multiprocessingpool.Pool(processes=config['training_max_batch_prep_workers'])
 
@@ -404,10 +403,7 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
             lastProcessPool.terminate()
 
     except Exception:
-        print(datetime.now(), f"[{os.getpid()}]", f"Error occurred in the batch preparation sub-process. Exiting.", flush=True)
-        traceback.print_exc()
-        sys.stdout.flush()
-        sys.stderr.flush()
+        getLogger().error(f"[{os.getpid()}] Error occurred in the batch preparation sub-process. Exiting. {traceback.format_exc()}")
 
 
 def prepareAndLoadBatch(subProcessCommandQueue, subProcessBatchResultQueue):
@@ -440,26 +436,29 @@ def printMovingAverageLosses(config, trainingStep):
     averageTotalLoss = numpy.mean(trainingStep.totalLosses[-averageStart:])
     averageTotalRebalancedLoss = numpy.mean(trainingStep.totalRebalancedLosses[-averageStart:])
 
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Reward Loss:", averageTotalRewardLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Present Reward Loss:", averagePresentRewardLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Discounted Future Reward Loss:", averageDiscountedFutureRewardLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average State Value Loss:", averageStateValueLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Advantage Loss:", averageAdvantageLoss, flush=True)
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Action Probability Loss:", averageActionProbabilityLoss, flush=True)
-    if config['enable_trace_prediction_loss']:
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Trace Prediction Loss:", averageTracePredictionLoss, flush=True)
-    if config['enable_execution_feature_prediction_loss']:
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Execution Feature Loss:", averageExecutionFeatureLoss, flush=True)
-    if config['enable_cursor_prediction_loss']:
-        print(datetime.now(), f"[{os.getpid()}]", "Moving Average Predicted Cursor Loss:", averagePredictedCursorLoss, flush=True)
+    message = f"[{os.getpid()}] "
 
-    print(datetime.now(), f"[{os.getpid()}]", "Moving Average Total Loss:", averageTotalLoss, flush=True)
+    message += f"Moving Average Total Reward Loss: {averageTotalRewardLoss}\n"
+    message += f"Moving Average Present Reward Loss: {averagePresentRewardLoss}\n"
+    message += f"Moving Average Discounted Future Reward Loss: {averageDiscountedFutureRewardLoss}\n"
+    message += f"Moving Average State Value Loss: {averageStateValueLoss}\n"
+    message += f"Moving Average Advantage Loss: {averageAdvantageLoss}\n"
+    message += f"Moving Average Action Probability Loss: {averageActionProbabilityLoss}\n"
+    if config['enable_trace_prediction_loss']:
+        message += f"Moving Average Trace Prediction Loss: {averageTracePredictionLoss}\n"
+    if config['enable_execution_feature_prediction_loss']:
+        message += f"Moving Average Execution Feature Loss: {averageExecutionFeatureLoss}\n"
+    if config['enable_cursor_prediction_loss']:
+        message += f"Moving Average Predicted Cursor Loss: {averagePredictedCursorLoss}\n"
+
+    message += f"Moving Average Total Loss: {averageTotalLoss}\n"
+    getLogger().info(message)
 
 
 def loadExecutionSession(sessionId, config):
     session = ExecutionSession.loadFromDisk(sessionId, config)
     if session is None:
-        print(datetime.now(), f"[{os.getpid()}]", f"Error! Did not find execution session {sessionId}")
+        getLogger().error(f"[{os.getpid()}] Error! Did not find execution session {sessionId}")
 
     return session
 
@@ -519,7 +518,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
                 if subprocessIndex == 9:
                     raise
         torch.cuda.set_device(gpu)
-        print(datetime.now(), f"[{os.getpid()}]", "Cuda Ready on GPU", gpu, flush=True)
+        getLogger().info(f"[{os.getpid()}] Cuda Ready on GPU {gpu}")
 
     try:
         try:
@@ -527,11 +526,11 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
         except RuntimeError:
             pass
 
-        print(datetime.now(), f"[{os.getpid()}]", "Starting Training Step", flush=True)
+        getLogger().info(f"[{os.getpid()}] Starting Training Step")
         testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
         if len(testingSteps) == 0:
-            print(datetime.now(), f"[{os.getpid()}]", "Error, no test sequences to train on for training step.", flush=True)
-            print(datetime.now(), f"[{os.getpid()}]", "==== Training Step Completed ====", flush=True)
+            getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
+            getLogger().info(f"[{os.getpid()}] ==== Training Step Completed ====")
             return {}
 
         trainingStep = TrainingStep(id=str(trainingSequenceId) + "_training_step_" + str(trainingStepIndex))
@@ -575,8 +574,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
             subProcesses.append(subProcess)
 
     except Exception as e:
-        print(datetime.now(), f"[{os.getpid()}]", f"Error occurred during initiation of training!", flush=True)
-        traceback.print_exc()
+        getLogger().error(f"[{os.getpid()}] Error occurred during initiation of training! {traceback.format_exc()}")
         return {"success": False}
 
     try:
@@ -608,14 +606,14 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
                             for subProcessCommandQueue in subProcessCommandQueues:
                                 subProcessCommandQueue.put(("starved", {}))
                             starved = True
-                            print(datetime.now(), f"[{os.getpid()}]", "GPU pipeline is starved for batches. Switching to starved state.", flush=True)
+                            getLogger().debug(f"[{os.getpid()}] GPU pipeline is starved for batches. Switching to starved state.")
                             lastStarveStateAdjustment = trainingStep.numberOfIterationsCompleted
                     else:
                         if starved:
                             for subProcessCommandQueue in subProcessCommandQueues:
                                 subProcessCommandQueue.put(("full", {}))
                             starved = False
-                            print(datetime.now(), f"[{os.getpid()}]", "GPU pipeline is full of batches. Switching to full state", flush=True)
+                            getLogger().debug(f"[{os.getpid()}] GPU pipeline is full of batches. Switching to full state")
                             lastStarveStateAdjustment = trainingStep.numberOfIterationsCompleted
 
                 batches = []
@@ -664,17 +662,17 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
                                 subProcessCommandQueue.put(("update-loss", {"executionTraceId": executionTraceId, "sampleRewardLoss": sampleRewardLoss}))
 
                 if trainingStep.numberOfIterationsCompleted % config['training_update_target_network_every'] == (config['training_update_target_network_every'] - 1):
-                    print(datetime.now(), f"[{os.getpid()}]", "Updating the target network weights to the current primary network weights.", flush=True)
+                    getLogger().info(f"[{os.getpid()}] Updating the target network weights to the current primary network weights.")
                     agent.updateTargetNetwork()
 
                 trainingStep.numberOfIterationsCompleted += 1
 
                 if trainingStep.numberOfIterationsCompleted % config['print_loss_iterations'] == (config['print_loss_iterations'] - 1):
                     if gpu is None or gpu == 0:
-                        print(datetime.now(), f"[{os.getpid()}]", "Completed", trainingStep.numberOfIterationsCompleted + 1, "batches", flush=True)
+                        getLogger().info(f"[{os.getpid()}] Completed {trainingStep.numberOfIterationsCompleted + 1} batches")
                         printMovingAverageLosses(config, trainingStep)
                         if config['print_cache_hit_rate']:
-                            print(datetime.now(), f"[{os.getpid()}]", f"Batch cache hit rate {100 * numpy.mean(recentCacheHits[-config['print_cache_hit_rate_moving_average_length']:]):.0f}%", flush=True)
+                            getLogger().info(f"[{os.getpid()}] Batch cache hit rate {100 * numpy.mean(recentCacheHits[-config['print_cache_hit_rate_moving_average_length']:]):.0f}%")
 
                 if trainingStep.numberOfIterationsCompleted % config['iterations_between_db_saves'] == (config['iterations_between_db_saves'] - 1):
                     if gpu is None or gpu == 0:
@@ -695,13 +693,12 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
             if gpu is None or gpu == 0:
                 agent.save()
                 agent.save(saveName=str(trainingStep.id))
-                print(datetime.now(), f"[{os.getpid()}]", "Agent saved!", flush=True)
+                getLogger().info(f"[{os.getpid()}] Agent saved!")
         else:
-            print(datetime.now(), f"[{os.getpid()}]", "ERROR! A NaN was detected in this models output. Not saving model.", flush=True)
+            getLogger().error(f"[{os.getpid()}] ERROR! A NaN was detected in this models output. Not saving model.")
 
     except Exception:
-        print(datetime.now(), f"[{os.getpid()}]", f"Error occurred while learning sequence!", flush=True)
-        traceback.print_exc()
+        getLogger().error(f"[{os.getpid()}] Error occurred while learning sequence!\n{traceback.format_exc()}")
         success = False
     finally:
         files = os.listdir(batchDirectory)
@@ -712,7 +709,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
         del agent
 
     # This print statement will trigger the parent manager process to kill this process.
-    print(datetime.now(), f"[{os.getpid()}]", "==== Training Step Completed ====", flush=True)
+    getLogger().info(f"[{os.getpid()}] ==== Training Step Completed ====")
     return {"trainingStepId": str(trainingStep.id), "success": success}
 
 

@@ -20,6 +20,7 @@
 
 
 from datetime import datetime
+from ...config.logger import getLogger
 from mitmproxy.script import concurrent
 import hashlib
 import os
@@ -88,10 +89,10 @@ class JSRewriteProxy:
         headers = set(flow.response.headers.keys())
         #
         # if "Integrity" in headers:
-        #     print("Deleting an Integrity header")
+        #     getLogger().info("Deleting an Integrity header")
         #     del flow.response.headers['Integrity']
         # if "integrity" in headers:
-        #     print("Deleting an Integrity header")
+        #     getLogger().info("Deleting an Integrity header")
         #     del flow.response.headers['integrity']
 
 
@@ -256,24 +257,24 @@ class JSRewriteProxy:
             if kind is not None:
                 mime = kind.mime
 
-            print(datetime.now(), f"[{os.getpid()}]", f"Error! Unable to install Kwola line-counting in the Javascript file {fileName}. Most"
+            getLogger().warning(f"[{os.getpid()}] Unable to install Kwola line-counting in the Javascript file {fileName}. Most"
                                                       f" likely this is because Babel thinks your javascript has invalid syntax, or that"
                                                       f" babel is not working / not able to find the babel-plugin-kwola / unable to"
                                                       f" transpile the javascript for some other reason. See the following truncated"
-                                                      f" output:", flush=True)
+                                                      f" output:")
 
             if len(result.stdout) > 0:
-                print(result.stdout[:cutoffLength], flush=True)
+                getLogger().warning(result.stdout[:cutoffLength])
             else:
-                print("No data in standard output", flush=True)
+                getLogger().warning("No data in standard output")
             if len(result.stderr) > 0:
-                print(result.stderr[:cutoffLength], flush=True)
+                getLogger().warning(result.stderr[:cutoffLength])
             else:
-                print("No data in standard error output", flush=True)
+                getLogger().warning("No data in standard error output")
 
             return data
         else:
-            print(datetime.now(), f"[{os.getpid()}]", f"Successfully translated {fileName} with Kwola branch counting and event tracing.", flush=True)
+            getLogger().info(f"[{os.getpid()}] Successfully translated {fileName} with Kwola branch counting and event tracing.")
             transformed = wrapperStart + result.stdout + wrapperEnd
 
             if strictMode:
@@ -337,12 +338,12 @@ class JSRewriteProxy:
                     flow.response.data.headers['Content-Length'] = str(len(transformed))
                     flow.response.data.content = transformed
                 else:
-                    print(datetime.now(), f"[{os.getpid()}]", f"Warning: Ignoring the javascript file '{fileName}' because it matches the javascript ignore keyword '{ignoreKeyword}'. "
+                    getLogger().info(f"[{os.getpid()}] Warning: Ignoring the javascript file '{fileName}' because it matches the javascript ignore keyword '{ignoreKeyword}'. "
                                                               f"This means that no learnings will take place on the code in this file. If this file is actually part of your "
                                                               f"application and should be learned on, then please modify your config file kwola.json and remove the ignore "
                                                               f"keyword '{ignoreKeyword}' from the variable 'web_session_ignored_javascript_file_keywords'. This file will be "
                                                               f"cached without Kwola line counting installed. Its faster to install line counting only in the files that need "
-                                                              f"it.", flush=True)
+                                                              f"it.")
 
                     self.saveInCache(shortFileHash, fileName, originalFileContents)
                     self.memoryCache[longFileHash] = originalFileContents
@@ -363,4 +364,4 @@ class JSRewriteProxy:
                 self.saveInCache(shortFileHash, fileName, originalFileContents)
                 self.memoryCache[longFileHash] = originalFileContents
         except Exception as e:
-            traceback.print_exc()
+            getLogger().error(traceback.format_exc())

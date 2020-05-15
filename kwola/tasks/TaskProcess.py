@@ -18,7 +18,8 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-
+from ..config.logger import getLogger
+import logging
 from datetime import datetime
 import json
 import sys
@@ -38,11 +39,11 @@ class TaskProcess:
 
 
     def run(self):
-        print(datetime.now(), f"[{os.getpid()}]", "TaskProcess: Waiting for input from stdin", flush=True)
+        getLogger().setLevel(logging.INFO)
+        getLogger().info(f"[{os.getpid()}] TaskProcess: Waiting for input from stdin")
         dataStr = sys.stdin.readline()
         data = json.loads(dataStr)
-        print(datetime.now(), f"[{os.getpid()}]", "Running process with following data:", flush=True)
-        print(json.dumps(data, indent=4), flush=True)
+        getLogger().info(f"[{os.getpid()}] Running process with following data:\n{json.dumps(data, indent=4)}")
         result = self.targetFunc(**data)
         print(TaskProcess.resultStartString, flush=True)
         print(json.dumps(result), flush=True)
