@@ -234,21 +234,24 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
         return 1.0
 
 
-def loadAllTestingSteps(config):
+def loadAllTestingSteps(config, applicationId):
     testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
 
-    testingSteps = []
+    if config['data_serialization_method'] == 'mongo':
+        return list(TestingStep.objects(applicationId=applicationId).no_dereference())
+    else:
+        testingSteps = []
 
-    for fileName in os.listdir(testStepsDir):
-        if ".lock" not in fileName:
-            stepId = fileName
-            stepId = stepId.replace(".json", "")
-            stepId = stepId.replace(".gz", "")
-            stepId = stepId.replace(".pickle", "")
+        for fileName in os.listdir(testStepsDir):
+            if ".lock" not in fileName:
+                stepId = fileName
+                stepId = stepId.replace(".json", "")
+                stepId = stepId.replace(".gz", "")
+                stepId = stepId.replace(".pickle", "")
 
-            testingSteps.append(TestingStep.loadFromDisk(stepId, config))
+                testingSteps.append(TestingStep.loadFromDisk(stepId, config))
 
-    return testingSteps
+        return testingSteps
 
 
 def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
@@ -258,13 +261,13 @@ def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
     trace.saveToDisk(config)
 
 
-def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex=0):
+def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex=0, applicationId=None):
     try:
         config = Configuration(configDir)
 
         getLogger().info(f"[{os.getpid()}] Starting initialization for batch preparation sub process.")
 
-        testingSteps = sorted([step for step in loadAllTestingSteps(config) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
+        testingSteps = sorted([step for step in loadAllTestingSteps(config, applicationId) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
         testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
 
         if len(testingSteps) == 0:
@@ -527,7 +530,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
             pass
 
         getLogger().info(f"[{os.getpid()}] Starting Training Step")
-        testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
+        testingSteps = [step for step in loadAllTestingSteps(config, applicationId) if step.status == "completed"]
         if len(testingSteps) == 0:
             getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
             getLogger().info(f"[{os.getpid()}] ==== Training Step Completed ====")
@@ -567,7 +570,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessBatchResultQueue = multiprocessing.Queue()
 
-            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex))
+            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex, applicationId))
             subProcess.start()
             atexit.register(lambda: subProcess.terminate())
 
