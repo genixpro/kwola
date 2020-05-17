@@ -36,6 +36,8 @@ class ExecutionSession(Document):
 
     owner = StringField()
 
+    applicationId = StringField()
+
     testingStepId = StringField()
 
     testingRunId = StringField(required=False)

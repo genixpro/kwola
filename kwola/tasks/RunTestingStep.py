@@ -139,6 +139,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 owner=testStep.owner,
                 testingStepId=str(testingStepId),
                 testingRunId=testStep.testingRunId,
+                applicationId=testStep.applicationId,
                 startTime=datetime.now(),
                 endTime=None,
                 tabNumber=sessionN,
@@ -203,6 +204,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
                 trace.executionSessionId = str(executionSession.id)
                 trace.testingStepId = str(testingStepId)
+                trace.applicationId = str(executionSession.applicationId)
+                trace.testingRunId = str(executionSession.testingRunId)
                 trace.owner = testStep.owner
                 trace.saveToDisk(config)
 
@@ -274,6 +277,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             bug = BugModel()
             bug.id = CustomIDField.generateNewUUID(BugModel, config)
             bug.owner = testStep.owner
+            bug.applicationId = testStep.applicationId
             bug.testingStepId = testStep.id
             bug.executionSessionId = executionSessionId
             bug.stepNumber = stepNumber

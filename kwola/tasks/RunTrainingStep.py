@@ -503,7 +503,7 @@ def saveExecutionTraceWeightData(traceWeightData, configDir):
         json.dump(traceWeightData, f)
 
 
-def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator"):
+def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator", testingRunId=None, applicationId=None):
     config = Configuration(configDir)
 
     success = True
@@ -531,11 +531,13 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
         if len(testingSteps) == 0:
             getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
             getLogger().info(f"[{os.getpid()}] ==== Training Step Completed ====")
-            return {}
+            return {"success": False}
 
         trainingStep = TrainingStep(id=str(trainingSequenceId) + "_training_step_" + str(trainingStepIndex))
         trainingStep.startTime = datetime.now()
         trainingStep.trainingSequenceId = trainingSequenceId
+        trainingStep.testingRunId = testingRunId
+        trainingStep.applicationId = applicationId
         trainingStep.status = "running"
         trainingStep.numberOfIterationsCompleted = 0
         trainingStep.presentRewardLosses = []
