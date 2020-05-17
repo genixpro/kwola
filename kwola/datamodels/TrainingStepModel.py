@@ -38,6 +38,8 @@ class TrainingStep(Document):
 
     trainingSequenceId = StringField()
 
+    testingRunId = StringField()
+
     status = StringField()
 
     numberOfIterationsCompleted = IntField()
