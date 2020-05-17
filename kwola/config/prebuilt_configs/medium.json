@@ -53,6 +53,7 @@
   "debug_video_text_thickness": 0.5,
   "debug_video_text_top_margin": 25,
   "debug_video_top_size": 250,
+  "debug_video_workers": 8,
   "decaying_branch_trace_decay_rate": 0.90,
   "decaying_branch_trace_scale": 0.20,
   "decaying_branch_trace_minimum_weight_for_symbol_inclusion": 0.02,

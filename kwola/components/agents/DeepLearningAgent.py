@@ -1227,7 +1227,7 @@ class DeepLearningAgent:
         mpl.use('Agg')
         mpl.rcParams['figure.max_open_warning'] = 1000
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.config['debug_video_workers']) as executor:
             futures = []
             for trace, rawImage in zip(executionTraces, rawImages):
                 if trace is not None:
