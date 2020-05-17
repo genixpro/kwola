@@ -65,7 +65,7 @@ class Configuration:
 
         self.configData = data
 
-        if self.configData['data_serialization_method'] == "mongo" and self.configData['mongo_uri']:
+        if self.configData['data_serialization_method'] == "mongo" and 'mongo_uri' in self.configData and self.configData['mongo_uri']:
             import mongoengine
             mongoengine.connect(host=self.configData['mongo_uri'])
 
