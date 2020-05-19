@@ -70,6 +70,8 @@ class WebEnvironmentSession:
             chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
 
         chrome_options.add_argument(f"--no-sandbox")
+        chrome_options.add_argument(f"--disable-gpu")
+        chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
 
         capabilities = webdriver.DesiredCapabilities.CHROME
         capabilities['loggingPrefs'] = {'browser': 'ALL'}
