@@ -268,7 +268,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         for session in executionSessions:
             debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(session.id), "", False, False, None, "annotated_videos"))
-            debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
@@ -296,7 +295,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                     cloneFile.write(origFile.read())
 
             debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
-            debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
@@ -313,7 +311,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
             debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[0].id), "prediction", True, True, None, "debug_videos"))
-            debugVideoSubprocess1.start()
             atexit.register(lambda: debugVideoSubprocess1.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess1)
 
@@ -321,7 +318,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             time.sleep(5)
 
             debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, None, "debug_videos"))
-            debugVideoSubprocess2.start()
             atexit.register(lambda: debugVideoSubprocess2.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess2)
 
@@ -329,12 +325,14 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         del environment
 
+        for debugVideoSubprocess in debugVideoSubprocesses:
+            debugVideoSubprocess.start()
+            debugVideoSubprocess.join()
+
         for session in executionSessions:
             getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
             addExecutionSessionToSampleCache(session.id, config)
 
-        for debugVideoSubprocess in debugVideoSubprocesses:
-            debugVideoSubprocess.join()
 
     except Exception as e:
         getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
