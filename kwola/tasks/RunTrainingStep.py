@@ -234,7 +234,7 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
         return 1.0
 
 
-def loadAllTestingSteps(config, applicationId):
+def loadAllTestingSteps(config, applicationId=None):
     testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
 
     if config['data_serialization_method'] == 'mongo':
