@@ -25,7 +25,7 @@ from ..diagnostics.test_installation import testInstallation
 import os.path
 import questionary
 import sys
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 import logging
 
 

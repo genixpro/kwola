@@ -27,7 +27,7 @@ from selenium.webdriver.common.proxy import Proxy, ProxyType
 import threading
 import time
 import sys
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 import logging
 
 def findFreePort():

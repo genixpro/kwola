@@ -23,7 +23,7 @@ from ..components.environments.WebEnvironment import WebEnvironment
 from ..config.config import Configuration
 from ..diagnostics.test_installation import testInstallation
 import time
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 import logging
 
 def main():

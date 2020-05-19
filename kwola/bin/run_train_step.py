@@ -25,7 +25,7 @@ from ..datamodels.TrainingStepModel import TrainingStep
 from ..tasks import RunTrainingStep
 from .main import getConfigurationDirFromCommandLineArgs
 from ..diagnostics.test_installation import testInstallation
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 import logging
 
 def main():

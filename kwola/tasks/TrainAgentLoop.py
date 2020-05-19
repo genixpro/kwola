@@ -19,7 +19,7 @@
 #
 
 
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.ManagedTaskSubprocess import ManagedTaskSubprocess

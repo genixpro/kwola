@@ -18,7 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 from ..tasks.TaskProcess import TaskProcess
 from datetime import datetime
 import atexit

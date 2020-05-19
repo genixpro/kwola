@@ -20,7 +20,7 @@
 
 import unittest
 from ..diagnostics.test_installation import testInstallation
-from ..config.logger import setupLocalLogging
+from ..config.logger import getLogger, setupLocalLogging
 import logging
 
 def main():
