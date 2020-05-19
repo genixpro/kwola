@@ -27,7 +27,7 @@ from selenium.webdriver.common.proxy import Proxy, ProxyType
 import threading
 import time
 import sys
-from ..config.logger import getLogger
+from ..config.logger import setupLocalLogging
 import logging
 
 def findFreePort():
@@ -56,7 +56,7 @@ def main():
     """
         This is the entry for the command which makes it convenient to install the proxy certificate
     """
-    getLogger().setLevel(logging.INFO)
+    setupLocalLogging()
     commandArgs = sys.argv[1:]
 
     proxyPort = findFreePort()

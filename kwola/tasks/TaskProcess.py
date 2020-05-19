@@ -18,7 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from ..config.logger import getLogger
+from ..config.logger import setupLocalLogging
 import logging
 from datetime import datetime
 import json
@@ -39,7 +39,7 @@ class TaskProcess:
 
 
     def run(self):
-        getLogger().setLevel(logging.INFO)
+        setupLocalLogging()
         getLogger().info(f"[{os.getpid()}] TaskProcess: Waiting for input from stdin")
         dataStr = sys.stdin.readline()
         data = json.loads(dataStr)

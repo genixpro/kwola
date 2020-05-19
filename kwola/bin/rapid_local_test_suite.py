@@ -20,14 +20,14 @@
 
 import unittest
 from ..diagnostics.test_installation import testInstallation
-from ..config.logger import getLogger
+from ..config.logger import setupLocalLogging
 import logging
 
 def main():
     """
         This is the entry point for the Kwola secondary command that runs a rapid test suite that can be used to diagnose whether your Kwola installation is working.
     """
-    getLogger().setLevel(logging.INFO)
+    setupLocalLogging()
     success = testInstallation(verbose=True)
     if not success:
         print(
