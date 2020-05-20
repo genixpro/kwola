@@ -398,7 +398,7 @@ class WebEnvironmentSession:
                 if (bounds.bottom < 0 || bounds.right < 0)
                     continue;
                     
-                if (bounds.top > window.innerHeight || bounds.right > window.innerWidth)
+                if (bounds.top > window.innerHeight || bounds.left > window.innerWidth)
                     continue;
                 
                 const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
