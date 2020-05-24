@@ -506,7 +506,7 @@ def saveExecutionTraceWeightData(traceWeightData, configDir):
         json.dump(traceWeightData, f)
 
 
-def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator", testingRunId=None, applicationId=None):
+def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator", testingRunId=None, applicationId=None, gpuWorldSize=torch.cuda.device_count()):
     config = Configuration(configDir)
 
     success = True
@@ -514,7 +514,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
     if gpu is not None:
         for subprocessIndex in range(10):
             try:
-                torch.distributed.init_process_group(backend="gloo", world_size=torch.cuda.device_count(), rank=gpu, init_method=f"file:///tmp/{coordinatorTempFileName}", )
+                torch.distributed.init_process_group(backend="gloo", world_size=gpuWorldSize, rank=gpu, init_method=f"file:///tmp/{coordinatorTempFileName}", )
                 break
             except RuntimeError:
                 time.sleep(1)
