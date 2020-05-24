@@ -274,6 +274,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
         if len(testingSteps) == 0:
             getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
             return
+        else:
+            getLogger().info(f"[{os.getpid()}] Found {len(testingSteps)} total testing steps for this application.")
 
         # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
         executionSessionIds = []
@@ -287,6 +289,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
+        getLogger().info(f"[{os.getpid()}] Found {len(executionSessionIds)} total execution sessions that can be learned.")
+        
         getLogger().info(f"[{os.getpid()}] Starting loading of execution trace weight datas.")
 
         executionTraceWeightDatas = []
