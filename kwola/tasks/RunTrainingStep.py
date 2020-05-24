@@ -65,7 +65,7 @@ def addExecutionSessionToSampleCache(executionSessionId, config):
         pickleBytes = pickle.dumps(traceBatch)
         compressedPickleBytes = gzip.compress(pickleBytes)
 
-        getLogger().info(f"Writing batch cache file ${cacheFile}")
+        getLogger().info(f"Writing batch cache file {cacheFile}")
         with open(cacheFile, 'wb') as file:
             file.write(compressedPickleBytes)
 
@@ -307,6 +307,9 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         getLogger().info(f"[{os.getpid()}] Finished initialization for batch preparation sub process.")
+
+        if len(executionTraceWeightDatas) == 0:
+            raise RuntimeError("There are no execution trace weight datas to process in the algorithm.")
 
         processPool = multiprocessingpool.Pool(processes=config['training_initial_batch_prep_workers'])
         backgroundTraceSaveProcessPool = multiprocessingpool.Pool(processes=config['training_background_trace_save_workers'])
