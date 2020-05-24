@@ -31,6 +31,7 @@ from ..datamodels.TestingStepModel import TestingStep
 from .RunTrainingStep import addExecutionSessionToSampleCache
 from datetime import datetime
 import atexit
+import concurrent.futures
 import billiard as multiprocessing
 import numpy
 import os
@@ -106,6 +107,11 @@ def loadAllBugs(config):
                 bugs.append(bug)
 
     return bugs
+
+
+def runAndJoinSubprocess(debugVideoSubprocess):
+    debugVideoSubprocess.start()
+    debugVideoSubprocess.join()
 
 
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
@@ -325,9 +331,12 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         del environment
 
-        for debugVideoSubprocess in debugVideoSubprocesses:
-            debugVideoSubprocess.start()
-            debugVideoSubprocess.join()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = []
+            for debugVideoSubprocess in debugVideoSubprocesses:
+                futures.append(executor.submit(runAndJoinSubprocess, debugVideoSubprocess))
+            for future in futures:
+                future.result()
 
         for session in executionSessions:
             getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
