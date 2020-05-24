@@ -343,6 +343,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
     except Exception as e:
         getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
         returnValue['success'] = False
+        returnValue['exception'] = traceback.format_exc()
 
     # This print statement will trigger the parent manager process to kill this process.
     getLogger().info(f"[{os.getpid()}] Finished Running Testing Sequence!")
