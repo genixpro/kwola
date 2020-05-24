@@ -307,13 +307,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             getLogger().info(f"\n\n[{os.getpid()}] Bug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
 
 
-        testStep.status = "completed"
-
-        testStep.endTime = datetime.now()
-
-        testStep.executionSessions = [session.id for session in executionSessions]
-        testStep.saveToDisk(config)
-
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
             debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[0].id), "prediction", True, True, None, "debug_videos"))
@@ -342,6 +335,10 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
             addExecutionSessionToSampleCache(session.id, config)
 
+        testStep.status = "completed"
+        testStep.endTime = datetime.now()
+        testStep.executionSessions = [session.id for session in executionSessions]
+        testStep.saveToDisk(config)
 
     except Exception as e:
         getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
