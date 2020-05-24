@@ -65,6 +65,7 @@ def addExecutionSessionToSampleCache(executionSessionId, config):
         pickleBytes = pickle.dumps(traceBatch)
         compressedPickleBytes = gzip.compress(pickleBytes)
 
+        getLogger().info(f"Writing cache file ${cacheFile}")
         with open(cacheFile, 'wb') as file:
             file.write(compressedPickleBytes)
 
