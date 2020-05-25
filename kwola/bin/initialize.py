@@ -20,14 +20,14 @@
 
 from .main import getConfigurationDirFromCommandLineArgs
 from ..diagnostics.test_installation import testInstallation
-from ..config.logger import getLogger
+from ..config.logger import getLogger, setupLocalLogging
 import logging
 
 def main():
     """
         This is the entry point for the Kwola secondary command, kwola_init
     """
-    getLogger().setLevel(logging.INFO)
+    setupLocalLogging()
     success = testInstallation(verbose=True)
     if not success:
         print(

@@ -4,7 +4,7 @@ from ..tasks import TrainAgentLoop
 from ..config.config import Configuration
 import shutil
 import traceback
-from ..config.logger import getLogger
+from ..config.logger import getLogger, setupLocalLogging
 
 class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):

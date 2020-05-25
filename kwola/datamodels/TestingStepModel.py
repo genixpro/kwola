@@ -52,6 +52,8 @@ class TestingStep(Document):
 
     testingRunId = StringField(required=False)
 
+    applicationId = StringField(required=False)
+
 
     def saveToDisk(self, config):
         saveObjectToDisk(self, "testing_steps", config)

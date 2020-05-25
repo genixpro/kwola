@@ -19,7 +19,7 @@
 #
 
 
-from ..config.logger import getLogger
+from ..config.logger import getLogger, setupLocalLogging
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.TaskProcess import TaskProcess
@@ -65,6 +65,7 @@ def addExecutionSessionToSampleCache(executionSessionId, config):
         pickleBytes = pickle.dumps(traceBatch)
         compressedPickleBytes = gzip.compress(pickleBytes)
 
+        getLogger().info(f"Writing batch cache file {cacheFile}")
         with open(cacheFile, 'wb') as file:
             file.write(compressedPickleBytes)
 
@@ -234,21 +235,24 @@ def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, ex
         return 1.0
 
 
-def loadAllTestingSteps(config):
+def loadAllTestingSteps(config, applicationId=None):
     testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
 
-    testingSteps = []
+    if config['data_serialization_method'] == 'mongo':
+        return list(TestingStep.objects(applicationId=applicationId).no_dereference())
+    else:
+        testingSteps = []
 
-    for fileName in os.listdir(testStepsDir):
-        if ".lock" not in fileName:
-            stepId = fileName
-            stepId = stepId.replace(".json", "")
-            stepId = stepId.replace(".gz", "")
-            stepId = stepId.replace(".pickle", "")
+        for fileName in os.listdir(testStepsDir):
+            if ".lock" not in fileName:
+                stepId = fileName
+                stepId = stepId.replace(".json", "")
+                stepId = stepId.replace(".gz", "")
+                stepId = stepId.replace(".pickle", "")
 
-            testingSteps.append(TestingStep.loadFromDisk(stepId, config))
+                testingSteps.append(TestingStep.loadFromDisk(stepId, config))
 
-    return testingSteps
+        return testingSteps
 
 
 def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
@@ -258,18 +262,20 @@ def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
     trace.saveToDisk(config)
 
 
-def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex=0):
+def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex=0, applicationId=None):
     try:
         config = Configuration(configDir)
 
         getLogger().info(f"[{os.getpid()}] Starting initialization for batch preparation sub process.")
 
-        testingSteps = sorted([step for step in loadAllTestingSteps(config) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
+        testingSteps = sorted([step for step in loadAllTestingSteps(config, applicationId) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
         testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
 
         if len(testingSteps) == 0:
             getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
             return
+        else:
+            getLogger().info(f"[{os.getpid()}] Found {len(testingSteps)} total testing steps for this application.")
 
         # We use this mechanism to force parallel preloading of all the execution traces. Otherwise it just takes forever...
         executionSessionIds = []
@@ -283,6 +289,8 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
             executionSessions = [future.result() for future in executionSessionFutures]
 
+        getLogger().info(f"[{os.getpid()}] Found {len(executionSessionIds)} total execution sessions that can be learned.")
+        
         getLogger().info(f"[{os.getpid()}] Starting loading of execution trace weight datas.")
 
         executionTraceWeightDatas = []
@@ -303,6 +311,9 @@ def prepareAndLoadBatchesSubprocess(configDir, batchDirectory, subProcessCommand
 
         del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
         getLogger().info(f"[{os.getpid()}] Finished initialization for batch preparation sub process.")
+
+        if len(executionTraceWeightDatas) == 0:
+            raise RuntimeError("There are no execution trace weight datas to process in the algorithm.")
 
         processPool = multiprocessingpool.Pool(processes=config['training_initial_batch_prep_workers'])
         backgroundTraceSaveProcessPool = multiprocessingpool.Pool(processes=config['training_background_trace_save_workers'])
@@ -503,7 +514,7 @@ def saveExecutionTraceWeightData(traceWeightData, configDir):
         json.dump(traceWeightData, f)
 
 
-def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator"):
+def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator", testingRunId=None, applicationId=None, gpuWorldSize=torch.cuda.device_count()):
     config = Configuration(configDir)
 
     success = True
@@ -511,7 +522,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
     if gpu is not None:
         for subprocessIndex in range(10):
             try:
-                torch.distributed.init_process_group(backend="gloo", world_size=torch.cuda.device_count(), rank=gpu, init_method=f"file:///tmp/{coordinatorTempFileName}", )
+                torch.distributed.init_process_group(backend="gloo", world_size=gpuWorldSize, rank=gpu, init_method=f"file:///tmp/{coordinatorTempFileName}", )
                 break
             except RuntimeError:
                 time.sleep(1)
@@ -527,15 +538,17 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
             pass
 
         getLogger().info(f"[{os.getpid()}] Starting Training Step")
-        testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
+        testingSteps = [step for step in loadAllTestingSteps(config, applicationId) if step.status == "completed"]
         if len(testingSteps) == 0:
             getLogger().warning(f"[{os.getpid()}] Error, no test sequences to train on for training step.")
             getLogger().info(f"[{os.getpid()}] ==== Training Step Completed ====")
-            return {}
+            return {"success": False}
 
         trainingStep = TrainingStep(id=str(trainingSequenceId) + "_training_step_" + str(trainingStepIndex))
         trainingStep.startTime = datetime.now()
         trainingStep.trainingSequenceId = trainingSequenceId
+        trainingStep.testingRunId = testingRunId
+        trainingStep.applicationId = applicationId
         trainingStep.status = "running"
         trainingStep.numberOfIterationsCompleted = 0
         trainingStep.presentRewardLosses = []
@@ -565,7 +578,7 @@ def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, 
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessBatchResultQueue = multiprocessing.Queue()
 
-            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex))
+            subProcess = multiprocessing.Process(target=prepareAndLoadBatchesSubprocess, args=(configDir, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex, applicationId))
             subProcess.start()
             atexit.register(lambda: subProcess.terminate())
 

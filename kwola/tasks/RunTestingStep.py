@@ -19,7 +19,7 @@
 #
 
 
-from ..config.logger import getLogger
+from ..config.logger import getLogger, setupLocalLogging
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.TaskProcess import TaskProcess
@@ -31,6 +31,7 @@ from ..datamodels.TestingStepModel import TestingStep
 from .RunTrainingStep import addExecutionSessionToSampleCache
 from datetime import datetime
 import atexit
+import concurrent.futures
 import billiard as multiprocessing
 import numpy
 import os
@@ -109,6 +110,11 @@ def loadAllBugs(config):
     return bugs
 
 
+def runAndJoinSubprocess(debugVideoSubprocess):
+    debugVideoSubprocess.start()
+    debugVideoSubprocess.join()
+
+
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False):
     getLogger().info(f"[{os.getpid()}] Starting New Testing Sequence")
 
@@ -140,6 +146,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                 owner=testStep.owner,
                 testingStepId=str(testingStepId),
                 testingRunId=testStep.testingRunId,
+                applicationId=testStep.applicationId,
                 startTime=datetime.now(),
                 endTime=None,
                 tabNumber=sessionN,
@@ -204,6 +211,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
                 trace.executionSessionId = str(executionSession.id)
                 trace.testingStepId = str(testingStepId)
+                trace.applicationId = str(executionSession.applicationId)
+                trace.testingRunId = str(executionSession.testingRunId)
                 trace.owner = testStep.owner
                 trace.saveToDisk(config)
 
@@ -266,7 +275,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         for session in executionSessions:
             debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(session.id), "", False, False, None, "annotated_videos"))
-            debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
@@ -275,6 +283,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             bug = BugModel()
             bug.id = CustomIDField.generateNewUUID(BugModel, config)
             bug.owner = testStep.owner
+            bug.applicationId = testStep.applicationId
             bug.testingStepId = testStep.id
             bug.executionSessionId = executionSessionId
             bug.stepNumber = stepNumber
@@ -309,24 +318,15 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                     cloneFile.write(origFile.read())
 
             debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, subFolderStr))
-            debugVideoSubprocess.start()
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
             getLogger().info(f"\n\n[{os.getpid()}] Bug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
 
 
-        testStep.status = "completed"
-
-        testStep.endTime = datetime.now()
-
-        testStep.executionSessions = [session.id for session in executionSessions]
-        testStep.saveToDisk(config)
-
         if not shouldBeRandom and generateDebugVideo:
             # Start some parallel processes generating debug videos.
             debugVideoSubprocess1 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[0].id), "prediction", True, True, None, "debug_videos"))
-            debugVideoSubprocess1.start()
             atexit.register(lambda: debugVideoSubprocess1.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess1)
 
@@ -334,7 +334,6 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             time.sleep(5)
 
             debugVideoSubprocess2 = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessions[int(len(executionSessions) / 3)].id), "mix", True, True, None, "debug_videos"))
-            debugVideoSubprocess2.start()
             atexit.register(lambda: debugVideoSubprocess2.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess2)
 
@@ -342,16 +341,26 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
         del environment
 
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = []
+            for debugVideoSubprocess in debugVideoSubprocesses:
+                futures.append(executor.submit(runAndJoinSubprocess, debugVideoSubprocess))
+            for future in futures:
+                future.result()
+
         for session in executionSessions:
             getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
             addExecutionSessionToSampleCache(session.id, config)
 
-        for debugVideoSubprocess in debugVideoSubprocesses:
-            debugVideoSubprocess.join()
+        testStep.status = "completed"
+        testStep.endTime = datetime.now()
+        testStep.executionSessions = [session.id for session in executionSessions]
+        testStep.saveToDisk(config)
 
     except Exception as e:
         getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
         returnValue['success'] = False
+        returnValue['exception'] = traceback.format_exc()
 
     # This print statement will trigger the parent manager process to kill this process.
     getLogger().info(f"[{os.getpid()}] Finished Running Testing Sequence!")

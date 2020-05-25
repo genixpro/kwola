@@ -19,7 +19,7 @@
 #
 
 
-from ..config.logger import getLogger
+from ..config.logger import getLogger, setupLocalLogging
 from .LockedFile import LockedFile
 from datetime import datetime
 import gzip

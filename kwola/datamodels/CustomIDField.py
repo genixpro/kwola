@@ -40,10 +40,10 @@ class CustomIDField(mongoengine.fields.StringField):
     @staticmethod
     def generateNewUUID(modelClass, config, minimumLength=4):
         currentLength = minimumLength
-        id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
-        while modelClass.loadFromDisk(id, config, printErrorOnFailure=False) is not None:
+        generatedId = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
+        while modelClass.loadFromDisk(generatedId, config, printErrorOnFailure=False) is not None:
             currentLength += 4
-            id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
+            generatedId = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('ascii').replace("_", "").replace("-", "")[:currentLength].lower()
 
-        return id
+        return generatedId
 

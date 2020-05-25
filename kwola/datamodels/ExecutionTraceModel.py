@@ -42,9 +42,13 @@ class ExecutionTrace(Document):
 
     time = DateField()
 
+    applicationId = StringField()
+
     executionSessionId = StringField()
 
     testingStepId = StringField()
+
+    testingRunId = StringField()
 
     actionMaps = EmbeddedDocumentListField(ActionMap)
 
