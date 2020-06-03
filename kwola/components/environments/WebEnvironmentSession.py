@@ -247,18 +247,28 @@ class WebEnvironmentSession:
         loginKeywords = ['log', 'sub', 'sign']
 
         for map in actionMaps:
+            found = False
             for matchKeyword in emailKeywords:
                 if matchKeyword in map.keywords and map.elementType == "input":
                     emailInputs.append(map)
+                    found = True
                     break
+            if found:
+                continue
             for matchKeyword in passwordKeywords:
                 if matchKeyword in map.keywords and map.elementType == "input":
                     passwordInputs.append(map)
+                    found = True
                     break
+            if found:
+                continue
             for matchKeyword in loginKeywords:
                 if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
                     loginButtons.append(map)
+                    found = True
                     break
+            if found:
+                continue
 
         return emailInputs, passwordInputs, loginButtons
 
