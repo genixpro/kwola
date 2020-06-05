@@ -28,6 +28,7 @@ import psutil
 import subprocess
 import threading
 import time
+import tempfile
 
 
 class ManagedTaskSubprocess:
@@ -42,7 +43,10 @@ class ManagedTaskSubprocess:
     """
 
     def __init__(self, args, data, timeout, config, logId):
-        self.logFilePath = os.path.join(config.getKwolaUserDataDirectory("logs"), logId + "_log.txt")
+        if logId is not None:
+            self.logFilePath = os.path.join(config.getKwolaUserDataDirectory("logs"), logId + "_log.txt")
+        else:
+            self.logFilePath = tempfile.mktemp()
         self.currentLogSize = 0
 
         self.args = args
@@ -56,20 +60,27 @@ class ManagedTaskSubprocess:
 
         self.output = ''
 
-        self.monitorTimeoutProcess = threading.Thread(target=lambda: self.timeoutMonitoringThread(), daemon=True)
+        self.monitorTimeoutProcess = None
+        self.monitorOutputProcess = None
 
     def __del__(self):
         self.process.terminate()
         self.processOutputFile.close()
 
-
     def start(self):
+        atexit.register(lambda: self.process.terminate())
+
         self.process = subprocess.Popen(self.args, stdout=self.processOutputFile, stderr=None, stdin=subprocess.PIPE)
 
         self.process.stdin.write(bytes(json.dumps(self.data) + "\n", "utf8"))
         self.process.stdin.flush()
-        pass
 
+        self.monitorTimeoutProcess = threading.Thread(target=lambda: self.timeoutMonitoringThread(), daemon=True)
+        self.monitorOutputProcess = threading.Thread(target=lambda: self.outputMonitoringThread(), daemon=True)
+
+
+        self.monitorTimeoutProcess.start()
+        self.monitorOutputProcess.start()
 
 
     def getLatestLogOutput(self):
@@ -139,8 +150,16 @@ class ManagedTaskSubprocess:
         return False
 
     def waitForProcessResult(self):
-        atexit.register(lambda: self.process.terminate())
+        while self.alive:
+            time.sleep(1)
 
+        result = self.extractResultFromOutput()
+        getLogger().info(f"[{os.getpid()}] Task Subprocess finished and gave back result:\n{json.dumps(result, indent=4)}")
+
+        return result
+
+
+    def outputMonitoringThread(self):
         waitBetweenStdoutUpdates = 0.2
 
         self.output = ''
@@ -166,13 +185,6 @@ class ManagedTaskSubprocess:
         if additionalOutput is not None:
             self.output += additionalOutput
 
-        result = self.extractResultFromOutput()
-        getLogger().info(f"[{os.getpid()}] Task Subprocess finished and gave back result:\n{json.dumps(result, indent=4)}")
-
-        return result
-
-
-
     def timeoutMonitoringThread(self):
         while self.alive:
             elapsedSeconds = (datetime.now() - self.startTime).total_seconds()
@@ -181,4 +193,13 @@ class ManagedTaskSubprocess:
                 self.stopProcessBothMethods()
 
             time.sleep(1)
+
+    def ready(self):
+        return not self.alive
+
+    def successful(self):
+        return True
+
+    def failed(self):
+        return False
 

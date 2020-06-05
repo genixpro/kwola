@@ -45,7 +45,5 @@ class TaskProcess:
         data = json.loads(dataStr)
         getLogger().info(f"[{os.getpid()}] Running process with following data:\n{json.dumps(data, indent=4)}")
         result = self.targetFunc(**data)
-        print(TaskProcess.resultStartString, flush=True)
-        print(json.dumps(result), flush=True)
-        print(TaskProcess.resultFinishString, flush=True)
+        print(TaskProcess.resultStartString + json.dumps(result) + TaskProcess.resultFinishString, flush=True)
         exit(0)

@@ -333,9 +333,13 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             for future in futures:
                 future.result()
 
-        for session in executionSessions:
-            getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
-            addExecutionSessionToSampleCache(session.id, config)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for session in executionSessions:
+                getLogger().info(f"[{os.getpid()}] Preparing samples for {session.id} and adding them to the sample cache.")
+                futures.append(executor.submit(addExecutionSessionToSampleCache, session.id, config))
+            for future in futures:
+                future.result()
 
         testStep.status = "completed"
         testStep.endTime = datetime.now()

@@ -48,6 +48,18 @@ import torch.distributed
 import traceback
 
 
+def writeSingleExecutionTrace(traceBatch, sampleCacheDir):
+    traceId = traceBatch['traceIds'][0]
+
+    cacheFile = os.path.join(sampleCacheDir, traceId + ".pickle.gz")
+
+    pickleBytes = pickle.dumps(traceBatch)
+    compressedPickleBytes = gzip.compress(pickleBytes)
+
+    getLogger().info(f"Writing batch cache file {cacheFile}")
+    with open(cacheFile, 'wb') as file:
+        file.write(compressedPickleBytes)
+
 def addExecutionSessionToSampleCache(executionSessionId, config):
     agent = DeepLearningAgent(config, whichGpu=None)
 
@@ -57,17 +69,12 @@ def addExecutionSessionToSampleCache(executionSessionId, config):
 
     batches = agent.prepareBatchesForExecutionSession(executionSession)
 
-    for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
-        traceId = traceBatch['traceIds'][0]
-
-        cacheFile = os.path.join(sampleCacheDir, traceId + ".pickle.gz")
-
-        pickleBytes = pickle.dumps(traceBatch)
-        compressedPickleBytes = gzip.compress(pickleBytes)
-
-        getLogger().info(f"Writing batch cache file {cacheFile}")
-        with open(cacheFile, 'wb') as file:
-            file.write(compressedPickleBytes)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = []
+        for traceIndex, traceBatch in zip(range(len(executionSession.executionTraces) - 1), batches):
+            futures.append(executor.submit(writeSingleExecutionTrace, traceBatch, sampleCacheDir))
+        for future in futures:
+            future.result()
 
 
 def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessionId, batchDirectory):
