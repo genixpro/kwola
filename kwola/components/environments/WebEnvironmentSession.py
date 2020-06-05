@@ -454,6 +454,9 @@ class WebEnvironmentSession:
                                                   ))
                     data.canClick = true;
                 
+                if (element.getAttribute("cursor") === "pointer")
+                    data.canClick = true;
+                
                 if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
                     data.canType = true;
                 
