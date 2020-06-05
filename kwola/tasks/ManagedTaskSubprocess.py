@@ -45,11 +45,11 @@ class ManagedTaskSubprocess:
         self.logFilePath = os.path.join(config.getKwolaUserDataDirectory("logs"), logId + "_log.txt")
         self.currentLogSize = 0
 
-        self.processOutputFile = open(self.logFilePath, 'w')
-        self.process = subprocess.Popen(args, stdout=self.processOutputFile, stderr=None, stdin=subprocess.PIPE)
+        self.args = args
+        self.data = data
 
-        self.process.stdin.write(bytes(json.dumps(data) + "\n", "utf8"))
-        self.process.stdin.flush()
+        self.processOutputFile = open(self.logFilePath, 'w')
+        self.process = None
         self.startTime = datetime.now()
         self.alive = True
         self.timeout = timeout
@@ -61,6 +61,15 @@ class ManagedTaskSubprocess:
     def __del__(self):
         self.process.terminate()
         self.processOutputFile.close()
+
+
+    def start(self):
+        self.process = subprocess.Popen(self.args, stdout=self.processOutputFile, stderr=None, stdin=subprocess.PIPE)
+
+        self.process.stdin.write(bytes(json.dumps(self.data) + "\n", "utf8"))
+        self.process.stdin.flush()
+        pass
+
 
 
     def getLatestLogOutput(self):

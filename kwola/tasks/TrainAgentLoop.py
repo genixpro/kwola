@@ -52,6 +52,7 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
         "testingStepId": str(testingStep.id),
         "shouldBeRandom": True
     }, timeout=config['random_initialization_testing_sequence_timeout'], config=config, logId=testingStep.id)
+    process.start()
     result = process.waitForProcessResult()
 
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
@@ -102,6 +103,8 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
             "coordinatorTempFileName": coordinatorTempFileName
         }, timeout=config['training_step_timeout'], config=config, logId=str(trainingSequence.id + "_training_step_" + str(trainingStepIndex)))
 
+        process.start()
+
         result = process.waitForProcessResult()
 
         if result is not None and 'trainingStepId' in result:
@@ -130,6 +133,7 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         "shouldBeRandom": False,
         "generateDebugVideo": generateDebugVideo and config['enable_debug_videos']
     }, timeout=config['training_step_timeout'], config=config, logId=testingStep.id)
+    process.start()
     result = process.waitForProcessResult()
 
     # Reload the testing sequence from the db. It will have been updated by the sub-process.
