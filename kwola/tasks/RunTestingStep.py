@@ -72,6 +72,8 @@ def predictedActionSubProcess(configDir, shouldBeRandom, subProcessCommandQueue,
 
 
 def createDebugVideoSubProcess(configDir, executionSessionId, name="", includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None, folder="debug_videos"):
+    setupLocalLogging()
+
     config = Configuration(configDir)
 
     agent = DeepLearningAgent(config, whichGpu=None)

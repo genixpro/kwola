@@ -142,7 +142,7 @@ class JSRewriteProxy:
         return data, gzipped
 
     def doesFlowLooksLikeJavascriptFile(self, flow):
-        fileName = self.getCleanedFileName(flow)
+        cleanedFileName = self.getCleanedFileName(flow)
 
         contentType = flow.response.headers.get('Content-Type')
         if contentType is None:
@@ -156,7 +156,7 @@ class JSRewriteProxy:
             "text/ecmascript"
         ]
 
-        if ('.js' in fileName and not ".json" in fileName and not ".jsp" in fileName and not fileName.endswith(".css")) or str(contentType).strip().lower() in jsMimeTypes:
+        if ('_js' in cleanedFileName and not "_json" in cleanedFileName and not "_jsp" in cleanedFileName and not cleanedFileName.endswith("_css")) or str(contentType).strip().lower() in jsMimeTypes:
             fileContents, gzipped = self.decompressDataIfNeeded(flow.response.data.content)
 
             kind = filetype.guess(fileContents)
@@ -193,9 +193,9 @@ class JSRewriteProxy:
         return None
 
     def doesFlowLooksLikeHTML(self, flow):
-        fileName = self.getCleanedFileName(flow)
+        cleanedFileName = self.getCleanedFileName(flow)
 
-        if '.js' not in fileName and not ".json" in fileName and ".css" not in fileName:
+        if '_js' not in cleanedFileName and not "_json" in cleanedFileName and "_css" not in cleanedFileName:
             fileContents, gzipped = self.decompressDataIfNeeded(flow.response.data.content)
 
             kind = filetype.guess(fileContents)

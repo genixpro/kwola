@@ -20,6 +20,7 @@
 
 from ...components.proxy.JSRewriteProxy import JSRewriteProxy
 from ...components.proxy.PathTracer import PathTracer
+from ...config.logger import getLogger, setupLocalLogging
 from contextlib import closing
 from mitmproxy.tools.dump import DumpMaster
 import mitmproxy.exceptions
@@ -71,6 +72,8 @@ class ProxyProcess:
 
     @staticmethod
     def runProxyServerSubprocess(config, commandQueue, resultQueue):
+        setupLocalLogging()
+
         codeRewriter = JSRewriteProxy(config)
         pathTracer = PathTracer()
 
