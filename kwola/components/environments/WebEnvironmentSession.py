@@ -454,7 +454,8 @@ class WebEnvironmentSession:
                                                   ))
                     data.canClick = true;
                 
-                if (element.getAttribute("cursor") === "pointer")
+                const elemStyle = window.getComputedStyle(element);
+                if (elemStyle.getPropertyValue("cursor") === "pointer")
                     data.canClick = true;
                 
                 if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
