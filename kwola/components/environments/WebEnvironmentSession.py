@@ -218,8 +218,13 @@ class WebEnvironmentSession:
             elapsedTime = abs((datetime.now() - startTime).total_seconds())
             if elapsedTime > self.config['web_session_no_network_activity_timeout']:
                 getLogger().warning(f"[{os.getpid()}] Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
-                      " stop network activity all on its own? Try the config variable tweaking web_session_no_network_activity_wait_time down"
-                      " if constant network activity is the expected behaviour.")
+                      f" stop network activity all on its own? Try the config variable tweaking web_session_no_network_activity_wait_time down"
+                      f" if constant network activity is the expected behaviour. List of recent paths: {self.proxy.getPathTrace()['recent']}")
+
+                # We adjust the configuration value for this downwards so that if these timeouts are occuring, they're impact on the rest
+                # of the operations are gradually reduced so that the run can proceed
+                self.config['web_session_no_network_activity_timeout'] = self.config['web_session_no_network_activity_timeout'] * 0.50
+
                 break
 
     def movieFileName(self):
