@@ -59,10 +59,12 @@ class WebEnvironmentSession:
     def __init__(self, config, tabNumber):
         self.config = config
         self.targetURL = config['url']
+        self.hasBrowserDied = False
 
         self.targetHostRoot = self.getHostRoot(self.targetURL)
 
         self.proxy = ProxyProcess(config)
+        self.urlWhitelistRegexes = [re.compile(pattern) for pattern in self.config['web_session_restrict_url_to_regexes']]
 
         chrome_options = Options()
         chrome_options.headless = config['web_session_headless']
@@ -153,8 +155,6 @@ class WebEnvironmentSession:
             "global_removeEventListener",
             "global_addEventListener",
         ]
-
-        self.hasBrowserDied = False
 
     def __del__(self):
         self.shutdown()
@@ -660,12 +660,27 @@ class WebEnvironmentSession:
         return success
 
     def checkOffsite(self, priorURL):
-        self.waitUntilNoNetworkActivity()
-
         try:
             # If the browser went off site and off site links are disabled, then we send it back to the url it started from
             if self.config['prevent_offsite_links']:
+                self.waitUntilNoNetworkActivity()
+
+                offsite = False
                 if self.driver.current_url != "data:," and self.getHostRoot(self.driver.current_url) != self.targetHostRoot:
+                    offsite = True
+
+                whitelistMatched = False
+                if len(self.urlWhitelistRegexes) == 0:
+                    whitelistMatched = True
+
+                for regex in self.urlWhitelistRegexes:
+                    if regex.search(self.driver.current_url) is not None:
+                        whitelistMatched = True
+
+                if not whitelistMatched:
+                    offsite = True
+
+                if offsite:
                     getLogger().info(f"[{os.getpid()}] The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
                     self.driver.get(priorURL)
                     self.waitUntilNoNetworkActivity()

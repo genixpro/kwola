@@ -217,6 +217,7 @@
   "web_session_parallel_execution_sessions": 12,
   "web_session_print_every_action": false,
   "web_session_print_every_action_failure": false,
+  "web_session_restrict_url_to_regexes": [],
   "web_session_width": 1024,
   "web_session_height": 768,
   "web_session_no_network_activity_wait_time": 2.0,
