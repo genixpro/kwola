@@ -31,6 +31,8 @@ class BaseError(EmbeddedDocument):
 
     type = StringField()
 
+    page = StringField()
+
 
     def computeHash(self):
         raise NotImplementedError()

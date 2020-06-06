@@ -40,6 +40,7 @@ import cv2
 import hashlib
 import numpy
 import numpy as np
+import re
 import os
 import os.path
 import selenium.common.exceptions
@@ -141,6 +142,8 @@ class WebEnvironmentSession:
         self.lastScreenshotHash = screenHash
 
         self.cumulativeBranchTrace = self.extractBranchTrace()
+
+        self.networkErrorRegex = re.compile(r"(\D[45]\d\d$)|(\D[45]\d\d\D)")
 
         self.errorHashes = set()
 
@@ -669,6 +672,7 @@ class WebEnvironmentSession:
         startLogCount = len(self.driver.get_log('browser'))
 
         self.proxy.resetPathTrace()
+        self.proxy.resetNetworkErrors()
 
         try:
             element = self.driver.execute_script("""
@@ -718,7 +722,7 @@ class WebEnvironmentSession:
                 
                 getLogger().error(logMsgString)
             else:
-                error = ExceptionError(stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
+                error = ExceptionError(type="exception", page=executionTrace.startURL, stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
                 executionTrace.errorsDetected.append(error)
                 errorHash = error.computeHash()
 
@@ -738,6 +742,10 @@ class WebEnvironmentSession:
                 message = str(log['message'])
                 message = message.replace("\\n", "\n")
 
+                # If it looks like a network error, then ignore it because those are handled separately
+                if self.networkErrorRegex.search(message) is not None:
+                    continue
+
                 kwolaJSRewriteErrorFound = False
                 for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
                     if detectionString in message:
@@ -753,7 +761,7 @@ class WebEnvironmentSession:
                     
                     getLogger().error(logMsgString)
                 else:
-                    error = LogError(message=message, logLevel=log['level'])
+                    error = LogError(type="log", page=executionTrace.startURL, message=message, logLevel=log['level'])
                     executionTrace.errorsDetected.append(error)
                     errorHash = error.computeHash()
 
@@ -765,6 +773,22 @@ class WebEnvironmentSession:
                         
                         self.errorHashes.add(errorHash)
                         hadNewError = True
+
+        for networkError in self.proxy.getNetworkErrors():
+            networkError.page = executionTrace.startURL
+            executionTrace.errorsDetected.append(networkError)
+            errorHash = networkError.computeHash()
+
+            if errorHash not in self.errorHashes:
+                networkErrorMsgString = f"[{os.getpid()}] A network error was detected in client application:\n"
+                networkErrorMsgString += f"Path: {networkError.path}\n"
+                networkErrorMsgString += f"Status Code: {networkError.statusCode}\n"
+                networkErrorMsgString += f"Message: {networkError.message}\n"
+
+                getLogger().info(networkErrorMsgString)
+
+                self.errorHashes.add(errorHash)
+                hadNewError = True
 
         screenHash = self.addScreenshot()
 

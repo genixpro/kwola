@@ -134,6 +134,12 @@ class ExecutionTrace(Document):
     # This is only "cached" because it can actually be recomputed on the fly
     cachedEndDecayingFutureBranchTrace = DictField(ListField())
 
+    timeForScreenshot = FloatField()
+    timeForActionMapRetrieval = FloatField()
+    timeForActionDecision = FloatField()
+    timeForActionExecution = FloatField()
+    timeForMiscellaneous = FloatField()
+
     # We use Python getter / setter methods to transparently compress and decompress
     # these fields as they go into and out of the database model.
     @property

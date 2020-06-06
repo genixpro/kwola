@@ -20,9 +20,11 @@
 
 from ...components.proxy.JSRewriteProxy import JSRewriteProxy
 from ...components.proxy.PathTracer import PathTracer
+from ...components.proxy.NetworkErrorTracer import NetworkErrorTracer
 from ...config.logger import getLogger, setupLocalLogging
 from contextlib import closing
 from mitmproxy.tools.dump import DumpMaster
+import pickle
 import mitmproxy.exceptions
 from threading import Thread
 import asyncio
@@ -70,14 +72,22 @@ class ProxyProcess:
         self.commandQueue.put("getMostRecentNetworkActivityTime")
         return self.resultQueue.get()
 
+    def getNetworkErrors(self):
+        self.commandQueue.put("getNetworkErrors")
+        return pickle.loads(self.resultQueue.get())
+
+    def resetNetworkErrors(self):
+        self.commandQueue.put("resetNetworkErrors")
+
     @staticmethod
     def runProxyServerSubprocess(config, commandQueue, resultQueue):
         setupLocalLogging()
 
         codeRewriter = JSRewriteProxy(config)
         pathTracer = PathTracer()
+        networkErrorTracer = NetworkErrorTracer()
 
-        proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(codeRewriter, pathTracer, resultQueue), daemon=True)
+        proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(codeRewriter, pathTracer, networkErrorTracer, resultQueue), daemon=True)
         proxyThread.start()
 
         while True:
@@ -85,6 +95,9 @@ class ProxyProcess:
 
             if message == "resetPathTrace":
                 pathTracer.recentPaths = set()
+
+            if message == "resetNetworkErrors":
+                networkErrorTracer.errors = []
 
             if message == "getPathTrace":
                 pathTrace = {
@@ -96,19 +109,22 @@ class ProxyProcess:
 
                 resultQueue.put(pathTrace)
 
+            if message == "getNetworkErrors":
+                resultQueue.put(pickle.dumps(networkErrorTracer.errors))
+
             if message == "getMostRecentNetworkActivityTime":
                 resultQueue.put(pathTracer.mostRecentNetworkActivityTime)
 
     @staticmethod
-    def runProxyServerThread(codeRewriter, pathTracer, resultQueue):
+    def runProxyServerThread(codeRewriter, pathTracer, networkErrorTracer, resultQueue):
         while True:
             try:
-                ProxyProcess.runProxyServerOnce(codeRewriter, pathTracer, resultQueue)
+                ProxyProcess.runProxyServerOnce(codeRewriter, pathTracer, networkErrorTracer, resultQueue)
             except Exception:
                 pass
 
     @staticmethod
-    def runProxyServerOnce(codeRewriter, pathTracer, resultQueue):
+    def runProxyServerOnce(codeRewriter, pathTracer, networkErrorTracer, resultQueue):
         from mitmproxy import proxy, options
 
         loop = asyncio.new_event_loop()
@@ -125,6 +141,7 @@ class ProxyProcess:
                 m.server = proxy.server.ProxyServer(pconf)
                 m.addons.add(codeRewriter)
                 m.addons.add(pathTracer)
+                m.addons.add(networkErrorTracer)
                 break
             except mitmproxy.exceptions.ServerException:
                 pass

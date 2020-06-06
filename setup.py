@@ -42,7 +42,9 @@ requirements = [
     "torch",
     "filetype",
     "billiard",
-    "wheel"
+    "wheel",
+    "python-Levenshtein",
+    "bs4"
 ]
 
 setup(

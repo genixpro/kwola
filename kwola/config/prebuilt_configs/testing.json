@@ -237,13 +237,13 @@
     "cleave",
     "collect",
     "cufon",
-    "d3.js",
-    "date.js",
+    "d3_js",
+    "date_js",
     "dojo",
     "ember",
     "firebug",
     "flot",
-    "ga.js",
+    "ga_js",
     "glimmer",
     "granim",
     "graph",
@@ -254,7 +254,7 @@
     "lazy",
     "licia",
     "lodash",
-    "math.js",
+    "math_js",
     "mathjs",
     "mercury",
     "meteor",
@@ -292,6 +292,6 @@
     "verge",
     "vue",
     "webix",
-    "webworker"
+    "worker"
   ]
 }

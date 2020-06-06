@@ -184,11 +184,24 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
             subProcesses.append((subProcessCommandQueue, subProcessResultQueue, subProcess))
 
+        listOfTimesForScreenshot = []
+        listOfTimesForActionMapRetrieval = []
+        listOfTimesForActionDecision = []
+        listOfTimesForActionExecution = []
+        listOfTimesForMiscellaneous = []
+        listOfTotalLoopTimes = []
+
+        loopTime = datetime.now()
         while stepsRemaining > 0:
             stepsRemaining -= 1
 
+            taskStartTime = datetime.now()
             images = environment.getImages()
+            screenshotTime = (datetime.now() - taskStartTime).total_seconds()
+
+            taskStartTime = datetime.now()
             envActionMaps = environment.getActionMaps()
+            actionMapRetrievalTime = (datetime.now() - taskStartTime).total_seconds()
 
             fileDescriptor, inferenceBatchFileName = tempfile.mkstemp()
 
@@ -199,23 +212,50 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
 
             subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses[0]
 
+            taskStartTime = datetime.now()
             subProcessCommandQueue.put(inferenceBatchFileName)
             resultFileName = subProcessResultQueue.get()
+            actionDecisionTime = (datetime.now() - taskStartTime).total_seconds()
             with open(resultFileName, 'rb') as file:
                 actions = pickle.load(file)
             os.unlink(resultFileName)
 
             if stepsRemaining % config['testing_print_every'] == 0:
                 getLogger().info(f"[{os.getpid()}] Finished {step + 1} testing actions.")
+                getLogger().info(f"[{os.getpid()}]     Avg Screenshot time: {numpy.average(listOfTimesForScreenshot[-config['testing_print_every']:])}")
+                getLogger().info(f"[{os.getpid()}]     Avg Action Map Retrieval Time: {numpy.average(listOfTimesForActionMapRetrieval[-config['testing_print_every']:])}")
+                getLogger().info(f"[{os.getpid()}]     Avg Action Decision Time: {numpy.average(listOfTimesForActionDecision[-config['testing_print_every']:])}")
+                getLogger().info(f"[{os.getpid()}]     Avg Action Execution Time: {numpy.average(listOfTimesForActionExecution[-config['testing_print_every']:])}")
+                getLogger().info(f"[{os.getpid()}]     Avg Miscellaneous Time: {numpy.average(listOfTimesForMiscellaneous[-config['testing_print_every']:])}")
+                getLogger().info(f"[{os.getpid()}]     Avg Total Loop Time: {numpy.average(listOfTotalLoopTimes[-config['testing_print_every']:])}")
 
+            taskStartTime = datetime.now()
             traces = environment.runActions(actions, [executionSession.id for executionSession in executionSessions])
+            actionExecutionTime = (datetime.now() - taskStartTime).total_seconds()
+
+            totalLoopTime = (datetime.now() - loopTime).total_seconds()
+            loopTime = datetime.now()
+            listOfTotalLoopTimes.append(totalLoopTime)
+
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
                 trace.executionSessionId = str(executionSession.id)
                 trace.testingStepId = str(testingStepId)
                 trace.applicationId = str(executionSession.applicationId)
                 trace.testingRunId = str(executionSession.testingRunId)
                 trace.owner = testStep.owner
+
+                trace.timeForScreenshot = screenshotTime
+                trace.timeForActionMapRetrieval = actionMapRetrievalTime
+                trace.timeForActionDecision = actionDecisionTime
+                trace.timeForActionExecution = actionExecutionTime
+                trace.timeForMiscellaneous = totalLoopTime - (screenshotTime + actionMapRetrievalTime + actionDecisionTime + actionExecutionTime)
                 trace.saveToDisk(config)
+
+                listOfTimesForScreenshot.append(trace.timeForScreenshot)
+                listOfTimesForActionMapRetrieval.append(trace.timeForActionMapRetrieval)
+                listOfTimesForActionDecision.append(trace.timeForActionDecision)
+                listOfTimesForActionExecution.append(trace.timeForActionExecution)
+                listOfTimesForMiscellaneous.append(trace.timeForMiscellaneous)
 
                 executionSessions[sessionN].executionTraces.append(str(trace.id))
                 executionSessionTraces[sessionN].append(trace)
@@ -229,6 +269,7 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
                         newErrorsThisTestingStep.append(error)
                         newErrorOriginalExecutionSessionIds.append(str(executionSession.id))
                         newErrorOriginalStepNumbers.append(step)
+
 
             if config['testing_reset_agent_period'] == 1 or stepsRemaining % config['testing_reset_agent_period'] == (config['testing_reset_agent_period'] - 1):
                 subProcessCommandQueue, subProcessResultQueue, subProcess = subProcesses.pop(0)
@@ -279,6 +320,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             atexit.register(lambda: debugVideoSubprocess.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess)
 
+        existingBugs = loadAllBugs(config)
+
         getLogger().info(f"[{os.getpid()}] Found {len(newErrorsThisTestingStep)} new unique errors this session.")
         for errorIndex, error, executionSessionId, stepNumber in zip(range(len(newErrorsThisTestingStep)), newErrorsThisTestingStep, newErrorOriginalExecutionSessionIds, newErrorOriginalStepNumbers):
             bug = BugModel()
@@ -290,23 +333,33 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             bug.stepNumber = stepNumber
             bug.error = error
             bug.testingRunId = testStep.testingRunId
-            bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
-            bug.saveToDisk(config)
 
-            bugTextFile = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")
-            with open(bugTextFile, "wt") as file:
-                file.write(bug.generateBugText())
+            duplicate = False
+            for existingBug in existingBugs:
+                if bug.isDuplicateOf(existingBug):
+                    duplicate = True
+                    break
 
-            bugVideoFilePath = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".mp4")
-            with open(os.path.join(kwolaVideoDirectory, f'{str(executionSessionId)}.mp4'), "rb") as origFile:
-                with open(bugVideoFilePath, 'wb') as cloneFile:
-                    cloneFile.write(origFile.read())
+            if not duplicate:
+                bug.saveToDisk(config, overrideSaveFormat="json", overrideCompression=0)
+                bug.saveToDisk(config)
 
-            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
-            atexit.register(lambda: debugVideoSubprocess.terminate())
-            debugVideoSubprocesses.append(debugVideoSubprocess)
+                bugTextFile = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")
+                with open(bugTextFile, "wt") as file:
+                    file.write(bug.generateBugText())
 
-            getLogger().info(f"\n\n[{os.getpid()}] Bug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
+                bugVideoFilePath = os.path.join(config.getKwolaUserDataDirectory("bugs"), bug.id + ".mp4")
+                with open(os.path.join(kwolaVideoDirectory, f'{str(executionSessionId)}.mp4'), "rb") as origFile:
+                    with open(bugVideoFilePath, 'wb') as cloneFile:
+                        cloneFile.write(origFile.read())
+
+                debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(configDir, str(executionSessionId), f"{bug.id}_bug", False, False, stepNumber, "bugs"))
+                atexit.register(lambda: debugVideoSubprocess.terminate())
+                debugVideoSubprocesses.append(debugVideoSubprocess)
+
+                getLogger().info(f"\n\n[{os.getpid()}] Bug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
+
+                existingBugs.append(bug)
 
 
         if not shouldBeRandom and generateDebugVideo:
