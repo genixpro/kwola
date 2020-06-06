@@ -154,6 +154,8 @@ class WebEnvironmentSession:
             "global_addEventListener",
         ]
 
+        self.hasBrowserDied = False
+
     def __del__(self):
         self.shutdown()
 
@@ -227,6 +229,9 @@ class WebEnvironmentSession:
         return os.path.join(self.screenshotDirectory, self.movieFileName())
 
     def createMovie(self):
+        if self.hasBrowserDied:
+            return None
+
         result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         if result.returncode != 0:
@@ -279,70 +284,77 @@ class WebEnvironmentSession:
         """
             This method is used to perform the automatic heuristic based login.
         """
-        time.sleep(2)
-        self.waitUntilNoNetworkActivity()
-
-        emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
-
-        # check to see if there is a "login" button that we need to click first to expose
-        # the login form
-        if (len(emailInputs) == 0) and (len(passwordInputs) == 0) and len(loginButtons) > 0:
-            loginTriggerButton = loginButtons[0]
-
-            loginClickAction = ClickTapAction(x=loginTriggerButton.left + 1,
-                                              y=loginTriggerButton.top + 1,
-                                              source="autologin",
-                                              times=1,
-                                              type="click")
-            success = self.performActionInBrowser(loginClickAction)
+        try:
+            time.sleep(2)
+            self.waitUntilNoNetworkActivity()
 
             emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
 
-            loginButtons = list(filter(lambda button: button.keywords != loginTriggerButton.keywords, loginButtons))
+            # check to see if there is a "login" button that we need to click first to expose
+            # the login form
+            if (len(emailInputs) == 0) and (len(passwordInputs) == 0) and len(loginButtons) > 0:
+                loginTriggerButton = loginButtons[0]
+
+                loginClickAction = ClickTapAction(x=loginTriggerButton.left + 1,
+                                                  y=loginTriggerButton.top + 1,
+                                                  source="autologin",
+                                                  times=1,
+                                                  type="click")
+                success = self.performActionInBrowser(loginClickAction)
+
+                emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
+
+                loginButtons = list(filter(lambda button: button.keywords != loginTriggerButton.keywords, loginButtons))
 
 
-        if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
-            getLogger().warning(f"[{os.getpid()}] Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.")
-            return
+            if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
+                getLogger().warning(f"[{os.getpid()}] Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.")
+                return
 
-        startURL = self.driver.current_url
+            startURL = self.driver.current_url
 
-        emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
-                                     y=emailInputs[0].top + 1,
-                                     source="autologin",
-                                     label="email",
-                                     text=self.config.email,
-                                     type="typeEmail")
+            emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
+                                         y=emailInputs[0].top + 1,
+                                         source="autologin",
+                                         label="email",
+                                         text=self.config.email,
+                                         type="typeEmail")
 
-        passwordTypeAction = TypeAction(x=passwordInputs[0].left + 1,
-                                        y=passwordInputs[0].top + 1,
-                                        source="autologin",
-                                        label="password",
-                                        text=self.config.password,
-                                        type="typePassword")
+            passwordTypeAction = TypeAction(x=passwordInputs[0].left + 1,
+                                            y=passwordInputs[0].top + 1,
+                                            source="autologin",
+                                            label="password",
+                                            text=self.config.password,
+                                            type="typePassword")
 
-        loginClickAction = ClickTapAction(x=loginButtons[0].left + 1,
-                                          y=loginButtons[0].top + 1,
-                                          source="autologin",
-                                          times=1,
-                                          type="click")
+            loginClickAction = ClickTapAction(x=loginButtons[0].left + 1,
+                                              y=loginButtons[0].top + 1,
+                                              source="autologin",
+                                              times=1,
+                                              type="click")
 
-        success1 = self.performActionInBrowser(emailTypeAction)
-        success2 = self.performActionInBrowser(passwordTypeAction)
-        success3 = self.performActionInBrowser(loginClickAction)
+            success1 = self.performActionInBrowser(emailTypeAction)
+            success2 = self.performActionInBrowser(passwordTypeAction)
+            success3 = self.performActionInBrowser(loginClickAction)
 
-        time.sleep(2)
-        self.waitUntilNoNetworkActivity()
+            time.sleep(2)
+            self.waitUntilNoNetworkActivity()
 
-        didURLChange = bool(startURL != self.driver.current_url)
+            didURLChange = bool(startURL != self.driver.current_url)
 
-        if success1 and success2 and success3:
-            if didURLChange:
-                getLogger().info(f"[{os.getpid()}] Heuristic autologin appears to have worked!")
+            if success1 and success2 and success3:
+                if didURLChange:
+                    getLogger().info(f"[{os.getpid()}] Heuristic autologin appears to have worked!")
+                else:
+                    getLogger().warning(f"[{os.getpid()}] Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
             else:
-                getLogger().warning(f"[{os.getpid()}] Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
-        else:
-            getLogger().warning(f"[{os.getpid()}] There was an error running one of the actions required for the heuristic auto login.")
+                getLogger().warning(f"[{os.getpid()}] There was an error running one of the actions required for the heuristic auto login.")
+        except urllib3.exceptions.MaxRetryError:
+            self.hasBrowserDied = True
+            return None
+        except selenium.common.exceptions.WebDriverException:
+            self.hasBrowserDied = True
+            return None
 
     def extractBranchTrace(self):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
@@ -396,148 +408,158 @@ class WebEnvironmentSession:
         return result
 
     def getActionMaps(self):
-        elementActionMaps = self.driver.execute_script("""
-            function isFunction(functionToCheck) {
-             return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
-            }
-        
-            const actionMaps = [];
-            const domElements = document.querySelectorAll("*");
+        try:
+            if self.hasBrowserDied:
+                return []
+
+            elementActionMaps = self.driver.execute_script("""
+                function isFunction(functionToCheck) {
+                 return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
+                }
             
-            for(let element of domElements)
-            {
-                const bounds = element.getBoundingClientRect();
-               
-                if (bounds.bottom < 0 || bounds.right < 0)
-                    continue;
-                    
-                if (bounds.top > window.innerHeight || bounds.left > window.innerWidth)
-                    continue;
+                const actionMaps = [];
+                const domElements = document.querySelectorAll("*");
                 
-                const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
-                const paddingRight = Number(window.getComputedStyle(element, null).getPropertyValue('padding-right').replace("px", ""));
-                const paddingTop = Number(window.getComputedStyle(element, null).getPropertyValue('padding-top').replace("px", ""));
-                const paddingBottom = Number(window.getComputedStyle(element, null).getPropertyValue('padding-bottom').replace("px", ""));
-                
-                const data = {
-                    canClick: false,
-                    canRightClick: false,
-                    canType: false,
-                    left: bounds.left + paddingLeft + 3,
-                    right: bounds.right - paddingRight - 3,
-                    top: bounds.top + paddingTop + 3,
-                    bottom: bounds.bottom - paddingBottom - 3,
-                    width: bounds.width - paddingLeft - paddingRight - 6,
-                    height: bounds.height - paddingTop - paddingBottom - 6,
-                    elementType: element.tagName.toLowerCase(),
-                    keywords: (element.textContent + " " + element.getAttribute("class") + " " + element.getAttribute("name") + " " + element.getAttribute("id")).toLowerCase() 
-                };
-                
-                // Skip this element if it covers basically the whole screen.
-                if (data.width > (window.innerWidth * 0.80) && data.height > (window.innerHeight * 0.80))
+                for(let element of domElements)
                 {
-                    continue;
+                    const bounds = element.getBoundingClientRect();
+                   
+                    if (bounds.bottom < 0 || bounds.right < 0)
+                        continue;
+                        
+                    if (bounds.top > window.innerHeight || bounds.left > window.innerWidth)
+                        continue;
+                    
+                    const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
+                    const paddingRight = Number(window.getComputedStyle(element, null).getPropertyValue('padding-right').replace("px", ""));
+                    const paddingTop = Number(window.getComputedStyle(element, null).getPropertyValue('padding-top').replace("px", ""));
+                    const paddingBottom = Number(window.getComputedStyle(element, null).getPropertyValue('padding-bottom').replace("px", ""));
+                    
+                    const data = {
+                        canClick: false,
+                        canRightClick: false,
+                        canType: false,
+                        left: bounds.left + paddingLeft + 3,
+                        right: bounds.right - paddingRight - 3,
+                        top: bounds.top + paddingTop + 3,
+                        bottom: bounds.bottom - paddingBottom - 3,
+                        width: bounds.width - paddingLeft - paddingRight - 6,
+                        height: bounds.height - paddingTop - paddingBottom - 6,
+                        elementType: element.tagName.toLowerCase(),
+                        keywords: (element.textContent + " " + element.getAttribute("class") + " " + element.getAttribute("name") + " " + element.getAttribute("id")).toLowerCase() 
+                    };
+                    
+                    // Skip this element if it covers basically the whole screen.
+                    if (data.width > (window.innerWidth * 0.80) && data.height > (window.innerHeight * 0.80))
+                    {
+                        continue;
+                    }
+                    
+                    if (element.tagName === "A"
+                            || element.tagName === "BUTTON"
+                            || element.tagName === "AREA"
+                            || element.tagName === "AUDIO"
+                            || element.tagName === "VIDEO"
+                            || element.tagName === "SELECT")
+                        data.canClick = true;
+                    
+                    if (element.tagName === "INPUT" && !(element.getAttribute("type") === "text" 
+                                                         || element.getAttribute("type") === "" 
+                                                         || element.getAttribute("type") === "password"
+                                                         || element.getAttribute("type") === "email"
+                                                         || element.getAttribute("type") === null 
+                                                         || element.getAttribute("type") === undefined 
+                                                         || !element.getAttribute("type")
+                                                      ))
+                        data.canClick = true;
+                    
+                    const elemStyle = window.getComputedStyle(element);
+                    if (elemStyle.getPropertyValue("cursor") === "pointer")
+                        data.canClick = true;
+                    
+                    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
+                        data.canType = true;
+                    
+                    if (isFunction(element.onclick) 
+                        || isFunction(element.onauxclick) 
+                        || isFunction(element.onmousedown)
+                        || isFunction(element.onmouseup)
+                        || isFunction(element.ontouchend)
+                        || isFunction(element.ontouchstart))
+                        data.canClick = true;
+                    
+                    if (isFunction(element.oncontextmenu))
+                        data.canRightClick = true;
+                    
+                    if (isFunction(element.onkeydown) 
+                        || isFunction(element.onkeypress) 
+                        || isFunction(element.onkeyup))
+                        data.canType = true;
+                        
+                    if (window.kwolaEvents && window.kwolaEvents.has(element))
+                    {
+                        const knownEvents = window.kwolaEvents.get(element);
+                        if (knownEvents.indexOf("click") != -1)
+                        {
+                            data.canClick = true;
+                        }
+                        if (knownEvents.indexOf("contextmenu") != -1)
+                        {
+                            data.canRightClick = true;
+                        }
+                        if (knownEvents.indexOf("dblclick") != -1)
+                        {
+                            data.canClick = true;
+                        }
+                        
+                        if (knownEvents.indexOf("mousedown") != -1)
+                        {
+                            data.canClick = true;
+                            data.canRightClick = true;
+                        }
+                        if (knownEvents.indexOf("mouseup") != -1)
+                        {
+                            data.canClick = true;
+                            data.canRightClick = true;
+                        }
+                        
+                        if (knownEvents.indexOf("keydown") != -1)
+                        {
+                            data.canType = true;
+                        }
+                        if (knownEvents.indexOf("keypress") != -1)
+                        {
+                            data.canType = true;
+                        }
+                        if (knownEvents.indexOf("keyup") != -1)
+                        {
+                            data.canType = true;
+                        }
+                    }
+                    
+                    if (data.canType || data.canClick || data.canRightClick)
+                        if (data.width > 0 && data.height > 0)
+                            actionMaps.push(data);
                 }
                 
-                if (element.tagName === "A"
-                        || element.tagName === "BUTTON"
-                        || element.tagName === "AREA"
-                        || element.tagName === "AUDIO"
-                        || element.tagName === "VIDEO"
-                        || element.tagName === "SELECT")
-                    data.canClick = true;
-                
-                if (element.tagName === "INPUT" && !(element.getAttribute("type") === "text" 
-                                                     || element.getAttribute("type") === "" 
-                                                     || element.getAttribute("type") === "password"
-                                                     || element.getAttribute("type") === "email"
-                                                     || element.getAttribute("type") === null 
-                                                     || element.getAttribute("type") === undefined 
-                                                     || !element.getAttribute("type")
-                                                  ))
-                    data.canClick = true;
-                
-                const elemStyle = window.getComputedStyle(element);
-                if (elemStyle.getPropertyValue("cursor") === "pointer")
-                    data.canClick = true;
-                
-                if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
-                    data.canType = true;
-                
-                if (isFunction(element.onclick) 
-                    || isFunction(element.onauxclick) 
-                    || isFunction(element.onmousedown)
-                    || isFunction(element.onmouseup)
-                    || isFunction(element.ontouchend)
-                    || isFunction(element.ontouchstart))
-                    data.canClick = true;
-                
-                if (isFunction(element.oncontextmenu))
-                    data.canRightClick = true;
-                
-                if (isFunction(element.onkeydown) 
-                    || isFunction(element.onkeypress) 
-                    || isFunction(element.onkeyup))
-                    data.canType = true;
-                    
-                if (window.kwolaEvents && window.kwolaEvents.has(element))
-                {
-                    const knownEvents = window.kwolaEvents.get(element);
-                    if (knownEvents.indexOf("click") != -1)
-                    {
-                        data.canClick = true;
-                    }
-                    if (knownEvents.indexOf("contextmenu") != -1)
-                    {
-                        data.canRightClick = true;
-                    }
-                    if (knownEvents.indexOf("dblclick") != -1)
-                    {
-                        data.canClick = true;
-                    }
-                    
-                    if (knownEvents.indexOf("mousedown") != -1)
-                    {
-                        data.canClick = true;
-                        data.canRightClick = true;
-                    }
-                    if (knownEvents.indexOf("mouseup") != -1)
-                    {
-                        data.canClick = true;
-                        data.canRightClick = true;
-                    }
-                    
-                    if (knownEvents.indexOf("keydown") != -1)
-                    {
-                        data.canType = true;
-                    }
-                    if (knownEvents.indexOf("keypress") != -1)
-                    {
-                        data.canType = true;
-                    }
-                    if (knownEvents.indexOf("keyup") != -1)
-                    {
-                        data.canType = true;
-                    }
-                }
-                
-                if (data.canType || data.canClick || data.canRightClick)
-                    if (data.width > 0 && data.height > 0)
-                        actionMaps.push(data);
-            }
-            
-            return actionMaps;
-        """)
+                return actionMaps;
+            """)
 
-        actionMaps = []
+            actionMaps = []
 
-        for actionMapData in elementActionMaps:
-            actionMap = ActionMap(**actionMapData)
-            # Cut the keywords off at 1024 characters to prevent too much memory / storage usage
-            actionMap.keywords = actionMap.keywords[:self.config['web_session_action_map_max_keyword_size']]
-            actionMaps.append(actionMap)
+            for actionMapData in elementActionMaps:
+                actionMap = ActionMap(**actionMapData)
+                # Cut the keywords off at 1024 characters to prevent too much memory / storage usage
+                actionMap.keywords = actionMap.keywords[:self.config['web_session_action_map_max_keyword_size']]
+                actionMaps.append(actionMap)
 
-        return actionMaps
+            return actionMaps
+        except urllib3.exceptions.MaxRetryError:
+            self.hasBrowserDied = True
+            return []
+        except selenium.common.exceptions.WebDriverException:
+            self.hasBrowserDied = True
+            return []
 
     def performActionInBrowser(self, action):
         success = True
@@ -660,234 +682,254 @@ class WebEnvironmentSession:
             pass
 
     def runAction(self, action, executionSessionId):
-        self.checkOffsite(priorURL=self.targetURL)
-
-        executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
-        executionTrace.time = datetime.now()
-        executionTrace.actionPerformed = action
-        executionTrace.errorsDetected = []
-        executionTrace.startURL = self.driver.current_url
-        executionTrace.actionMaps = self.getActionMaps()
-
-        startLogCount = len(self.driver.get_log('browser'))
-
-        self.proxy.resetPathTrace()
-        self.proxy.resetNetworkErrors()
-
         try:
-            element = self.driver.execute_script("""
-            return document.elementFromPoint(arguments[0], arguments[1]);
-            """, action.x, action.y)
+            if self.hasBrowserDied:
+                return None
 
-            if element is not None:
-                executionTrace.cursor = element.value_of_css_property("cursor")
-            else:
+            self.checkOffsite(priorURL=self.targetURL)
+
+            executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
+            executionTrace.time = datetime.now()
+            executionTrace.actionPerformed = action
+            executionTrace.errorsDetected = []
+            executionTrace.startURL = self.driver.current_url
+            executionTrace.actionMaps = self.getActionMaps()
+
+            startLogCount = len(self.driver.get_log('browser'))
+
+            self.proxy.resetPathTrace()
+            self.proxy.resetNetworkErrors()
+
+            try:
+                element = self.driver.execute_script("""
+                return document.elementFromPoint(arguments[0], arguments[1]);
+                """, action.x, action.y)
+
+                if element is not None:
+                    executionTrace.cursor = element.value_of_css_property("cursor")
+                else:
+                    executionTrace.cursor = None
+
+            except selenium.common.exceptions.StaleElementReferenceException as e:
                 executionTrace.cursor = None
 
-        except selenium.common.exceptions.StaleElementReferenceException as e:
-            executionTrace.cursor = None
+            success = self.performActionInBrowser(action)
 
-        success = self.performActionInBrowser(action)
+            executionTrace.didActionSucceed = success
 
-        executionTrace.didActionSucceed = success
+            self.checkOffsite(priorURL=executionTrace.startURL)
+            self.checkLoadFailure()
 
-        self.checkOffsite(priorURL=executionTrace.startURL)
-        self.checkLoadFailure()
+            hadNewError = False
+            exceptions = self.extractExceptions()
+            for exception in exceptions:
+                msg, source, lineno, colno, stack = tuple(exception)
 
-        hadNewError = False
-        exceptions = self.extractExceptions()
-        for exception in exceptions:
-            msg, source, lineno, colno, stack = tuple(exception)
+                msg = str(msg)
+                source = str(source)
+                stack = str(stack)
 
-            msg = str(msg)
-            source = str(source)
-            stack = str(stack)
-
-            combinedMessage = msg + source + stack
-
-            kwolaJSRewriteErrorFound = False
-            for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
-                if detectionString in combinedMessage:
-                    kwolaJSRewriteErrorFound = True
-
-            if kwolaJSRewriteErrorFound:
-                logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
-                          f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
-                          f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
-                          f"issue. \n"
-                
-                logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
-                
-                logMsgString += f"{str(stack)}\n"
-                
-                getLogger().error(logMsgString)
-            else:
-                error = ExceptionError(type="exception", page=executionTrace.startURL, stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
-                executionTrace.errorsDetected.append(error)
-                errorHash = error.computeHash()
-
-                if errorHash not in self.errorHashes:
-                    logMsgString = f"[{os.getpid()}] An unhandled exception was detected in client application:\n"
-                    logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
-                    logMsgString += f"{str(stack)}"
-                    
-                    getLogger().info(logMsgString)
-
-                    self.errorHashes.add(errorHash)
-                    hadNewError = True
-
-        logEntries = self.driver.get_log('browser')[startLogCount:]
-        for log in logEntries:
-            if log['level'] == 'SEVERE':
-                message = str(log['message'])
-                message = message.replace("\\n", "\n")
-
-                # If it looks like a network error, then ignore it because those are handled separately
-                if self.networkErrorRegex.search(message) is not None:
-                    continue
+                combinedMessage = msg + source + stack
 
                 kwolaJSRewriteErrorFound = False
                 for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
-                    if detectionString in message:
+                    if detectionString in combinedMessage:
                         kwolaJSRewriteErrorFound = True
 
                 if kwolaJSRewriteErrorFound:
                     logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
                               f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
                               f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
-                              f"issue.\n"
-                    
-                    logMsgString += f"{message}\n"
-                    
+                              f"issue. \n"
+
+                    logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
+
+                    logMsgString += f"{str(stack)}\n"
+
                     getLogger().error(logMsgString)
                 else:
-                    error = LogError(type="log", page=executionTrace.startURL, message=message, logLevel=log['level'])
+                    error = ExceptionError(type="exception", page=executionTrace.startURL, stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
                     executionTrace.errorsDetected.append(error)
                     errorHash = error.computeHash()
 
                     if errorHash not in self.errorHashes:
-                        logMsgString = f"[{os.getpid()}] A log error was detected in client application:\n"                        
-                        logMsgString += f"{message}\n"
-                        
+                        logMsgString = f"[{os.getpid()}] An unhandled exception was detected in client application:\n"
+                        logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
+                        logMsgString += f"{str(stack)}"
+
                         getLogger().info(logMsgString)
-                        
+
                         self.errorHashes.add(errorHash)
                         hadNewError = True
 
-        for networkError in self.proxy.getNetworkErrors():
-            networkError.page = executionTrace.startURL
-            executionTrace.errorsDetected.append(networkError)
-            errorHash = networkError.computeHash()
+            logEntries = self.driver.get_log('browser')[startLogCount:]
+            for log in logEntries:
+                if log['level'] == 'SEVERE':
+                    message = str(log['message'])
+                    message = message.replace("\\n", "\n")
 
-            if errorHash not in self.errorHashes:
-                networkErrorMsgString = f"[{os.getpid()}] A network error was detected in client application:\n"
-                networkErrorMsgString += f"Path: {networkError.path}\n"
-                networkErrorMsgString += f"Status Code: {networkError.statusCode}\n"
-                networkErrorMsgString += f"Message: {networkError.message}\n"
+                    # If it looks like a network error, then ignore it because those are handled separately
+                    if self.networkErrorRegex.search(message) is not None:
+                        continue
 
-                getLogger().info(networkErrorMsgString)
+                    kwolaJSRewriteErrorFound = False
+                    for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
+                        if detectionString in message:
+                            kwolaJSRewriteErrorFound = True
 
-                self.errorHashes.add(errorHash)
-                hadNewError = True
+                    if kwolaJSRewriteErrorFound:
+                        logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
+                                  f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
+                                  f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
+                                  f"issue.\n"
 
-        screenHash = self.addScreenshot()
+                        logMsgString += f"{message}\n"
 
-        branchTrace = self.extractBranchTrace()
+                        getLogger().error(logMsgString)
+                    else:
+                        error = LogError(type="log", page=executionTrace.startURL, message=message, logLevel=log['level'])
+                        executionTrace.errorsDetected.append(error)
+                        errorHash = error.computeHash()
 
-        urlPathTrace = self.proxy.getPathTrace()
+                        if errorHash not in self.errorHashes:
+                            logMsgString = f"[{os.getpid()}] A log error was detected in client application:\n"
+                            logMsgString += f"{message}\n"
 
-        cumulativeProxyPaths = urlPathTrace['seen']
-        newProxyPaths = cumulativeProxyPaths.difference(self.lastProxyPaths)
-        newBranches = False
-        filteredBranchTrace = {}
+                            getLogger().info(logMsgString)
 
-        for fileName in branchTrace.keys():
-            traceVector = branchTrace[fileName]
-            didExecuteFile = bool(numpy.sum(traceVector) > 0)
+                            self.errorHashes.add(errorHash)
+                            hadNewError = True
 
-            if didExecuteFile:
-                filteredBranchTrace[fileName] = traceVector
+            for networkError in self.proxy.getNetworkErrors():
+                networkError.page = executionTrace.startURL
+                executionTrace.errorsDetected.append(networkError)
+                errorHash = networkError.computeHash()
 
-            if fileName in self.cumulativeBranchTrace:
-                cumulativeTraceVector = self.cumulativeBranchTrace[fileName]
+                if errorHash not in self.errorHashes:
+                    networkErrorMsgString = f"[{os.getpid()}] A network error was detected in client application:\n"
+                    networkErrorMsgString += f"Path: {networkError.path}\n"
+                    networkErrorMsgString += f"Status Code: {networkError.statusCode}\n"
+                    networkErrorMsgString += f"Message: {networkError.message}\n"
 
-                if len(traceVector) == len(cumulativeTraceVector):
-                    newBranchCount = np.sum(traceVector[cumulativeTraceVector == 0])
-                    if newBranchCount > 0:
-                        newBranches = True
+                    getLogger().info(networkErrorMsgString)
+
+                    self.errorHashes.add(errorHash)
+                    hadNewError = True
+
+            screenHash = self.addScreenshot()
+
+            branchTrace = self.extractBranchTrace()
+
+            urlPathTrace = self.proxy.getPathTrace()
+
+            cumulativeProxyPaths = urlPathTrace['seen']
+            newProxyPaths = cumulativeProxyPaths.difference(self.lastProxyPaths)
+            newBranches = False
+            filteredBranchTrace = {}
+
+            for fileName in branchTrace.keys():
+                traceVector = branchTrace[fileName]
+                didExecuteFile = bool(numpy.sum(traceVector) > 0)
+
+                if didExecuteFile:
+                    filteredBranchTrace[fileName] = traceVector
+
+                if fileName in self.cumulativeBranchTrace:
+                    cumulativeTraceVector = self.cumulativeBranchTrace[fileName]
+
+                    if len(traceVector) == len(cumulativeTraceVector):
+                        newBranchCount = np.sum(traceVector[cumulativeTraceVector == 0])
+                        if newBranchCount > 0:
+                            newBranches = True
+                    else:
+                        if didExecuteFile:
+                            newBranches = True
                 else:
                     if didExecuteFile:
                         newBranches = True
-            else:
-                if didExecuteFile:
-                    newBranches = True
 
-        executionTrace.branchTrace = {k:v.tolist() for k,v in filteredBranchTrace.items()}
+            executionTrace.branchTrace = {k:v.tolist() for k,v in filteredBranchTrace.items()}
 
-        executionTrace.networkTrafficTrace = list(urlPathTrace['recent'])
+            executionTrace.networkTrafficTrace = list(urlPathTrace['recent'])
 
-        executionTrace.startScreenshotHash = self.lastScreenshotHash
-        executionTrace.finishScreenshotHash = screenHash
-        executionTrace.tabNumber = self.tabNumber
-        executionTrace.frameNumber = self.frameNumber
+            executionTrace.startScreenshotHash = self.lastScreenshotHash
+            executionTrace.finishScreenshotHash = screenHash
+            executionTrace.tabNumber = self.tabNumber
+            executionTrace.frameNumber = self.frameNumber
 
-        executionTrace.logOutput = "\n".join([str(log) for log in logEntries])
-        executionTrace.finishURL = self.driver.current_url
+            executionTrace.logOutput = "\n".join([str(log) for log in logEntries])
+            executionTrace.finishURL = self.driver.current_url
 
-        executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-        executionTrace.didNewErrorOccur = hadNewError
-        executionTrace.didCodeExecute = bool(len(filteredBranchTrace) > 0)
-        executionTrace.didNewBranchesExecute = bool(newBranches)
+            executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
+            executionTrace.didNewErrorOccur = hadNewError
+            executionTrace.didCodeExecute = bool(len(filteredBranchTrace) > 0)
+            executionTrace.didNewBranchesExecute = bool(newBranches)
 
-        executionTrace.hadNetworkTraffic = len(urlPathTrace['recent']) > 0
-        executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
-        executionTrace.didScreenshotChange = screenHash != self.lastScreenshotHash
-        executionTrace.isScreenshotNew = screenHash not in self.screenshotHashes
-        executionTrace.didURLChange = executionTrace.startURL != executionTrace.finishURL
-        executionTrace.isURLNew = executionTrace.finishURL not in self.allUrls
+            executionTrace.hadNetworkTraffic = len(urlPathTrace['recent']) > 0
+            executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
+            executionTrace.didScreenshotChange = screenHash != self.lastScreenshotHash
+            executionTrace.isScreenshotNew = screenHash not in self.screenshotHashes
+            executionTrace.didURLChange = executionTrace.startURL != executionTrace.finishURL
+            executionTrace.isURLNew = executionTrace.finishURL not in self.allUrls
 
-        executionTrace.hadLogOutput = bool(executionTrace.logOutput)
+            executionTrace.hadLogOutput = bool(executionTrace.logOutput)
 
-        total = 0
-        executedAtleastOnce = 0
-        for fileName in self.cumulativeBranchTrace:
-            total += len(self.cumulativeBranchTrace[fileName])
-            executedAtleastOnce += np.count_nonzero(self.cumulativeBranchTrace[fileName])
+            total = 0
+            executedAtleastOnce = 0
+            for fileName in self.cumulativeBranchTrace:
+                total += len(self.cumulativeBranchTrace[fileName])
+                executedAtleastOnce += np.count_nonzero(self.cumulativeBranchTrace[fileName])
 
-        # Just an extra check here to cover our ass in case of division by zero
-        if total == 0:
-            total += 1
+            # Just an extra check here to cover our ass in case of division by zero
+            if total == 0:
+                total += 1
 
-        executionTrace.cumulativeBranchCoverage = float(executedAtleastOnce) / float(total)
+            executionTrace.cumulativeBranchCoverage = float(executedAtleastOnce) / float(total)
 
-        for fileName in filteredBranchTrace.keys():
-            if fileName in self.cumulativeBranchTrace:
-                if len(branchTrace[fileName]) == len(self.cumulativeBranchTrace[fileName]):
-                    self.cumulativeBranchTrace[fileName] += branchTrace[fileName]
+            for fileName in filteredBranchTrace.keys():
+                if fileName in self.cumulativeBranchTrace:
+                    if len(branchTrace[fileName]) == len(self.cumulativeBranchTrace[fileName]):
+                        self.cumulativeBranchTrace[fileName] += branchTrace[fileName]
+                    else:
+                        getLogger().warning(f"Warning! The file with fileName {fileName} has changed the size of its trace vector. This "
+                              f"is very unusual and could indicate some strange situation with dynamically loaded javascript")
                 else:
-                    getLogger().warning(f"Warning! The file with fileName {fileName} has changed the size of its trace vector. This "
-                          f"is very unusual and could indicate some strange situation with dynamically loaded javascript")
-            else:
-                self.cumulativeBranchTrace[fileName] = branchTrace[fileName]
+                    self.cumulativeBranchTrace[fileName] = branchTrace[fileName]
 
-        self.allUrls.add(self.driver.current_url)
+            self.allUrls.add(self.driver.current_url)
 
-        self.lastScreenshotHash = screenHash
-        self.screenshotHashes.add(screenHash)
+            self.lastScreenshotHash = screenHash
+            self.screenshotHashes.add(screenHash)
 
-        self.lastProxyPaths = set(urlPathTrace['seen'])
+            self.lastProxyPaths = set(urlPathTrace['seen'])
 
-        self.frameNumber += 1
+            self.frameNumber += 1
 
-        return executionTrace
+            return executionTrace
+        except urllib3.exceptions.MaxRetryError:
+            self.hasBrowserDied = True
+            return None
+        except selenium.common.exceptions.WebDriverException:
+            self.hasBrowserDied = True
+            return None
 
     def screenshotSize(self):
         rect = self.driver.get_window_rect()
         return rect
 
     def getImage(self):
-        image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
+        try:
+            if self.hasBrowserDied:
+                return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
 
-        image = numpy.flip(image[:, :, :3], axis=2)  # OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
+            image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
 
-        return image
+            image = numpy.flip(image[:, :, :3], axis=2)  # OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
+
+            return image
+        except urllib3.exceptions.MaxRetryError:
+            self.hasBrowserDied = True
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
+        except selenium.common.exceptions.WebDriverException:
+            self.hasBrowserDied = True
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])

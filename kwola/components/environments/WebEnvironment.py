@@ -126,3 +126,18 @@ class WebEnvironment:
         ]
 
         return np.array(moviePaths)
+
+    def removeBadSessionIfNeeded(self):
+        """
+            This method checks all the browser sessions to see if there are any bad ones. If so, it will remove
+            the first bad one it finds and return the index of that session
+
+            :return: None if all sessions are good, integer of the first bad session removed if there was a bad session
+                    removed.
+        """
+
+        for sessionN, session in enumerate(self.sessions):
+            if session.hasBrowserDied:
+                del self.sessions[sessionN]
+                return sessionN
+        return None

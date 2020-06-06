@@ -195,6 +195,13 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         while stepsRemaining > 0:
             stepsRemaining -= 1
 
+            sessionToRemove = environment.removeBadSessionIfNeeded()
+            while sessionToRemove is not None:
+                getLogger().warning(f"[{os.getpid()}] Removing web browser session at index {sessionToRemove} because the browser has crashed!")
+                del executionSessions[sessionToRemove]
+                del executionSessionTraces[sessionToRemove]
+                sessionToRemove = environment.removeBadSessionIfNeeded()
+
             taskStartTime = datetime.now()
             images = environment.getImages()
             screenshotTime = (datetime.now() - taskStartTime).total_seconds()
@@ -237,6 +244,9 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             loopTime = datetime.now()
 
             for sessionN, executionSession, trace in zip(range(len(traces)), executionSessions, traces):
+                if trace is None:
+                    continue
+
                 trace.executionSessionId = str(executionSession.id)
                 trace.testingStepId = str(testingStepId)
                 trace.applicationId = str(executionSession.applicationId)
@@ -398,6 +408,8 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
         testStep.endTime = datetime.now()
         testStep.executionSessions = [session.id for session in executionSessions]
         testStep.saveToDisk(config)
+        returnValue['successfulExecutionSessions'] = len(testStep.executionSessions)
+        returnValue['success'] = True
 
     except Exception as e:
         getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
