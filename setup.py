@@ -43,7 +43,7 @@ requirements = [
     "filetype",
     "billiard",
     "wheel",
-    "python-Levenshtein",
+    "StringDist",
     "bs4"
 ]
 
