@@ -57,8 +57,15 @@ def writeSingleExecutionTrace(traceBatch, sampleCacheDir):
     compressedPickleBytes = gzip.compress(pickleBytes)
 
     getLogger().info(f"Writing batch cache file {cacheFile}")
-    with open(cacheFile, 'wb') as file:
-        file.write(compressedPickleBytes)
+    maxAttempts = 10
+    for attempt in range(maxAttempts):
+        try:
+            with open(cacheFile, 'wb') as file:
+                file.write(compressedPickleBytes)
+            return
+        except OSError:
+            time.sleep(1.5 ** attempt)
+            continue
 
 def addExecutionSessionToSampleCache(executionSessionId, config):
     agent = DeepLearningAgent(config, whichGpu=None)
