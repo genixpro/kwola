@@ -228,14 +228,15 @@ def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebug
             os.unlink(resultFileName)
 
             if stepsRemaining % config['testing_print_every'] == 0:
-                getLogger().info(f"[{os.getpid()}] Finished {step + 1} testing actions.")
+                msg = f"[{os.getpid()}] Finished {step + 1} testing actions."
                 if len(listOfTimesForScreenshot):
-                    getLogger().info(f"[{os.getpid()}]     Avg Screenshot time: {numpy.average(listOfTimesForScreenshot[-config['testing_print_every'] * len(executionSessions):])}")
-                    getLogger().info(f"[{os.getpid()}]     Avg Action Map Retrieval Time: {numpy.average(listOfTimesForActionMapRetrieval[-config['testing_print_every'] * len(executionSessions):])}")
-                    getLogger().info(f"[{os.getpid()}]     Avg Action Decision Time: {numpy.average(listOfTimesForActionDecision[-config['testing_print_every'] * len(executionSessions):])}")
-                    getLogger().info(f"[{os.getpid()}]     Avg Action Execution Time: {numpy.average(listOfTimesForActionExecution[-config['testing_print_every'] * len(executionSessions):])}")
-                    getLogger().info(f"[{os.getpid()}]     Avg Miscellaneous Time: {numpy.average(listOfTimesForMiscellaneous[-config['testing_print_every'] * len(executionSessions):])}")
-                    getLogger().info(f"[{os.getpid()}]     Avg Total Loop Time: {numpy.average(listOfTotalLoopTimes[-config['testing_print_every'] * len(executionSessions):])}")
+                    msg += f"\n     Avg Screenshot time: {numpy.average(listOfTimesForScreenshot[-config['testing_print_every'] * len(executionSessions):])}"
+                    msg += f"\n     Avg Action Map Retrieval Time: {numpy.average(listOfTimesForActionMapRetrieval[-config['testing_print_every'] * len(executionSessions):])}"
+                    msg += f"\n     Avg Action Decision Time: {numpy.average(listOfTimesForActionDecision[-config['testing_print_every'] * len(executionSessions):])}"
+                    msg += f"\n     Avg Action Execution Time: {numpy.average(listOfTimesForActionExecution[-config['testing_print_every'] * len(executionSessions):])}"
+                    msg += f"\n     Avg Miscellaneous Time: {numpy.average(listOfTimesForMiscellaneous[-config['testing_print_every'] * len(executionSessions):])}"
+                    msg += f"\n     Avg Total Loop Time: {numpy.average(listOfTotalLoopTimes[-config['testing_print_every'] * len(executionSessions):])}"
+                getLogger().info(msg)
 
             taskStartTime = datetime.now()
             traces = environment.runActions(actions, [executionSession.id for executionSession in executionSessions])
