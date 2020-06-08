@@ -362,6 +362,9 @@ class WebEnvironmentSession:
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
             return None
+        except urllib3.exceptions.ProtocolError:
+            self.hasBrowserDied = True
+            return None
 
     def extractBranchTrace(self):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
@@ -565,6 +568,9 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             return []
         except selenium.common.exceptions.WebDriverException:
+            self.hasBrowserDied = True
+            return []
+        except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
             return []
 
@@ -934,6 +940,9 @@ class WebEnvironmentSession:
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
             return None
+        except urllib3.exceptions.ProtocolError:
+            self.hasBrowserDied = True
+            return None
 
     def screenshotSize(self):
         rect = self.driver.get_window_rect()
@@ -953,5 +962,8 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
         except selenium.common.exceptions.WebDriverException:
+            self.hasBrowserDied = True
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
+        except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
