@@ -113,29 +113,29 @@ class ExecutionTrace(Document):
 
     # Cached cumulative branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedStartCumulativeBranchTrace = DictField(ListField())
+    cachedStartCumulativeBranchTrace = DictField(ListField(), default=None)
 
     # Cached decaying branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedStartDecayingBranchTrace = DictField(ListField())
+    cachedStartDecayingBranchTrace = DictField(ListField(), default=None)
 
     # Cached cumulative branch trace vector at the end of this trace, e.g. after the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedEndCumulativeBranchTrace = DictField(ListField())
+    cachedEndCumulativeBranchTrace = DictField(ListField(), default=None)
 
     # Cached decaying branch trace vector at the end of this trace, e.g. after the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedEndDecayingBranchTrace = DictField(ListField())
+    cachedEndDecayingBranchTrace = DictField(ListField(), default=None)
 
     # Cached decaying branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
     # To be clear, this is a 'future' branch trace, so at the start of the trace,
     # the future includes the actions being performed in this frame.
-    cachedStartDecayingFutureBranchTrace = DictField(ListField())
+    cachedStartDecayingFutureBranchTrace = DictField(ListField(), default=None)
 
     # Cached decaying branch trace vector at the end of this trace, e.g. after the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedEndDecayingFutureBranchTrace = DictField(ListField())
+    cachedEndDecayingFutureBranchTrace = DictField(ListField(), default=None)
 
     timeForScreenshot = FloatField()
     timeForActionMapRetrieval = FloatField()

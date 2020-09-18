@@ -16,6 +16,8 @@ class TestEndToEnd(unittest.TestCase):
                                                                         password="",
                                                                         name="",
                                                                         paragraph="",
+                                                                        enableTypeEmail=False,
+                                                                        enableTypePassword=False,
                                                                         enableRandomNumberCommand=False,
                                                                         enableRandomBracketCommand=False,
                                                                         enableRandomMathCommand=False,

@@ -43,8 +43,17 @@ class KwolaCoreConfiguration:
             self.configurationDirectory = configurationDirectory
             self.configData = {}
 
-            with open(self.configFileName, "rt") as f:
-                data = json.load(f)
+            maxAttempts = 5
+            for attempt in range(maxAttempts):
+                try:
+                    with open(self.configFileName, "rt") as f:
+                        data = json.load(f)
+                        break
+                except OSError:
+                    if attempt == (maxAttempts - 1):
+                        raise
+                    else:
+                        time.sleep(2**attempt)
         else:
             data = configData
 

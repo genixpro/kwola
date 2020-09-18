@@ -160,14 +160,14 @@ class DeepLearningAgent:
         hasTypingAction = False
 
         # Only add in the email action if the user configured it
-        if config['email']:
+        if config['email'] and config['enableTypeEmail']:
             self.actions['typeEmail'] = lambda x, y: TypeAction(type="typeEmail", x=x, y=y, label="email", text=config['email'])
             self.actionBaseWeights.append(config['random_weight_type_email'])
             self.actionProbabilityBoostKeywords.append(["email", "user"])
             hasTypingAction = True
 
         # Only add in the password action if the user configured it
-        if config['password']:
+        if config['password'] and config['enableTypePassword']:
             self.actions['typePassword'] = lambda x, y: TypeAction(type="typePassword", x=x, y=y, label="password", text=config['password'])
             self.actionBaseWeights.append(config['random_weight_type_password'])
             self.actionProbabilityBoostKeywords.append(["pass"])
