@@ -2,8 +2,12 @@ import logging
 
 logger = logging.getLogger()
 
+kwolaLoggingFormatString = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d [%(process)d] %(message)s'
+kwolaDateFormatString = "%b%d %H:%M:%S"
+
 def setupLocalLogging():
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s', datefmt="%b%d %H:%M:%S")
+    global logger
+    logging.basicConfig(format=kwolaLoggingFormatString, datefmt=kwolaDateFormatString)
     logger.setLevel(logging.INFO)
 
 def getLogger():

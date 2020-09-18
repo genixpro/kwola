@@ -34,7 +34,7 @@ def main():
             "There appears to be a problem with your Kwola installation or environment. Exiting.")
         exit(1)
 
-    suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop.test_restaurant_click_only")
+    suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop.test_restaurant_all_actions")
 
     runner = unittest.TextTestRunner(verbosity=3)
     runner.run(suite)

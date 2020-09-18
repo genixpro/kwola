@@ -18,10 +18,12 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from ...components.proxy.JSRewriteProxy import JSRewriteProxy
+from ...components.proxy.RewriteProxy import RewriteProxy
 from ...components.proxy.PathTracer import PathTracer
 from ...components.proxy.NetworkErrorTracer import NetworkErrorTracer
 from ...config.logger import getLogger, setupLocalLogging
+from ..plugins.core.JSRewriter import JSRewriter
+from ..plugins.core.HTMLRewriter import HTMLRewriter
 from contextlib import closing
 from mitmproxy.tools.dump import DumpMaster
 import pickle
@@ -38,12 +40,22 @@ class ProxyProcess:
         This class is used to run and manage the proxy subprocess
     """
 
-    def __init__(self, config):
+    def __init__(self, config, plugins=None):
+        if plugins is None:
+            self.plugins = []
+        else:
+            self.plugins = plugins
+
+        self.plugins = [
+            JSRewriter(config),
+            HTMLRewriter(config)
+        ] + self.plugins
+
         self.config = config
         self.commandQueue = multiprocessing.Queue()
         self.resultQueue = multiprocessing.Queue()
 
-        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue))
+        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue, pickle.dumps(self.plugins)))
         self.proxyProcess.start()
 
         # Wait for the result indicating that the proxy process is ready
@@ -80,10 +92,12 @@ class ProxyProcess:
         self.commandQueue.put("resetNetworkErrors")
 
     @staticmethod
-    def runProxyServerSubprocess(config, commandQueue, resultQueue):
+    def runProxyServerSubprocess(config, commandQueue, resultQueue, plugins):
         setupLocalLogging()
 
-        codeRewriter = JSRewriteProxy(config)
+        plugins = pickle.loads(plugins)
+
+        codeRewriter = RewriteProxy(config, plugins)
         pathTracer = PathTracer()
         networkErrorTracer = NetworkErrorTracer()
 

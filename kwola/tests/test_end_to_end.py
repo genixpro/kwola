@@ -1,7 +1,7 @@
 
 import unittest
 from ..tasks import TrainAgentLoop
-from ..config.config import Configuration
+from ..config.config import KwolaCoreConfiguration
 import shutil
 import traceback
 from ..config.logger import getLogger, setupLocalLogging
@@ -10,19 +10,19 @@ class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):
         getLogger().info(f"\nStarting a click-only test targeting the URL {url}")
 
-        configDir = Configuration.createNewLocalKwolaConfigDir("testing",
-                                                               url=url,
-                                                               email="",
-                                                               password="",
-                                                               name="",
-                                                               paragraph="",
-                                                               enableRandomNumberCommand=False,
-                                                               enableRandomBracketCommand=False,
-                                                               enableRandomMathCommand=False,
-                                                               enableRandomOtherSymbolCommand=False,
-                                                               enableDoubleClickCommand=False,
-                                                               enableRightClickCommand=False
-                                                               )
+        configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
+                                                                        url=url,
+                                                                        email="",
+                                                                        password="",
+                                                                        name="",
+                                                                        paragraph="",
+                                                                        enableRandomNumberCommand=False,
+                                                                        enableRandomBracketCommand=False,
+                                                                        enableRandomMathCommand=False,
+                                                                        enableRandomOtherSymbolCommand=False,
+                                                                        enableDoubleClickCommand=False,
+                                                                        enableRightClickCommand=False
+                                                                        )
         try:
             TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
             getLogger().info(f"Click-only test for URL {url} has completed successfully")

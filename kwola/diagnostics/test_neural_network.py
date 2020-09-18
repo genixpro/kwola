@@ -18,7 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-from ..config.config import Configuration
+from ..config.config import KwolaCoreConfiguration
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 import torch
 import torch.distributed
@@ -56,21 +56,21 @@ def testNeuralNetworkAllGPUs(verbose=True):
     """
 
 
-    configDir = Configuration.createNewLocalKwolaConfigDir("testing",
-                                                           url="http://demo.kwolatesting.com/",
-                                                           email="",
-                                                           password="",
-                                                           name="",
-                                                           paragraph="",
-                                                           enableRandomNumberCommand=False,
-                                                           enableRandomBracketCommand=False,
-                                                           enableRandomMathCommand=False,
-                                                           enableRandomOtherSymbolCommand=False,
-                                                           enableDoubleClickCommand=False,
-                                                           enableRightClickCommand=False
-                                                           )
+    configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
+                                                                    url="http://demo.kwolatesting.com/",
+                                                                    email="",
+                                                                    password="",
+                                                                    name="",
+                                                                    paragraph="",
+                                                                    enableRandomNumberCommand=False,
+                                                                    enableRandomBracketCommand=False,
+                                                                    enableRandomMathCommand=False,
+                                                                    enableRandomOtherSymbolCommand=False,
+                                                                    enableDoubleClickCommand=False,
+                                                                    enableRightClickCommand=False
+                                                                    )
 
-    config = Configuration(configDir)
+    config = KwolaCoreConfiguration(configDir)
 
     allSuccess = True
 

@@ -42,6 +42,8 @@ class TrainingStep(Document):
 
     status = StringField()
 
+    hadNaN = BooleanField()
+
     numberOfIterationsCompleted = IntField()
 
     averageLoss = FloatField()

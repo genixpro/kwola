@@ -23,14 +23,14 @@ from ..config.logger import getLogger, setupLocalLogging
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.ManagedTaskSubprocess import ManagedTaskSubprocess
-from ..config.config import Configuration
+from ..config.config import KwolaCoreConfiguration
 from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..datamodels.TrainingSequenceModel import TrainingSequence
 from ..datamodels.TrainingStepModel import TrainingStep
 from ..datamodels.ExecutionSessionModel import ExecutionSession
 from ..datamodels.ExecutionTraceModel import ExecutionTrace
-from .RunTrainingStep import loadAllTestingSteps
+from ..components.managers.TrainingManager import TrainingManager
 from concurrent.futures import as_completed, wait
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -108,14 +108,14 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
         result = process.waitForProcessResult()
 
         if result is not None and 'trainingStepId' in result:
+            result['finishTime'] = datetime.now()
+
             trainingStepId = str(result['trainingStepId'])
             trainingStep = TrainingStep.loadFromDisk(trainingStepId, config)
             trainingSequence.trainingSteps.append(trainingStep)
             trainingSequence.saveToDisk(config)
         else:
             getLogger().error(f"[{os.getpid()}] Training task subprocess appears to have failed")
-
-        result['finishTime'] = datetime.now()
 
         return result
 
@@ -136,12 +136,13 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
     process.start()
     result = process.waitForProcessResult()
 
-    # Reload the testing sequence from the db. It will have been updated by the sub-process.
-    testingStep = TestingStep.loadFromDisk(testingStep.id, config)
-    trainingSequence.testingSteps.append(testingStep)
-    trainingSequence.saveToDisk(config)
+    if result is not None and 'testingStepId' in result:
+        result['finishTime'] = datetime.now()
 
-    result['finishTime'] = datetime.now()
+        # Reload the testing sequence from the db. It will have been updated by the sub-process.
+        testingStep = TestingStep.loadFromDisk(testingStep.id, config)
+        trainingSequence.testingSteps.append(testingStep)
+        trainingSequence.saveToDisk(config)
 
     return result
 
@@ -215,7 +216,7 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                 result = future.result()
                 if result is None:
                     anyFailures = True
-                if 'success' in result and not result['success']:
+                elif 'success' in result and not result['success']:
                     anyFailures = True
 
             if anyFailures and exitOnFail:
@@ -263,7 +264,7 @@ def trainAgent(configDir, exitOnFail=False):
     except RuntimeError:
         pass
 
-    config = Configuration(configDir)
+    config = KwolaCoreConfiguration(configDir)
 
     # Create the bugs directory. This is just temporary
     config.getKwolaUserDataDirectory("bugs")
@@ -289,7 +290,7 @@ def trainAgent(configDir, exitOnFail=False):
     trainingSequence.trainingStepsCompleted = 0
     trainingSequence.saveToDisk(config)
 
-    testingSteps = [step for step in loadAllTestingSteps(config) if step.status == "completed"]
+    testingSteps = [step for step in TrainingManager.loadAllTestingSteps(config) if step.status == "completed"]
     if len(testingSteps) == 0:
         runRandomInitialization(config, trainingSequence, exitOnFail=exitOnFail)
         trainingSequence.saveToDisk(config)

@@ -28,7 +28,8 @@ class ExecutionSession(Document):
         'indexes': [
             ('owner',),
             ('owner', 'testingStepId', 'startTime'),
-            ('owner', 'testingRunId', 'startTime')
+            ('owner', 'testingRunId', 'startTime'),
+            ('testingRunId', 'startTime')
         ]
     }
 

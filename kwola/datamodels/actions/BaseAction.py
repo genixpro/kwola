@@ -46,6 +46,9 @@ class BaseAction(EmbeddedDocument):
 
     wasRepeatOverride = BooleanField()
 
+    intersectingActionMaps = EmbeddedDocumentListField(ActionMap)
+
+    # Deprecated
     actionMapsAvailable = EmbeddedDocumentListField(ActionMap)
 
     # Deprecated

@@ -20,7 +20,7 @@
 
 
 from ...config.logger import getLogger
-from ...components.proxy.JSRewriteProxy import JSRewriteProxy
+from ...components.proxy.RewriteProxy import RewriteProxy
 from ...components.proxy.PathTracer import PathTracer
 from .WebEnvironmentSession import WebEnvironmentSession
 from contextlib import closing
@@ -33,6 +33,14 @@ import numpy as np
 import socket
 import time
 import os
+from ..plugins.core.RecordAllPaths import RecordAllPaths
+from ..plugins.core.RecordBranchTrace import RecordBranchTrace
+from ..plugins.core.RecordCursorAtAction import RecordCursorAtAction
+from ..plugins.core.RecordExceptions import RecordExceptions
+from ..plugins.core.RecordLogEntriesAndLogErrors import RecordLogEntriesAndLogErrors
+from ..plugins.core.RecordNetworkErrors import RecordNetworkErrors
+from ..plugins.core.RecordPageURLs import RecordPageURLs
+from ..plugins.core.RecordScreenshots import RecordScreenshots
 
 
 class WebEnvironment:
@@ -41,16 +49,44 @@ class WebEnvironment:
         with the software.
     """
 
-    def __init__(self, config, sessionLimit=None):
+    def __init__(self, config, sessionLimit=None, plugins=None, executionSessions=None):
         self.config = config
 
+        defaultPlugins = [
+            RecordCursorAtAction(),
+            RecordExceptions(),
+            RecordLogEntriesAndLogErrors(),
+            RecordNetworkErrors(),
+            RecordPageURLs(),
+            RecordAllPaths(),
+            RecordBranchTrace(),
+            RecordScreenshots()
+        ]
+
+        if plugins is None:
+            # Put in the default set up plugins
+            self.plugins = defaultPlugins
+        else:
+            self.plugins = defaultPlugins + plugins
+
         def createSession(number):
-            return WebEnvironmentSession(config, number)
+            maxAttempts = 10
+            for attempt in range(maxAttempts):
+                try:
+                    return WebEnvironmentSession(config, number, self.plugins, self.executionSessions[number])
+                except Exception as e:
+                    if attempt == (maxAttempts - 1):
+                        raise
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
             sessionCount = config['web_session_parallel_execution_sessions']
             if sessionLimit is not None:
                 sessionCount = min(sessionLimit, sessionCount)
+
+            if executionSessions is None:
+                self.executionSessions = [None] * sessionCount
+            else:
+                self.executionSessions = executionSessions
 
             getLogger().info(f"[{os.getpid()}] Starting up {sessionCount} parallel browser sessions.")
 
@@ -99,7 +135,7 @@ class WebEnvironment:
     def numberParallelSessions(self):
         return len(self.sessions)
 
-    def runActions(self, actions, executionSessionIds):
+    def runActions(self, actions):
         """
             Run a single action on each of the browser tabs within this environment.
 
@@ -110,22 +146,14 @@ class WebEnvironment:
         resultFutures = []
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for tab, action, executionSessionId in zip(self.sessions, actions, executionSessionIds):
-                resultFuture = executor.submit(tab.runAction, action, executionSessionId)
+            for tab, action in zip(self.sessions, actions):
+                resultFuture = executor.submit(tab.runAction, action)
                 resultFutures.append(resultFuture)
 
         results = [
             resultFuture.result() for resultFuture in resultFutures
         ]
         return results
-
-    def createMovies(self):
-        moviePaths = [
-            tab.createMovie()
-            for tab in self.sessions
-        ]
-
-        return np.array(moviePaths)
 
     def removeBadSessionIfNeeded(self):
         """
@@ -141,3 +169,9 @@ class WebEnvironment:
                 del self.sessions[sessionN]
                 return sessionN
         return None
+
+
+    def runSessionCompletedHooks(self):
+        for tab in self.sessions:
+            tab.runSessionCompletedHooks()
+

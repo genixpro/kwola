@@ -19,7 +19,7 @@
 #
 
 
-from ..config.config import Configuration
+from ..config.config import KwolaCoreConfiguration
 from ..datamodels.CustomIDField import CustomIDField
 from ..datamodels.TestingStepModel import TestingStep
 from ..tasks import RunTestingStep
@@ -39,7 +39,7 @@ def main():
         exit(1)
 
     configDir = getConfigurationDirFromCommandLineArgs()
-    config = Configuration(configDir)
+    config = KwolaCoreConfiguration(configDir)
 
     testingStep = TestingStep(id=CustomIDField.generateNewUUID(TestingStep, config))
     testingStep.saveToDisk(config)

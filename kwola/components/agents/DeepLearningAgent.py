@@ -19,7 +19,7 @@
 #
 
 
-from ...config.config import Configuration
+from ...config.config import KwolaCoreConfiguration
 from ...config.logger import getLogger
 from ...datamodels.actions.ClickTapAction import ClickTapAction
 from ...datamodels.actions.ClearFieldAction import ClearFieldAction
@@ -187,6 +187,13 @@ class DeepLearningAgent:
             self.actionProbabilityBoostKeywords.append(["pass"])
             hasTypingAction = True
 
+        for customTypingActionIndex, customTypingActionString in enumerate(config['custom_typing_action_strings']):
+            actionName = f'typeCustom{customTypingActionIndex}'
+            self.actions[actionName] = lambda x, y: TypeAction(type=actionName, x=x, y=y, label=actionName, text=customTypingActionString)
+            self.actionBaseWeights.append(config['random_weight_custom_type_action'])
+            self.actionProbabilityBoostKeywords.append([])
+            hasTypingAction = True
+
         # Only add in the random number action if the user configured it
         if config['enableRandomNumberCommand']:
             self.actions['typeNumber'] = lambda x, y: TypeAction(type="typeNumber", x=x, y=y, label="number", text=self.randomString('-.0123456789$%', random.randint(1, 5)))
@@ -306,7 +313,14 @@ class DeepLearningAgent:
             # Depending on whether GPU is turned on, we try load the state dict
             # directly into GPU / CUDA memory.
             device = self.getTorchDevices()[0]
-            stateDict = torch.load(self.modelPath, map_location=device)
+            maxAttempts = 10
+            for attempts in range(maxAttempts):
+                try:
+                    stateDict = torch.load(self.modelPath, map_location=device)
+                    break
+                except RuntimeError:
+                    if attempts == maxAttempts - 1:
+                        raise
 
             # Load the state dictionary into the model itself.
             self.model.load_state_dict(stateDict)
@@ -490,22 +504,10 @@ class DeepLearningAgent:
 
             # If the element is an input box, then we have to enable all of the typing actions
             if element['canType']:
-                if "typeEmail" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeEmail"))
-                if "typePassword" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typePassword"))
-                if "typeName" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeName"))
-                if "typeNumber" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeNumber"))
-                if "typeBrackets" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeBrackets"))
-                if "typeMath" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeMath"))
-                if "typeOtherSymbol" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeOtherSymbol"))
-                if "typeParagraph" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("typeParagraph"))
+                for actionName in self.actionsSorted:
+                    if actionName.startswith("type"):
+                        actionTypes.append(self.actionsSorted.index(actionName))
+
                 if "clear" in self.actionsSorted:
                     actionTypes.append(self.actionsSorted.index("clear"))
 
@@ -581,7 +583,7 @@ class DeepLearningAgent:
             # same action map.
             count = 0
             for recentAction in sampleRecentActions:
-                for recentActionMap in self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable):
+                for recentActionMap in recentAction.intersectingActionMaps:
                     if map.doesOverlapWith(recentActionMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
                         count += 1
                         break
@@ -748,7 +750,7 @@ class DeepLearningAgent:
                 action.source = "random"
                 action.predictedReward = None
                 action.wasRepeatOverride = False
-                action.actionMapsAvailable = sampleActionMaps
+                action.intersectingActionMaps = self.getActionMapsIntersectingWithAction(action, sampleActionMaps)
 
                 # Its probably important to recognize what is happening here. Since we are processing the samples bound for the neural network
                 # separately from the samples that we generate random actions for, we will need some way of reassembling all of the results
@@ -840,13 +842,11 @@ class DeepLearningAgent:
                     # time the algorithm discovers new code branches, e.g. new functionality so this helps ensure the algorithm
                     # stays exploring instead of getting stuck but can learn different behaviours with the same elements
                     for recentAction in sampleRecentActions:
-                        recentActionMaps = self.getActionMapsIntersectingWithAction(recentAction, recentAction.actionMapsAvailable)
-
                         if recentAction.type != potentialAction.type:
                             continue
 
                         allEqual = True
-                        for recentMap in recentActionMaps:
+                        for recentMap in recentAction.intersectingActionMaps:
                             found = False
                             for potentialMap in potentialActionMaps:
                                 if recentMap.doesOverlapWith(potentialMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
@@ -869,16 +869,23 @@ class DeepLearningAgent:
                     # pixels. The advantage values give provide a better way of weighting the various pixels.
                     reshaped = numpy.array(sampleAdvantageValues.data).reshape([len(self.actionsSorted) * height * width])
 
+                    try:
+                        # Compute the minimum after removing all the impossible actions
+                        minAdvantage = numpy.min(reshaped[reshaped != self.config['reward_impossible_action']])
+                    except ValueError:
+                        minAdvantage = 0
+
                     # Ensure all of the values are positive by shifting it so the minimum value is 0
-                    reshaped = reshaped - numpy.min(reshaped)
+                    reshapedAdjusted = reshaped - minAdvantage
+                    reshapedAdjusted[reshaped == self.config['reward_impossible_action']] = 0
 
                     # Here we resize the array so that it adds up to 1.
-                    reshapedSum = numpy.sum(reshaped)
+                    reshapedSum = numpy.sum(reshapedAdjusted)
                     if reshapedSum > 0:
-                        reshaped = reshaped / reshapedSum
+                        reshapedAdjusted = reshapedAdjusted / reshapedSum
 
                         # Choose the random action. What we get back is an index for that action in the original array
-                        actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshaped)
+                        actionIndex = numpy.random.choice(range(len(self.actionsSorted) * height * width), p=reshapedAdjusted)
 
                         # Now we do a clever trick here to recover the x,y coordinates of the action and the index
                         # of the action type
@@ -912,7 +919,7 @@ class DeepLearningAgent:
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = source
                 action.predictedReward = samplePredictedReward
-                action.actionMapsAvailable = sampleActionMaps
+                action.intersectingActionMaps = self.getActionMapsIntersectingWithAction(action, sampleActionMaps)
                 action.wasRepeatOverride = override
                 # Here we append both the action and the original sample index. The original sample index
                 # is later used to recover the original ordering of the actions list
@@ -977,10 +984,18 @@ class DeepLearningAgent:
         # Here we choose a random x,y coordinate from within the bounds of the action map.
         # We also have to compensate for the image downscaling here, since we need to lookup
         # the possible actions on the downscaled pixel action map
-        actionX = random.randint(max(0, int(min(width - 1, chosenActionMap.left * self.config['model_image_downscale_ratio']))),
-                                 max(0, int(min(chosenActionMap.right * self.config['model_image_downscale_ratio'] - 1, width - 1))))
-        actionY = random.randint(max(0, int(min(height - 1, chosenActionMap.top * self.config['model_image_downscale_ratio']))),
-                                 max(0, int(min(chosenActionMap.bottom * self.config['model_image_downscale_ratio'] - 1, height - 1))))
+        actionLeftLimit = max(0, int(min(width - 1, chosenActionMap.left * self.config['model_image_downscale_ratio'])))
+        actionRightLimit = max(0, int(min(width - 1, chosenActionMap.right * self.config['model_image_downscale_ratio'] - 1)))
+        if actionRightLimit < actionLeftLimit:
+            actionRightLimit = actionLeftLimit
+
+        actionTopLimit = max(0, int(min(height - 1, chosenActionMap.top * self.config['model_image_downscale_ratio'])))
+        actionBottomLimit = max(0, int(min(height - 1, chosenActionMap.bottom * self.config['model_image_downscale_ratio'] - 1)))
+        if actionBottomLimit < actionTopLimit:
+            actionBottomLimit = actionTopLimit
+
+        actionX = random.randint(actionLeftLimit, actionRightLimit)
+        actionY = random.randint(actionTopLimit, actionBottomLimit)
 
         # Get the list of actions that are allowed at the chosen coordinates
         possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
@@ -1186,7 +1201,7 @@ class DeepLearningAgent:
 
         return actionX, actionY, actionType
 
-    def createDebugVideoForExecutionSession(self, executionSession, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None):
+    def createDebugVideoForExecutionSession(self, executionSession, includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilightStepNumber=None, cutoffStepNumber=None):
         """
             This method is used to generate a debug video for the given execution session.
 
@@ -1197,6 +1212,7 @@ class DeepLearningAgent:
                                                 These can also require more CPU and memory to generate so they are strictly optional.
             :param hilightStepNumber: If there is a specific frame within the video that should be hilighted, (e.g. if you are generating this debug video
                                       for a bug), then this should be the frame index. A value of None indicates that no frame should be hilighted.
+            :param cutoffStepNumber: This will cut the video short at the given step number.
             :return: Nothing is returned from this function.
         """
         videoPath = self.config.getKwolaUserDataDirectory("videos")
@@ -1210,9 +1226,9 @@ class DeepLearningAgent:
         # this case in several places throughout the code.
         executionTracesFiltered = [trace for trace in executionTraces if trace is not None]
 
-        self.computeCachedCumulativeBranchTraces(executionTraces)
-        self.computeCachedDecayingBranchTrace(executionTraces)
-        self.computeCachedDecayingFutureBranchTrace(executionTraces)
+        self.computeCachedCumulativeBranchTraces(executionTracesFiltered)
+        self.computeCachedDecayingBranchTrace(executionTracesFiltered)
+        self.computeCachedDecayingFutureBranchTrace(executionTracesFiltered)
 
         presentRewards = DeepLearningAgent.computePresentRewards(executionTracesFiltered, self.config)
 
@@ -1227,9 +1243,15 @@ class DeepLearningAgent:
         mpl.use('Agg')
         mpl.rcParams['figure.max_open_warning'] = 1000
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.config['debug_video_workers']) as executor:
+        if cutoffStepNumber is not None:
+            executionTracesFiltered = executionTracesFiltered[:cutoffStepNumber]
+            rawImages = rawImages[:cutoffStepNumber]
+
+        # Max workers set to 1 here temporarily due to a threading bug in the latest version of matplotlib
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=self.config['debug_video_workers']) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             futures = []
-            for trace, rawImage in zip(executionTraces, rawImages):
+            for trace, rawImage in zip(executionTracesFiltered, rawImages):
                 if trace is not None:
                     hilight = 0
                     if hilightStepNumber is not None:
@@ -1245,7 +1267,12 @@ class DeepLearningAgent:
 
             concurrent.futures.wait(futures)
 
-        subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '25', '-preset', 'veryslow', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode != 0:
+            errorMsg = f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:\n"
+            errorMsg += str(result.stdout, 'utf8') + "\n"
+            errorMsg += str(result.stderr, 'utf8') + "\n"
+            getLogger().error(errorMsg)
 
         moviePath = os.path.join(tempScreenshotDirectory, "debug.mp4")
 
@@ -1532,7 +1559,7 @@ class DeepLearningAgent:
 
                 # pixelActionMapAxes = mainFigure.add_subplot(numColumns, numRows, currentFig)
                 # currentFig += 1
-                pixelActionMap = self.createPixelActionMap(trace.actionPerformed.actionMapsAvailable, processedImage.shape[1], processedImage.shape[2])
+                pixelActionMap = self.createPixelActionMap(trace.actionMaps, processedImage.shape[1], processedImage.shape[2])
                 # actionPixelCount = numpy.count_nonzero(pixelActionMap)
                 # pixelActionMapAxes.imshow(numpy.swapaxes(numpy.swapaxes(pixelActionMap, 0, 1), 1, 2) * 255, interpolation="bilinear")
                 # pixelActionMapAxes.set_xticks([])
@@ -1697,8 +1724,8 @@ class DeepLearningAgent:
             fileName = f"kwola-screenshot-{debugImageIndex + 1:05d}.png"
             filePath = os.path.join(tempScreenshotDirectory, fileName)
             skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
-
-            getLogger().info(f"[{os.getpid()}] Completed debug image {fileName}")
+            if includeNeuralNetworkCharts:
+                getLogger().info(f"[{os.getpid()}] Completed debug image {fileName}")
         except Exception:
             getLogger().error(f"[{os.getpid()}] Failed to create debug image!\n{traceback.format_exc()}")
 
@@ -2020,6 +2047,7 @@ class DeepLearningAgent:
             executionFeatureLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_execution_feature_weight']])
             executionTraceLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_execution_trace_weight']])
             cursorPredictionLossWeightFloat = self.variableWrapperFunc(torch.FloatTensor, [self.config['loss_cursor_prediction_weight']])
+            rewardImpossibleAction = self.variableWrapperFunc(torch.FloatTensor, [self.config['reward_impossible_action']])
             widthTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[3]])
             heightTensor = self.variableWrapperFunc(torch.IntTensor, [batch["processedImages"].shape[2]])
             presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, batch["presentRewards"])
@@ -2135,22 +2163,25 @@ class DeepLearningAgent:
             # Here we are just iterating over all of the relevant data and tensors for each sample in the batch
             for sampleIndex, presentRewardImage, discountedFutureRewardImage, \
                 nextStatePresentRewardImage, nextStateDiscountedFutureRewardImage, \
-                rewardPixelMask, presentReward, stateValuePrediction, advantageImage, \
+                origRewardPixelMask, presentReward, stateValuePrediction, advantageImage, \
                 actionType, actionX, actionY, pixelActionMap, actionProbabilityImage, processedImage in zippedValues:
+
+                comboPixelMask = origRewardPixelMask * pixelActionMap[self.actionsSorted.index(actionType)]
 
                 # Here, we fetch out the reward and advantage images associated with the action that the AI actually
                 # took in the trace. We then multiply by the reward pixel mask. This gives us a reward image that only
                 # has values in the area covering the HTML element the algorithm actually touched with its action
                 # at this step.
-                presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
-                discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * rewardPixelMask
-                advantageMasked = advantageImage[self.actionsSorted.index(actionType)] * rewardPixelMask
+                presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)] * comboPixelMask
+                discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)] * comboPixelMask
+                advantageMasked = advantageImage[self.actionsSorted.index(actionType)] * comboPixelMask
 
                 # Here, we compute the best possible action we can take in the subsequent step from this one, and what is
                 # its reward. This gives us the value for the discounted future reward, e.g. what is the reward that
                 # the action we took in this sequence, could lead to in the future.
                 nextStateBestPossibleTotalReward = torch.max(nextStatePresentRewardImage + nextStateDiscountedFutureRewardImage)
-                discountedFutureReward = nextStateBestPossibleTotalReward * discountRate
+                isNextStateValid = torch.ne(nextStateBestPossibleTotalReward, rewardImpossibleAction * 2)
+                discountedFutureReward = nextStateBestPossibleTotalReward * discountRate * isNextStateValid
 
                 # Here we are basically calculating the target images. E.g., this is what we want the neural network to be predicting as outputs.
                 # For the present reward, we want the neural network to predict the exact present reward value that we have for this execution trace.
@@ -2158,15 +2189,15 @@ class DeepLearningAgent:
                 # in the next step after this one.
                 # In both cases, the image is constructed with the same mask that the reward images were masked with above. This ensures that we
                 # are only updating the values for the pixels of the html element the algo actually clicked on
-                targetPresentRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * presentReward * rewardPixelMask
-                targetDiscountedFutureRewards = torch.ones_like(discountedFutureRewardImage[self.actionsSorted.index(actionType)]) * discountedFutureReward * rewardPixelMask
+                targetPresentRewards = torch.ones_like(presentRewardImage[self.actionsSorted.index(actionType)]) * presentReward * comboPixelMask
+                targetDiscountedFutureRewards = torch.ones_like(discountedFutureRewardImage[self.actionsSorted.index(actionType)]) * discountedFutureReward * comboPixelMask
 
                 # We basically do the same with the advantage to create the target advantage image, and again its multiplied by the same
                 # pixel mask. The difference with advantage is that the advantage is updated to be the difference between the predicted reward
                 # value for the action we took v.s. the average reward value no matter what action we take. E.g. its a measure of how much
                 # better a particular action is versus the average action.
                 targetAdvantage = ((presentReward.detach() + discountedFutureReward.detach()) - stateValuePrediction.detach())
-                targetAdvantageImage = torch.ones_like(advantageImage[self.actionsSorted.index(actionType)]) * targetAdvantage * rewardPixelMask
+                targetAdvantageImage = torch.ones_like(advantageImage[self.actionsSorted.index(actionType)]) * targetAdvantage * comboPixelMask
 
                 # Now to train the "actor" in the actor critic model, we have to do something different. Instead of
                 # training the actor to predict how much better / worse particular actions are versus other actions,
@@ -2187,18 +2218,18 @@ class DeepLearningAgent:
                 actionProbabilityTargetImage[bestActionType] /= torch.max(oneTensorFloat, countActionProbabilityTargetPixels)
 
                 # The max here is just for safety, if any weird bugs happen we don't want any NaN values or division by zero
-                countPixelMask = torch.max(oneTensorLong, rewardPixelMask.sum())
+                countPixelMask = torch.max(oneTensorLong, comboPixelMask.sum())
 
                 # Now here we create tensors which represent the different between the predictions of the neural network and
                 # our target values that were all calculated above.
-                presentRewardLossMap = (targetPresentRewards - presentRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
-                discountedFutureRewardLossMap = (targetDiscountedFutureRewards - discountedFutureRewardsMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
-                advantageLossMap = (targetAdvantageImage - advantageMasked) * pixelActionMap[self.actionsSorted.index(actionType)]
+                presentRewardLossMap = (targetPresentRewards - presentRewardsMasked) * comboPixelMask
+                discountedFutureRewardLossMap = (targetDiscountedFutureRewards - discountedFutureRewardsMasked) * comboPixelMask
+                advantageLossMap = (targetAdvantageImage - advantageMasked) * comboPixelMask
                 actionProbabilityLossMap = (actionProbabilityTargetImage - actionProbabilityImage) * pixelActionMap
 
                 # Here we compute an average loss value for all pixels in the reward pixel mask.
-                presentRewardLoss = torch.true_divide(presentRewardLossMap.pow(2).sum(), countPixelMask)
-                discountedFutureRewardLoss = torch.true_divide(discountedFutureRewardLossMap.pow(2).sum(), countPixelMask)
+                presentRewardLoss = torch.true_divide(presentRewardLossMap.pow(2).sum(), countPixelMask) * isNextStateValid
+                discountedFutureRewardLoss = torch.true_divide(discountedFutureRewardLossMap.pow(2).sum(), countPixelMask) * isNextStateValid
                 advantageLoss = torch.true_divide(advantageLossMap.pow(2).sum(), countPixelMask)
                 actionProbabilityLoss = actionProbabilityLossMap.abs().sum()
                 # Additionally, we calculate a loss for the 'state' value, which is the average value the neural network
@@ -2303,22 +2334,22 @@ class DeepLearningAgent:
             # This else statement should only happen if there is a significant error in the neural network
             # itself that is leading to NaN values in the results. So here, we print out all of the loss
             # values for all of the batchs to help you track down where the error is.
-            message += f"[{os.getpid()}] ERROR! NaN detected in loss calculation. Skipping optimization step."
-            for batchIndex, batchResult in batchResultTensors:
+            message += f"[{os.getpid()}] ERROR! NaN detected in loss calculation. Skipping optimization step.\n"
+            for batchIndex, batchResult in enumerate(batchResultTensors):
                 presentRewardLoss, discountedFutureRewardLoss, stateValueLoss, \
                 advantageLoss, actionProbabilityLoss, tracePredictionLoss, predictedExecutionFeaturesLoss, \
                 predictedCursorLoss, totalRewardLoss, totalLoss, totalRebalancedLoss, \
                 totalSampleLosses, batch = batchResult
 
-                message += f"[{os.getpid()}] Batch {batchIndex}"
-                message += f"[{os.getpid()}] presentRewardLoss {float(presentRewardLoss.data.item())}"
-                message += f"[{os.getpid()}] discountedFutureRewardLoss {float(discountedFutureRewardLoss.data.item())}"
-                message += f"[{os.getpid()}] stateValueLoss {float(stateValueLoss.data.item())}"
-                message += f"[{os.getpid()}] advantageLoss {float(advantageLoss.data.item())}"
-                message += f"[{os.getpid()}] actionProbabilityLoss {float(actionProbabilityLoss.data.item())}"
-                message += f"[{os.getpid()}] tracePredictionLoss {float(tracePredictionLoss.data.item())}"
-                message += f"[{os.getpid()}] predictedExecutionFeaturesLoss {float(predictedExecutionFeaturesLoss.data.item())}"
-                message += f"[{os.getpid()}] predictedCursorLoss {float(predictedCursorLoss.data.item())}"
+                message += f"[{os.getpid()}] Batch {batchIndex}\n"
+                message += f"[{os.getpid()}] presentRewardLoss {float(presentRewardLoss.data.item())}\n"
+                message += f"[{os.getpid()}] discountedFutureRewardLoss {float(discountedFutureRewardLoss.data.item())}\n"
+                message += f"[{os.getpid()}] stateValueLoss {float(stateValueLoss.data.item())}\n"
+                message += f"[{os.getpid()}] advantageLoss {float(advantageLoss.data.item())}\n"
+                message += f"[{os.getpid()}] actionProbabilityLoss {float(actionProbabilityLoss.data.item())}\n"
+                message += f"[{os.getpid()}] tracePredictionLoss {float(tracePredictionLoss.data.item())}\n"
+                message += f"[{os.getpid()}] predictedExecutionFeaturesLoss {float(predictedExecutionFeaturesLoss.data.item())}\n"
+                message += f"[{os.getpid()}] predictedCursorLoss {float(predictedCursorLoss.data.item())}\n"
 
             getLogger().critical(message)
 
@@ -2362,6 +2393,15 @@ class DeepLearningAgent:
                                  predictedCursorLoss, totalLoss, totalRebalancedLoss, batchReward, sampleLosses))
         return batchResults
 
+    def saveDebugImageQuick(self, array, fileName):
+        fig = plt.figure(dpi=200)
+        ax = fig.add_subplot(111)
+        mainColorMap = plt.get_cmap('inferno')
+        im = ax.imshow(numpy.array(array), cmap=mainColorMap)
+        fig.colorbar(im, orientation='vertical')
+        fig.savefig(fileName)
+        plt.close(fig)
+
     @staticmethod
     def processRawImageParallel(rawImage, config):
         """
@@ -2373,7 +2413,7 @@ class DeepLearningAgent:
             :param config: The global configuration object
             :return: A new numpy array, in the shape [1, height, width] containing the processed image data.
         """
-        # Create local variables for convenince
+        # Create local variables for convenience
         width = rawImage.shape[1]
         height = rawImage.shape[0]
 

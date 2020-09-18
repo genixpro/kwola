@@ -30,7 +30,7 @@ def testChromedriver(verbose=True):
         This command is used to test whether chomedriver is installed correctly.
     """
 
-    targetURL = "https://google.com/"
+    targetURL = "http://kros1.kwola.io/"
 
     if verbose:
         print(f"Starting a Chrome browser through the chromedriver and pointing it at {targetURL}")
@@ -44,19 +44,24 @@ def testChromedriver(verbose=True):
 
     driver = selenium.webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
 
-    driver.get(targetURL)
-
-    googleBodyElement = None
-    try:
-        googleBodyElement = WebDriverWait(driver, 10, 0.25).until(
-            EC.presence_of_element_located((By.ID, "gsr"))
-        )
-    except selenium.common.exceptions.NoSuchElementException:
-        pass
+    loginElement = None
+    for attempt in range(5):
+        driver.get(targetURL)
+        try:
+            loginElement = WebDriverWait(driver, 10, 0.25).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "btn-success"))
+            )
+            break
+        except selenium.common.exceptions.NoSuchElementException:
+            print(f"Diagnostic URL {targetURL} did not appear to load correctly. Received a no-such-element error. Waiting 10 seconds and then retrying.")
+            time.sleep(10)
+        except selenium.common.exceptions.TimeoutException:
+            print(f"Diagnostic URL {targetURL} did not appear to load correctly. Received a timeout error. Waiting 10 seconds and then retrying.")
+            time.sleep(10)
 
     driver.close()
 
-    if googleBodyElement is not None:
+    if loginElement is not None:
         if verbose:
             print(f"Congratulations! Your Selenium installation appears to be working. We were able to load {targetURL} with a headless browser.")
         return True

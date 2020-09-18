@@ -20,7 +20,7 @@
 
 from .main import getConfigurationDirFromCommandLineArgs
 from ..components.environments.WebEnvironment import WebEnvironment
-from ..config.config import Configuration
+from ..config.config import KwolaCoreConfiguration
 from ..diagnostics.test_installation import testInstallation
 import time
 from ..config.logger import getLogger, setupLocalLogging
@@ -40,7 +40,7 @@ def main():
 
     configDir = getConfigurationDirFromCommandLineArgs()
 
-    config = Configuration(configDir)
+    config = KwolaCoreConfiguration(configDir)
 
     config['web_session_headless'] = False
 

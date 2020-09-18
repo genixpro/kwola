@@ -38,9 +38,15 @@ class BugModel(Document):
 
     executionSessionId = StringField()
 
+    creationDate = DateField()
+
     stepNumber = IntField()
 
     error = EmbeddedDocumentField(BaseError)
+
+    isMuted = BooleanField(default=False)
+
+    mutedErrorId = StringField(default=None)
 
     reproductionTraces = ListField(StringField())
 

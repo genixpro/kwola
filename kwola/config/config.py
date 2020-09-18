@@ -24,11 +24,16 @@ import os
 import os.path
 import pkg_resources
 import re
+import time
+import pymongo.errors
+import mongoengine
+import mongoengine.connection
+from pprint import pprint
 
 
 globalCachedPrebuiltConfigs = {}
 
-class Configuration:
+class KwolaCoreConfiguration:
     """
         This class represents the configuration for the Kwola model.
     """
@@ -53,7 +58,7 @@ class Configuration:
             # those keys with the default values taken from the prebuilt config.
             # This allows people to continue running existing runs even if we add
             # new configuration keys in subsequent releases.
-            prebuiltConfigData = Configuration.getPrebuiltConfigData(data['profile'])
+            prebuiltConfigData = KwolaCoreConfiguration.getPrebuiltConfigData(data['profile'])
             for key, value in prebuiltConfigData.items():
                 if key not in data:
                     data[key] = value
@@ -65,33 +70,54 @@ class Configuration:
 
         self.configData = data
 
-        if self.configData['data_serialization_method'] == "mongo" and 'mongo_uri' in self.configData and self.configData['mongo_uri']:
-            import mongoengine
-            mongoengine.connect(host=self.configData['mongo_uri'])
+        self.connectToMongoIfNeeded()
+
+    def connectToMongoIfNeeded(self):
+        if isinstance(self.configData['data_serialization_method'], dict):
+            method = self.configData['data_serialization_method']['default']
+        else:
+            method = self.configData['data_serialization_method']
+
+        if method == "mongo" and 'mongo_uri' in self.configData and self.configData['mongo_uri'] and len(mongoengine.connection._connections) == 0:
+            maxAttempts = 5
+            for attempt in range(maxAttempts):
+                try:
+                    mongoengine.connect(host=self.configData['mongo_uri'])
+                    break
+                except Exception as e:
+                    if attempt == (maxAttempts - 1):
+                        raise
+                    else:
+                        time.sleep(2**attempt)
 
 
-
-    def getKwolaUserDataDirectory(self, subDirName):
+    def getKwolaUserDataDirectory(self, subDirName, ensureExists=True):
         """
         This returns a sub-directory within the kwola user data directory.
 
-        It will ensure the path exists prior to returning
+        ensureExists - when set to True (default), this will ensure the directory exists first before returning it
         """
 
-        if not os.path.exists(self.configurationDirectory):
-            os.mkdir(self.configurationDirectory)
+        if ensureExists:
+            if not os.path.exists(self.configurationDirectory):
+                os.mkdir(self.configurationDirectory)
 
         subDirectory = os.path.join(self.configurationDirectory, subDirName)
-        if not os.path.exists(subDirectory):
-            try:
-                os.mkdir(subDirectory)
-            except FileExistsError:
-                pass
+        if ensureExists:
+            if not os.path.exists(subDirectory):
+                try:
+                    os.mkdir(subDirectory)
+                except FileExistsError:
+                    pass
 
         return subDirectory
 
     def __getitem__(self, key):
-        return self.configData[key]
+        try:
+            return self.configData[key]
+        except KeyError:
+            pprint(self.configData)
+            raise
 
     def __setitem__(self, key, value):
         self.configData[key] = value
@@ -122,7 +148,7 @@ class Configuration:
         found = []
         subFilesFolders = os.listdir(currentDir)
         for subDir in subFilesFolders:
-            if Configuration.checkDirectoryContainsKwolaConfig(subDir):
+            if KwolaCoreConfiguration.checkDirectoryContainsKwolaConfig(subDir):
                 found.append(subDir)
 
         found = sorted(found, reverse=True)
@@ -138,7 +164,7 @@ class Configuration:
                 os.mkdir(dirname)
 
                 with open(os.path.join(dirname, "kwola.json"), "wt") as configFile:
-                    prebuildConfigData = Configuration.getPrebuiltConfigData(prebuild)
+                    prebuildConfigData = KwolaCoreConfiguration.getPrebuiltConfigData(prebuild)
                     for key, value in configArgs.items():
                         prebuildConfigData[key] = value
                     configFile.write(json.dumps(prebuildConfigData, indent=4))

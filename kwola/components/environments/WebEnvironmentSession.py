@@ -29,7 +29,8 @@ from ...datamodels.actions.WaitAction import WaitAction
 from ...datamodels.errors.ExceptionError import ExceptionError
 from ...datamodels.errors.LogError import LogError
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
-from ..utils.video import chooseBestFfmpegVideoCodec
+from ..plugins.base.ProxyPluginBase import ProxyPluginBase
+from ..plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -56,14 +57,25 @@ class WebEnvironmentSession:
         This class represents a single tab in the web environment.
     """
 
-    def __init__(self, config, tabNumber):
+    def __init__(self, config, tabNumber, plugins=None, executionSession=None):
         self.config = config
         self.targetURL = config['url']
         self.hasBrowserDied = False
 
+        if plugins is None:
+            self.plugins = []
+        else:
+            self.plugins = plugins
+
+
+        proxyPlugins = [plugin for plugin in self.plugins if isinstance(plugin, ProxyPluginBase)]
+        self.plugins = [plugin for plugin in self.plugins if isinstance(plugin, WebEnvironmentPluginBase)]
+
+        self.executionSession = executionSession
+
         self.targetHostRoot = self.getHostRoot(self.targetURL)
 
-        self.proxy = ProxyProcess(config)
+        self.proxy = ProxyProcess(config, plugins=proxyPlugins)
         self.urlWhitelistRegexes = [re.compile(pattern) for pattern in self.config['web_session_restrict_url_to_regexes']]
 
         chrome_options = Options()
@@ -100,61 +112,17 @@ class WebEnvironmentSession:
 
         self.waitUntilNoNetworkActivity()
 
+        time.sleep(3)
+
         if self.config.autologin:
             self.runAutoLogin()
 
-        # Inject bug detection script
-        self.driver.execute_script("""
-            window.kwolaExceptions = [];
-            var kwolaCurrentOnError = window.onerror;
-            window.onerror=function(msg, source, lineno, colno, error) {
-                let stack = null;
-                if (error)
-                {
-                    stack = error.stack;
-                }
-                
-                window.kwolaExceptions.push([msg, source, lineno, colno, stack]);
-                if (kwolaCurrentOnError)
-                {
-                    kwolaCurrentOnError(msg, source, lineno, colno, error);
-                }
-            }
-        """)
-
-        self.lastScreenshotHash = None
-        self.lastProxyPaths = set()
-
-        self.allUrls = set()
-
         self.tabNumber = tabNumber
+        self.traceNumber = 0
 
-        self.frameNumber = 0
-
-        self.screenshotDirectory = tempfile.mkdtemp()
-        self.screenshotPaths = []
-        self.screenshotHashes = set()
-
-        self.allUrls.add(self.targetURL)
-        self.allUrls.add(self.driver.current_url)
-
-        screenHash = self.addScreenshot()
-        self.frameNumber = 1
-        self.screenshotHashes.add(screenHash)
-        self.lastScreenshotHash = screenHash
-
-        self.cumulativeBranchTrace = self.extractBranchTrace()
-
-        self.networkErrorRegex = re.compile(r"(\D[45]\d\d$)|(\D[45]\d\d\D)")
-
-        self.errorHashes = set()
-
-        self.kwolaJSRewriteErrorDetectionStrings = [
-            "globalKwola",
-            "kwolaError",
-            "global_removeEventListener",
-            "global_addEventListener",
-        ]
+        for plugin in self.plugins:
+            if self.executionSession is not None:
+                plugin.browserSessionStarted(self.driver, self.proxy, self.executionSession)
 
     def __del__(self):
         self.shutdown()
@@ -172,43 +140,16 @@ class WebEnvironmentSession:
         return hostRoot
 
     def shutdown(self):
-        # Cleanup the screenshot files
-        if hasattr(self, "screenshotPaths"):
-            for filePath in self.screenshotPaths:
-                if os.path.exists(filePath):
-                    os.unlink(filePath)
-
-            self.screenshotPaths = []
-            if hasattr(self, "tabNumber") and os.path.exists(self.movieFilePath()):
-                os.unlink(self.movieFilePath())
-
-        if hasattr(self, "screenshotDirectory"):
-            if os.path.exists(self.screenshotDirectory):
-                os.rmdir(self.screenshotDirectory)
+        if hasattr(self, 'plugins'):
+            for plugin in self.plugins:
+                if self.executionSession is not None:
+                    plugin.cleanup(self.driver, self.proxy, self.executionSession)
 
         if hasattr(self, "driver"):
             if self.driver:
                 self.driver.quit()
 
         self.driver = None
-
-    def addScreenshot(self):
-        fileName = f"kwola-screenshot-{self.frameNumber:05d}.png"
-
-        filePath = os.path.join(self.screenshotDirectory, fileName)
-
-        self.driver.save_screenshot(filePath)
-
-        hasher = hashlib.sha256()
-        with open(filePath, 'rb') as imageFile:
-            buf = imageFile.read()
-            hasher.update(buf)
-
-        screenshotHash = hasher.hexdigest()
-
-        self.screenshotPaths.append(filePath)
-
-        return screenshotHash
 
     def waitUntilNoNetworkActivity(self):
         startTime = datetime.now()
@@ -228,26 +169,6 @@ class WebEnvironmentSession:
                     self.config['web_session_no_network_activity_timeout'] = self.config['web_session_no_network_activity_timeout'] * 0.50
 
                 break
-
-    def movieFileName(self):
-        return f"kwola-video-{self.tabNumber}.mp4"
-
-    def movieFilePath(self):
-        return os.path.join(self.screenshotDirectory, self.movieFileName())
-
-    def createMovie(self):
-        if self.hasBrowserDied:
-            return None
-
-        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', self.movieFileName()], cwd=self.screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-        if result.returncode != 0:
-            errorMsg = f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:\n"
-            errorMsg += str(result.stdout, 'utf8') + "\n"
-            errorMsg += str(result.stderr, 'utf8') + "\n"
-            getLogger().error(errorMsg)
-
-        return self.movieFilePath()
 
     def findElementsForAutoLogin(self):
         actionMaps = self.getActionMaps()
@@ -315,8 +236,24 @@ class WebEnvironmentSession:
 
 
             if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
-                getLogger().warning(f"[{os.getpid()}] Error! Did not detect the all of the necessary HTML elements to perform an autologin. Kwola will be proceeding without automatically logging in.")
+                getLogger().warning(f"[{os.getpid()}] Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.")
                 return
+
+            if len(emailInputs) == 1:
+                # Find the login button that is closest to the email input while being below it
+                loginButtons = sorted(
+                    filter(lambda button: bool(button.top > emailInputs[0].bottom), loginButtons),
+                    key=lambda button: abs(emailInputs[0].top - button.top)
+                )
+            elif len(passwordInputs) == 1:
+                # Find the login button that is closest to the password input while being below it
+                loginButtons = sorted(
+                    filter(lambda button: bool(button.top > passwordInputs[0].bottom), loginButtons),
+                    key=lambda button: abs(passwordInputs[0].top - button.top)
+                )
+            else:
+                # Find the login button that is lowest down on the page
+                loginButtons = sorted(loginButtons, key=lambda button: button.top, reverse=True)
 
             startURL = self.driver.current_url
 
@@ -366,57 +303,6 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             return None
 
-    def extractBranchTrace(self):
-        # The JavaScript that we want to inject. This will extract out the Kwola debug information.
-        injected_javascript = (
-            'return window.kwolaCounters;'
-        )
-
-        result = self.driver.execute_script(injected_javascript)
-
-        # The JavaScript that we want to inject. This will extract out the Kwola debug information.
-        injected_javascript = (
-            'if (!window.kwolaCounters)'
-            '{'
-            '   window.kwolaCounters = {};'
-            '}'
-            'Object.keys(window.kwolaCounters).forEach((fileName) => {'
-            '   window.kwolaCounters[fileName].fill(0);'
-            '});'
-        )
-
-        try:
-            self.driver.execute_script(injected_javascript)
-        except selenium.common.exceptions.TimeoutException:
-            getLogger().warning(f"[{os.getpid()}] Warning, timeout while running the script to reset the kwola line counters.")
-
-        if result is not None:
-            # Cast everything to a numpy array so we don't have to do it later
-            for fileName, vector in result.items():
-                result[fileName] = numpy.array(vector)
-        else:
-            getLogger().warning(f"[{os.getpid()}] Warning, did not find the kwola line counter object in the browser. This usually "
-                  "indicates that there was an error either in translating the javascript, an error "
-                  "in loading the page, or that the page has absolutely no javascript. "
-                  f"On page: {self.driver.current_url}")
-            result = {}
-
-        return result
-
-    def extractExceptions(self):
-        # The JavaScript that we want to inject. This will extract out the exceptions
-        # that the Kwola error handler was able to pick up
-        injected_javascript = (
-            'const exceptions = window.kwolaExceptions; window.kwolaExceptions = []; return exceptions;'
-        )
-
-        result = self.driver.execute_script(injected_javascript)
-
-        if result is None:
-            return []
-
-        return result
-
     def getActionMaps(self):
         try:
             if self.hasBrowserDied:
@@ -456,7 +342,7 @@ class WebEnvironmentSession:
                         width: bounds.width - paddingLeft - paddingRight - 6,
                         height: bounds.height - paddingTop - paddingBottom - 6,
                         elementType: element.tagName.toLowerCase(),
-                        keywords: (element.textContent + " " + element.getAttribute("class") + " " + element.getAttribute("name") + " " + element.getAttribute("id")).toLowerCase() 
+                        keywords: (element.textContent + " " + element.getAttribute("class") + " " + element.getAttribute("name") + " " + element.getAttribute("id") + " " + element.getAttribute("type")).toLowerCase() 
                     };
                     
                     // Skip this element if it covers basically the whole screen.
@@ -548,7 +434,7 @@ class WebEnvironmentSession:
                     }
                     
                     if (data.canType || data.canClick || data.canRightClick)
-                        if (data.width > 0 && data.height > 0)
+                        if (data.width >= 1 && data.height >= 1)
                             actionMaps.push(data);
                 }
                 
@@ -709,37 +595,31 @@ class WebEnvironmentSession:
         except selenium.common.exceptions.TimeoutException:
             pass
 
-    def runAction(self, action, executionSessionId):
+    def runAction(self, action):
         try:
             if self.hasBrowserDied:
                 return None
 
             self.checkOffsite(priorURL=self.targetURL)
 
-            executionTrace = ExecutionTrace(id=str(executionSessionId) + "_trace_" + str(self.frameNumber))
+            executionTrace = ExecutionTrace(id=str(self.executionSession.id) + "_trace_" + str(self.traceNumber))
             executionTrace.time = datetime.now()
             executionTrace.actionPerformed = action
             executionTrace.errorsDetected = []
-            executionTrace.startURL = self.driver.current_url
             executionTrace.actionMaps = self.getActionMaps()
+            executionTrace.didErrorOccur = False
+            executionTrace.didNewErrorOccur = False
+            executionTrace.hadNetworkTraffic = False
+            executionTrace.hadNewNetworkTraffic = False
+            executionTrace.didCodeExecute = False
+            executionTrace.didNewBranchesExecute = False
+            executionTrace.didScreenshotChange = False
+            executionTrace.isScreenshotNew = False
+            executionTrace.tabNumber = self.tabNumber
+            executionTrace.traceNumber = self.traceNumber
 
-            startLogCount = len(self.driver.get_log('browser'))
-
-            self.proxy.resetPathTrace()
-            self.proxy.resetNetworkErrors()
-
-            try:
-                element = self.driver.execute_script("""
-                return document.elementFromPoint(arguments[0], arguments[1]);
-                """, action.x, action.y)
-
-                if element is not None:
-                    executionTrace.cursor = element.value_of_css_property("cursor")
-                else:
-                    executionTrace.cursor = None
-
-            except selenium.common.exceptions.StaleElementReferenceException as e:
-                executionTrace.cursor = None
+            for plugin in self.plugins:
+                plugin.beforeActionRuns(self.driver, self.proxy, self.executionSession, executionTrace, action)
 
             success = self.performActionInBrowser(action)
 
@@ -748,190 +628,10 @@ class WebEnvironmentSession:
             self.checkOffsite(priorURL=executionTrace.startURL)
             self.checkLoadFailure()
 
-            hadNewError = False
-            exceptions = self.extractExceptions()
-            for exception in exceptions:
-                msg, source, lineno, colno, stack = tuple(exception)
+            for plugin in self.plugins:
+                plugin.afterActionRuns(self.driver, self.proxy, self.executionSession, executionTrace, action)
 
-                msg = str(msg)
-                source = str(source)
-                stack = str(stack)
-
-                combinedMessage = msg + source + stack
-
-                kwolaJSRewriteErrorFound = False
-                for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
-                    if detectionString in combinedMessage:
-                        kwolaJSRewriteErrorFound = True
-
-                if kwolaJSRewriteErrorFound:
-                    logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
-                              f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
-                              f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
-                              f"issue. \n"
-
-                    logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
-
-                    logMsgString += f"{str(stack)}\n"
-
-                    getLogger().error(logMsgString)
-                else:
-                    error = ExceptionError(type="exception", page=executionTrace.startURL, stacktrace=stack, message=msg, source=source, lineNumber=lineno, columnNumber=colno)
-                    executionTrace.errorsDetected.append(error)
-                    errorHash = error.computeHash()
-
-                    if errorHash not in self.errorHashes:
-                        logMsgString = f"[{os.getpid()}] An unhandled exception was detected in client application:\n"
-                        logMsgString += f"{msg} at line {lineno} column {colno} in {source}\n"
-                        logMsgString += f"{str(stack)}"
-
-                        getLogger().info(logMsgString)
-
-                        self.errorHashes.add(errorHash)
-                        hadNewError = True
-
-            logEntries = self.driver.get_log('browser')[startLogCount:]
-            for log in logEntries:
-                if log['level'] == 'SEVERE':
-                    message = str(log['message'])
-                    message = message.replace("\\n", "\n")
-
-                    # If it looks like a network error, then ignore it because those are handled separately
-                    if self.networkErrorRegex.search(message) is not None:
-                        continue
-
-                    kwolaJSRewriteErrorFound = False
-                    for detectionString in self.kwolaJSRewriteErrorDetectionStrings:
-                        if detectionString in message:
-                            kwolaJSRewriteErrorFound = True
-
-                    if kwolaJSRewriteErrorFound:
-                        logMsgString = f"[{os.getpid()}] Error. There was a bug generated by the underlying javascript application, " \
-                                  f"but it appears to be a bug in Kwola's JS rewriting. Please notify the Kwola " \
-                                  f"developers that this url: {self.driver.current_url} gave you a js-code-rewriting " \
-                                  f"issue.\n"
-
-                        logMsgString += f"{message}\n"
-
-                        getLogger().error(logMsgString)
-                    else:
-                        error = LogError(type="log", page=executionTrace.startURL, message=message, logLevel=log['level'])
-                        executionTrace.errorsDetected.append(error)
-                        errorHash = error.computeHash()
-
-                        if errorHash not in self.errorHashes:
-                            logMsgString = f"[{os.getpid()}] A log error was detected in client application:\n"
-                            logMsgString += f"{message}\n"
-
-                            getLogger().info(logMsgString)
-
-                            self.errorHashes.add(errorHash)
-                            hadNewError = True
-
-            for networkError in self.proxy.getNetworkErrors():
-                networkError.page = executionTrace.startURL
-                executionTrace.errorsDetected.append(networkError)
-                errorHash = networkError.computeHash()
-
-                if errorHash not in self.errorHashes:
-                    networkErrorMsgString = f"[{os.getpid()}] A network error was detected in client application:\n"
-                    networkErrorMsgString += f"Path: {networkError.path}\n"
-                    networkErrorMsgString += f"Status Code: {networkError.statusCode}\n"
-                    networkErrorMsgString += f"Message: {networkError.message}\n"
-
-                    getLogger().info(networkErrorMsgString)
-
-                    self.errorHashes.add(errorHash)
-                    hadNewError = True
-
-            screenHash = self.addScreenshot()
-
-            branchTrace = self.extractBranchTrace()
-
-            urlPathTrace = self.proxy.getPathTrace()
-
-            cumulativeProxyPaths = urlPathTrace['seen']
-            newProxyPaths = cumulativeProxyPaths.difference(self.lastProxyPaths)
-            newBranches = False
-            filteredBranchTrace = {}
-
-            for fileName in branchTrace.keys():
-                traceVector = branchTrace[fileName]
-                didExecuteFile = bool(numpy.sum(traceVector) > 0)
-
-                if didExecuteFile:
-                    filteredBranchTrace[fileName] = traceVector
-
-                if fileName in self.cumulativeBranchTrace:
-                    cumulativeTraceVector = self.cumulativeBranchTrace[fileName]
-
-                    if len(traceVector) == len(cumulativeTraceVector):
-                        newBranchCount = np.sum(traceVector[cumulativeTraceVector == 0])
-                        if newBranchCount > 0:
-                            newBranches = True
-                    else:
-                        if didExecuteFile:
-                            newBranches = True
-                else:
-                    if didExecuteFile:
-                        newBranches = True
-
-            executionTrace.branchTrace = {k:v.tolist() for k,v in filteredBranchTrace.items()}
-
-            executionTrace.networkTrafficTrace = list(urlPathTrace['recent'])
-
-            executionTrace.startScreenshotHash = self.lastScreenshotHash
-            executionTrace.finishScreenshotHash = screenHash
-            executionTrace.tabNumber = self.tabNumber
-            executionTrace.frameNumber = self.frameNumber
-
-            executionTrace.logOutput = "\n".join([str(log) for log in logEntries])
-            executionTrace.finishURL = self.driver.current_url
-
-            executionTrace.didErrorOccur = len(executionTrace.errorsDetected) > 0
-            executionTrace.didNewErrorOccur = hadNewError
-            executionTrace.didCodeExecute = bool(len(filteredBranchTrace) > 0)
-            executionTrace.didNewBranchesExecute = bool(newBranches)
-
-            executionTrace.hadNetworkTraffic = len(urlPathTrace['recent']) > 0
-            executionTrace.hadNewNetworkTraffic = len(newProxyPaths) > 0
-            executionTrace.didScreenshotChange = screenHash != self.lastScreenshotHash
-            executionTrace.isScreenshotNew = screenHash not in self.screenshotHashes
-            executionTrace.didURLChange = executionTrace.startURL != executionTrace.finishURL
-            executionTrace.isURLNew = executionTrace.finishURL not in self.allUrls
-
-            executionTrace.hadLogOutput = bool(executionTrace.logOutput)
-
-            total = 0
-            executedAtleastOnce = 0
-            for fileName in self.cumulativeBranchTrace:
-                total += len(self.cumulativeBranchTrace[fileName])
-                executedAtleastOnce += np.count_nonzero(self.cumulativeBranchTrace[fileName])
-
-            # Just an extra check here to cover our ass in case of division by zero
-            if total == 0:
-                total += 1
-
-            executionTrace.cumulativeBranchCoverage = float(executedAtleastOnce) / float(total)
-
-            for fileName in filteredBranchTrace.keys():
-                if fileName in self.cumulativeBranchTrace:
-                    if len(branchTrace[fileName]) == len(self.cumulativeBranchTrace[fileName]):
-                        self.cumulativeBranchTrace[fileName] += branchTrace[fileName]
-                    else:
-                        getLogger().warning(f"Warning! The file with fileName {fileName} has changed the size of its trace vector. This "
-                              f"is very unusual and could indicate some strange situation with dynamically loaded javascript")
-                else:
-                    self.cumulativeBranchTrace[fileName] = branchTrace[fileName]
-
-            self.allUrls.add(self.driver.current_url)
-
-            self.lastScreenshotHash = screenHash
-            self.screenshotHashes.add(screenHash)
-
-            self.lastProxyPaths = set(urlPathTrace['seen'])
-
-            self.frameNumber += 1
+            self.traceNumber += 1
 
             return executionTrace
         except urllib3.exceptions.MaxRetryError:
@@ -951,7 +651,7 @@ class WebEnvironmentSession:
     def getImage(self):
         try:
             if self.hasBrowserDied:
-                return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
+                return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
 
             image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
 
@@ -960,10 +660,18 @@ class WebEnvironmentSession:
             return image
         except urllib3.exceptions.MaxRetryError:
             self.hasBrowserDied = True
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
         except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width', 3]])
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+
+    def runSessionCompletedHooks(self):
+        if self.hasBrowserDied:
+            return
+
+        for plugin in self.plugins:
+            plugin.browserSessionFinished(self.driver, self.proxy, self.executionSession)
+
