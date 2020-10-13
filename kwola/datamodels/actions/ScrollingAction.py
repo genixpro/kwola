@@ -18,24 +18,15 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-import unittest
-from ..diagnostics.test_installation import testInstallation
-from ..config.logger import getLogger, setupLocalLogging
-import logging
 
-def main():
+from .BaseAction import BaseAction
+from mongoengine import *
+
+
+class ScrollingAction(BaseAction):
     """
-        This is the entry point for the Kwola secondary command that runs a rapid test suite that can be used to diagnose whether your Kwola installation is working.
+        This class represents a scroll down.
     """
-    setupLocalLogging()
-    success = testInstallation(verbose=True)
-    if not success:
-        print(
-            "There appears to be a problem with your Kwola installation or environment. Exiting.")
-        exit(1)
 
-    suite = unittest.defaultTestLoader.loadTestsFromName("kwola.tests.test_training_loop.TestTrainingLoop.test_restaurant_click_only")
-
-    runner = unittest.TextTestRunner(verbosity=3)
-    runner.run(suite)
+    direction = StringField()
 

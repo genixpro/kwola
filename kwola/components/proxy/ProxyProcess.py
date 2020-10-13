@@ -25,20 +25,28 @@ from ...config.logger import getLogger, setupLocalLogging
 from ..plugins.core.JSRewriter import JSRewriter
 from ..plugins.core.HTMLRewriter import HTMLRewriter
 from contextlib import closing
-from mitmproxy.tools.dump import DumpMaster
 import pickle
-import mitmproxy.exceptions
 from threading import Thread
 import asyncio
-import billiard as multiprocessing
+# import billiard as multiprocessing
 import socket
+import multiprocessing
 import time
+import requests
+import traceback
+import os
+import signal
+from ...config.logger import getLogger
+from ..utils.retry import autoretry
+from ...errors import ProxyVerificationFailed
 
 
 class ProxyProcess:
     """
         This class is used to run and manage the proxy subprocess
     """
+
+    sharedMultiprocessingContext = multiprocessing.get_context('spawn')
 
     def __init__(self, config, plugins=None):
         if plugins is None:
@@ -52,19 +60,25 @@ class ProxyProcess:
         ] + self.plugins
 
         self.config = config
-        self.commandQueue = multiprocessing.Queue()
-        self.resultQueue = multiprocessing.Queue()
+        self.commandQueue = ProxyProcess.sharedMultiprocessingContext.Queue()
+        self.resultQueue = ProxyProcess.sharedMultiprocessingContext.Queue()
 
-        self.proxyProcess = multiprocessing.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue, pickle.dumps(self.plugins)))
+        self.proxyProcess = ProxyProcess.sharedMultiprocessingContext.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue, pickle.dumps(self.plugins, protocol=pickle.HIGHEST_PROTOCOL)), daemon=True)
         self.proxyProcess.start()
 
         # Wait for the result indicating that the proxy process is ready
         self.port = self.resultQueue.get()
-        time.sleep(0.1)
+        time.sleep(0.5)
+        getLogger().info(f"Proxy process has started on port {self.port} with pid {self.proxyProcess.pid}")
+        self.checkProxyFunctioning()
 
     def __del__(self):
+        self.shutdown()
+
+    def shutdown(self):
         if self.proxyProcess is not None:
-            self.proxyProcess.terminate()
+            self.commandQueue.put("exit")
+            self.proxyProcess = None
 
     @staticmethod
     def findFreePort():
@@ -90,6 +104,22 @@ class ProxyProcess:
 
     def resetNetworkErrors(self):
         self.commandQueue.put("resetNetworkErrors")
+
+    @autoretry(logRetries=False)
+    def checkProxyFunctioning(self):
+        proxies = {
+            'http': f'http://127.0.0.1:{self.port}',
+            'https': f'http://127.0.0.1:{self.port}',
+        }
+
+        testUrl = "http://kros3.kwola.io/"
+        response = requests.get(testUrl, proxies=proxies, verify=False)
+        if response.status_code != 200:
+            raise ProxyVerificationFailed(f"Error in the proxy - unable to connect to the testing url at {testUrl} through the local proxy. Status code: {response.status_code}. Body: {response.content}")
+        else:
+            self.resetPathTrace()
+            self.resetNetworkErrors()
+
 
     @staticmethod
     def runProxyServerSubprocess(config, commandQueue, resultQueue, plugins):
@@ -119,15 +149,16 @@ class ProxyProcess:
                     "recent": pathTracer.recentPaths
                 }
 
-                pathTracer.recentPaths = set()
-
                 resultQueue.put(pathTrace)
 
             if message == "getNetworkErrors":
-                resultQueue.put(pickle.dumps(networkErrorTracer.errors))
+                resultQueue.put(pickle.dumps(networkErrorTracer.errors, protocol=pickle.HIGHEST_PROTOCOL))
 
             if message == "getMostRecentNetworkActivityTime":
                 resultQueue.put(pathTracer.mostRecentNetworkActivityTime)
+
+            if message == "exit":
+                exit(0)
 
     @staticmethod
     def runProxyServerThread(codeRewriter, pathTracer, networkErrorTracer, resultQueue):
@@ -135,11 +166,13 @@ class ProxyProcess:
             try:
                 ProxyProcess.runProxyServerOnce(codeRewriter, pathTracer, networkErrorTracer, resultQueue)
             except Exception:
-                pass
+                getLogger().warning(f"Had to restart the mitmproxy due to an exception: {traceback.format_exc()}")
 
     @staticmethod
     def runProxyServerOnce(codeRewriter, pathTracer, networkErrorTracer, resultQueue):
         from mitmproxy import proxy, options
+        from mitmproxy.tools.dump import DumpMaster
+        import mitmproxy.exceptions
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -148,7 +181,7 @@ class ProxyProcess:
         while True:
             try:
                 port = ProxyProcess.findFreePort()
-                opts = options.Options(listen_port=port)
+                opts = options.Options(listen_port=port, http2=False)
                 pconf = proxy.config.ProxyConfig(opts)
 
                 m = DumpMaster(opts, with_termlog=False, with_dumper=False)
@@ -158,7 +191,7 @@ class ProxyProcess:
                 m.addons.add(networkErrorTracer)
                 break
             except mitmproxy.exceptions.ServerException:
-                pass
+                getLogger().warning(f"Had to restart the mitmproxy due to an exception: {traceback.format_exc()}")
 
         resultQueue.put(port)
         m.run()

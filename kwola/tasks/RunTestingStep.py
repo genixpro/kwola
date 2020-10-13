@@ -20,11 +20,11 @@
 
 
 from ..tasks.TaskProcess import TaskProcess
-from ..components.managers.TestingManager import TestingManager
+from ..components.managers.TestingStepManager import TestingStepManager
 
 
 def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None):
-    manager = TestingManager(configDir, testingStepId, shouldBeRandom, generateDebugVideo, plugins)
+    manager = TestingStepManager(configDir, testingStepId, shouldBeRandom, generateDebugVideo, plugins)
     return manager.runTesting()
 
 

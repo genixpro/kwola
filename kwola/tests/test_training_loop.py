@@ -20,7 +20,8 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         enableRandomOtherSymbolCommand=False,
                                                                         enableDoubleClickCommand=False,
                                                                         enableRightClickCommand=False,
-                                                                        custom_typing_action_strings=[]
+                                                                        custom_typing_action_strings=[],
+                                                                        enableScrolling=True
                                                                         )
         try:
             TrainAgentLoop.trainAgent(configDir, exitOnFail=True)

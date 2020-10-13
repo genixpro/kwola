@@ -44,12 +44,15 @@ requirements = [
     "billiard",
     "wheel",
     "StringDist",
-    "bs4"
+    "bs4",
+    "google-cloud-storage",
+    "Faker",
+    "giturlparse"
 ]
 
 setup(
     name='kwola',
-    version='0.1.41',
+    version='0.1.42',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[

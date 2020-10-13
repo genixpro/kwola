@@ -26,10 +26,12 @@ from ...tasks.TaskProcess import TaskProcess
 from ...config.config import KwolaCoreConfiguration
 from ...datamodels.ExecutionSessionModel import ExecutionSession
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
+from ...datamodels.ExecutionSessionTraceWeights import ExecutionSessionTraceWeights
 from ...datamodels.TestingStepModel import TestingStep
 from ...datamodels.TrainingStepModel import TrainingStep
 from datetime import datetime
 import atexit
+import subprocess
 import concurrent.futures
 import gzip
 import json
@@ -39,6 +41,7 @@ import numpy
 import os
 import pickle
 import random
+import shutil
 import scipy.special
 import sys
 import tempfile
@@ -50,7 +53,7 @@ import google.api_core.exceptions
 from google.cloud import storage
 
 
-storageClient = storage.Client()
+# storageClient = storage.Client()
 
 
 def isNumpyArray(obj):
@@ -217,8 +220,8 @@ class TrainingManager:
 
             self.threadExecutor.shutdown(wait=True)
 
-            self.shutdownAndJoinSubProcesses()
             self.saveAgent()
+            self.shutdownAndJoinSubProcesses()
 
         except Exception:
             getLogger().error(f"[{os.getpid()}] Error occurred while learning sequence!\n{traceback.format_exc()}")
@@ -228,7 +231,7 @@ class TrainingManager:
             files = os.listdir(self.batchDirectory)
             for file in files:
                 os.unlink(os.path.join(self.batchDirectory, file))
-            os.rmdir(self.batchDirectory)
+            shutil.rmtree(self.batchDirectory)
 
             del self.agent
 
@@ -380,12 +383,15 @@ class TrainingManager:
         getLogger().info(f"[{os.getpid()}] Shutting down and joining the sub-processes")
         for subProcess, subProcessCommandQueue in zip(self.subProcesses, self.subProcessCommandQueues):
             subProcessCommandQueue.put(("quit", {}))
+            getLogger().info(f"[{os.getpid()}] Waiting for batch prep subprocess with pid {subProcess.pid} to quit")
             subProcess.join(timeout=30)
             if subProcess.is_alive():
                 # Use kill in python 3.7+, terminate in lower versions
                 if hasattr(subProcess, 'kill'):
+                    getLogger().info(f"[{os.getpid()}] Sending the subprocess with pid {subProcess.pid} the kill signal with.")
                     subProcess.kill()
                 else:
+                    getLogger().info(f"[{os.getpid()}] Sending the subprocess with pid {subProcess.pid} the terminate signal.")
                     subProcess.terminate()
 
     def saveAgent(self):
@@ -401,15 +407,10 @@ class TrainingManager:
             getLogger().error(f"[{os.getpid()}] ERROR! A NaN was detected in this models output. Not saving model.")
 
     @staticmethod
-    def saveExecutionTraceWeightData(traceWeightData, configDir):
+    def saveExecutionSessionTraceWeights(traceWeightData, configDir):
         config = KwolaCoreConfiguration(configDir)
+        traceWeightData.saveToDisk(config)
 
-        weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceWeightData['id'] + "-weight.json")
-
-        saveData = {"weight": traceWeightData['weight']}
-
-        with open(weightFile, "wt") as f:
-            json.dump(saveData, f)
 
     @staticmethod
     def writeSingleExecutionTrace(traceBatch, sampleCacheDir):
@@ -417,7 +418,7 @@ class TrainingManager:
 
         cacheFile = os.path.join(sampleCacheDir, traceId + "-sample.pickle.gz")
 
-        pickleBytes = pickle.dumps(traceBatch)
+        pickleBytes = pickle.dumps(traceBatch, protocol=pickle.HIGHEST_PROTOCOL)
         compressedPickleBytes = gzip.compress(pickleBytes)
 
         # getLogger().info(f"Writing batch cache file {cacheFile}")
@@ -439,6 +440,8 @@ class TrainingManager:
         for attempt in range(maxAttempts):
             try:
                 agent = DeepLearningAgent(config, whichGpu=None)
+
+                agent.loadSymbolMap()
 
                 sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples")
 
@@ -462,6 +465,29 @@ class TrainingManager:
                     getLogger().warning(f"[{os.getpid()}] Warning! Failed to prepare samples for execution session {executionSessionId}. Error was: {traceback.print_exc()}")
 
     @staticmethod
+    def destroyPreparedSamplesForExecutionTrace(configDir, executionTraceId):
+        """ This method is used to destroy the cached prepared_samples data so that it can later be recreated. This is commonly triggered
+            in the event of an error."""
+        config = KwolaCoreConfiguration(configDir)
+        sampleCacheDir = config.getKwolaUserDataDirectory("prepared_samples", ensureExists=False)
+
+        cacheFile = os.path.join(sampleCacheDir, executionTraceId + "-sample.pickle.gz")
+
+        # Just for compatibility with the old naming scheme
+        oldCacheFileName = os.path.join(sampleCacheDir, executionTraceId + ".pickle.gz")
+
+        try:
+            os.unlink(cacheFile)
+        except FileNotFoundError:
+            pass
+
+        try:
+            os.unlink(oldCacheFileName)
+        except FileNotFoundError:
+            pass
+
+
+    @staticmethod
     def prepareBatchesForExecutionTrace(configDir, executionTraceId, executionSessionId, batchDirectory, applicationId):
         try:
             config = KwolaCoreConfiguration(configDir)
@@ -483,16 +509,10 @@ class TrainingManager:
                 # sampleBatch = pickle.loads(gzip.decompress(blob.download_as_string()))
                 cacheHit = True
             except FileNotFoundError:
-                try:
-                    with open(oldCacheFileName, 'rb') as file:
-                        sampleBatch = pickle.loads(gzip.decompress(file.read()))
-                    # sampleBatch = pickle.loads(gzip.decompress(blob.download_as_string()))
-                    cacheHit = True
-                except FileNotFoundError:
-                    TrainingManager.addExecutionSessionToSampleCache(executionSessionId, config)
-                    cacheHit = False
-                    with open(cacheFile, 'rb') as file:
-                        sampleBatch = pickle.loads(gzip.decompress(file.read()))
+                TrainingManager.addExecutionSessionToSampleCache(executionSessionId, config)
+                cacheHit = False
+                with open(cacheFile, 'rb') as file:
+                    sampleBatch = pickle.loads(gzip.decompress(file.read()))
 
             imageWidth = sampleBatch['processedImages'].shape[3]
             imageHeight = sampleBatch['processedImages'].shape[2]
@@ -545,7 +565,7 @@ class TrainingManager:
             fileDescriptor, fileName = tempfile.mkstemp(".bin", dir=batchDirectory)
 
             with open(fileDescriptor, 'wb') as batchFile:
-                pickle.dump(sampleBatch, batchFile)
+                pickle.dump(sampleBatch, batchFile, protocol=pickle.HIGHEST_PROTOCOL)
 
             return fileName, cacheHit
         except Exception:
@@ -553,9 +573,13 @@ class TrainingManager:
             raise
 
     @staticmethod
-    def prepareAndLoadSingleBatchForSubprocess(config, executionTraceWeightDatas, executionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue, applicationId):
+    def prepareAndLoadSingleBatchForSubprocess(config, executionSessionTraceWeightDatas, executionSessionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue, subProcessBatchResultQueue, applicationId):
         try:
-            traceWeights = numpy.array([traceWeightData['weight'] for traceWeightData in executionTraceWeightDatas])
+            tracesWithWeightObjects = [(traceWeightData.weights[traceId], traceId, traceWeightData)
+                                       for traceWeightData in executionSessionTraceWeightDatas
+                                       for traceId in traceWeightData.weights]
+
+            traceWeights = numpy.array([weight[0] for weight in tracesWithWeightObjects])
 
             traceWeights = numpy.minimum(config['training_trace_selection_maximum_weight'], traceWeights)
             traceWeights = numpy.maximum(config['training_trace_selection_minimum_weight'], traceWeights)
@@ -573,15 +597,21 @@ class TrainingManager:
                 traceWeights = traceWeights + numpy.arange(0, config['training_trace_selection_cache_not_full_state_one_side_bias'], len(traceWeights))
 
             traceProbabilities = scipy.special.softmax(traceWeights)
-            traceIds = [trace['id'] for trace in executionTraceWeightDatas]
+            traceIds = [weight[1] for weight in tracesWithWeightObjects]
 
             chosenExecutionTraceIds = numpy.random.choice(traceIds, [config['batch_size']], p=traceProbabilities)
 
+        except Exception:
+            getLogger().error(f"prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue.\n{traceback.format_exc()}")
+            subProcessCommandQueue.put(("batch", {}))
+            return 1.0
+
+        try:
             futures = []
             for traceId in chosenExecutionTraceIds:
-                traceWeightData = executionTraceWeightDataIdMap[str(traceId)]
+                traceWeightData = executionSessionTraceWeightDataIdMap[str(traceId)]
 
-                future = processPool.apply_async(TrainingManager.prepareBatchesForExecutionTrace, (config.configurationDirectory, str(traceId), str(traceWeightData['executionSessionId']), batchDirectory, applicationId))
+                future = processPool.apply_async(TrainingManager.prepareBatchesForExecutionTrace, (config.configurationDirectory, str(traceId), str(traceWeightData['id']), batchDirectory, applicationId))
                 futures.append(future)
 
             cacheHits = []
@@ -626,21 +656,29 @@ class TrainingManager:
 
             resultFileDescriptor, resultFileName = tempfile.mkstemp()
             with open(resultFileDescriptor, 'wb') as file:
-                pickle.dump((batch, cacheHitRate), file)
+                pickle.dump((batch, cacheHitRate), file, protocol=pickle.HIGHEST_PROTOCOL)
 
             subProcessBatchResultQueue.put(resultFileName)
 
             return cacheHitRate
-        except Exception:
-            getLogger().error(f"prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue.\n{traceback.format_exc()}")
-            subProcessCommandQueue.put(("batch", {}))
+        except Exception as e:
+            if not isinstance(e, KeyboardInterrupt):
+                getLogger().error(f"prepareAndLoadSingleBatchForSubprocess failed! Destroying the batch cache for the traces and then putting a retry into the queue.\n{traceback.format_exc()}")
+
+                # As a precautionary measure, we destroy whatever data is in the
+                # prepared samples cache for all of the various traceIds that were
+                # chosen here.
+                for traceId in chosenExecutionTraceIds:
+                    TrainingManager.destroyPreparedSamplesForExecutionTrace(config.configurationDirectory, traceId)
+
+                subProcessCommandQueue.put(("batch", {}))
             return 1.0
 
     @staticmethod
     def loadAllTestingSteps(config, applicationId=None):
         testStepsDir = config.getKwolaUserDataDirectory("testing_steps")
 
-        if config['data_serialization_method'] == 'mongo':
+        if config['data_serialization_method']['default'] == 'mongo':
             return list(TestingStep.objects(applicationId=applicationId).no_dereference())
         else:
             testingSteps = []
@@ -657,9 +695,9 @@ class TrainingManager:
             return testingSteps
 
     @staticmethod
-    def updateTraceRewardLoss(traceId, sampleRewardLoss, configDir):
+    def updateTraceRewardLoss(traceId, applicationId, sampleRewardLoss, configDir):
         config = KwolaCoreConfiguration(configDir)
-        trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=False)
+        trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=False, applicationId=applicationId)
         trace.lastTrainingRewardLoss = sampleRewardLoss
         trace.saveToDisk(config)
 
@@ -698,42 +736,51 @@ class TrainingManager:
 
             getLogger().info(f"[{os.getpid()}] Starting loading of execution trace weight datas.")
 
-            executionTraceWeightDatas = []
-            executionTraceWeightDataIdMap = {}
+            executionSessionTraceWeightDatas = []
+            executionSessionTraceWeightDataIdMap = {}
 
             initialDataLoadProcessPool = multiprocessingpool.Pool(processes=int(config['training_max_initialization_workers'] / config['training_batch_prep_subprocesses']), initializer=setupLocalLogging)
 
-            executionTraceFutures = []
+            executionSessionTraceWeightFutures = []
             for session in executionSessions:
-                for traceId in session.executionTraces[:-1]:
-                    executionTraceFutures.append(initialDataLoadProcessPool.apply_async(TrainingManager.loadExecutionTraceWeightData, [traceId, session.id, configDir, applicationId]))
+                executionSessionTraceWeightFutures.append(initialDataLoadProcessPool.apply_async(TrainingManager.loadExecutionSessionTraceWeights, [session.id, session.executionTraces[:-1], configDir]))
 
             completed = 0
-            for traceFuture in executionTraceFutures:
-                traceWeightData = pickle.loads(traceFuture.get(timeout=30))
+            totalTraces = 0
+            for weightFuture in executionSessionTraceWeightFutures:
+                traceWeightData = None
+                try:
+                    traceWeightDataStr = weightFuture.get(timeout=60)
+                    if traceWeightDataStr is not None:
+                        traceWeightData = pickle.loads(traceWeightDataStr)
+                except multiprocessing.context.TimeoutError:
+                    pass
+
                 if traceWeightData is not None:
-                    executionTraceWeightDatas.append(traceWeightData)
-                    executionTraceWeightDataIdMap[str(traceWeightData['id'])] = traceWeightData
+                    executionSessionTraceWeightDatas.append(traceWeightData)
+                    for traceId in traceWeightData.weights:
+                        executionSessionTraceWeightDataIdMap[str(traceId)] = traceWeightData
+                    totalTraces += len(traceWeightData.weights)
                 completed += 1
-                if completed % 1000 == 0:
+                if completed % 100 == 0:
                     getLogger().info(f"[{os.getpid()}] Finished loading {completed} execution trace weight datas.")
 
             initialDataLoadProcessPool.close()
             initialDataLoadProcessPool.join()
             del initialDataLoadProcessPool
 
-            getLogger().info(f"[{os.getpid()}] Finished loading of weight datas for {len(executionTraceWeightDatas)} execution traces.")
+            getLogger().info(f"[{os.getpid()}] Finished loading of weight datas for {len(executionSessionTraceWeightDatas)} execution sessions with {totalTraces} combined traces.")
 
-            del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionTraceFutures
+            del testingSteps, executionSessionIds, executionSessionFutures, executionSessions, executionSessionTraceWeightFutures
             getLogger().info(f"[{os.getpid()}] Finished initialization for batch preparation sub process.")
 
-            if len(executionTraceWeightDatas) == 0:
+            if len(executionSessionTraceWeightDatas) == 0:
                 subProcessBatchResultQueue.put("error")
-                raise RuntimeError("There are no execution trace weight datas to process in the algorithm.")
+                raise RuntimeError("There are no execution sessions to process in the algorithm.")
 
             processPool = multiprocessingpool.Pool(processes=config['training_initial_batch_prep_workers'], initializer=setupLocalLogging)
             backgroundTraceSaveProcessPool = multiprocessingpool.Pool(processes=config['training_background_trace_save_workers'], initializer=setupLocalLogging)
-            executionTraceSaveFutures = {}
+            executionSessionTraceWeightSaveFutures = {}
 
             batchCount = 0
             cacheFullState = True
@@ -765,7 +812,8 @@ class TrainingManager:
                         if batchCount % config['training_reset_workers_every_n_batches'] == (config['training_reset_workers_every_n_batches'] - 1):
                             needToResetPool = True
 
-                        future = threadExecutor.submit(TrainingManager.prepareAndLoadSingleBatchForSubprocess, config, executionTraceWeightDatas, executionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue,
+                        future = threadExecutor.submit(TrainingManager.prepareAndLoadSingleBatchForSubprocess, config, executionSessionTraceWeightDatas,
+                                                       executionSessionTraceWeightDataIdMap, batchDirectory, cacheFullState, processPool, subProcessCommandQueue,
                                                        subProcessBatchResultQueue, applicationId)
                         cacheRateFutures.append(future)
                         currentProcessPoolFutures.append(future)
@@ -774,17 +822,17 @@ class TrainingManager:
                     elif message == "update-loss":
                         executionTraceId = data["executionTraceId"]
                         sampleRewardLoss = data["sampleRewardLoss"]
-                        if executionTraceId in executionTraceWeightDataIdMap:
-                            traceWeightData = executionTraceWeightDataIdMap[executionTraceId]
+                        if executionTraceId in executionSessionTraceWeightDataIdMap:
+                            traceWeightData = executionSessionTraceWeightDataIdMap[executionTraceId]
 
                             # We do this check here because saving execution traces is actually a pretty CPU heavy process,
                             # so we only want to do it if the loss has actually changed by a significant degree
-                            differenceRatio = abs(traceWeightData['weight'] - sampleRewardLoss) / (traceWeightData['weight'] + 1e-6)
+                            differenceRatio = abs(traceWeightData.weights[executionTraceId] - sampleRewardLoss) / (traceWeightData.weights[executionTraceId] + 1e-6)
                             if differenceRatio > config['training_trace_selection_min_loss_ratio_difference_for_save']:
-                                traceWeightData['weight'] = sampleRewardLoss
-                                if executionTraceId not in executionTraceSaveFutures or executionTraceSaveFutures[executionTraceId].ready():
-                                    traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(TrainingManager.saveExecutionTraceWeightData, (traceWeightData, configDir))
-                                    executionTraceSaveFutures[executionTraceId] = traceSaveFuture
+                                traceWeightData.weights[executionTraceId] = sampleRewardLoss
+                                if traceWeightData.id not in executionSessionTraceWeightSaveFutures or executionSessionTraceWeightSaveFutures[traceWeightData.id].ready():
+                                    traceSaveFuture = backgroundTraceSaveProcessPool.apply_async(TrainingManager.saveExecutionSessionTraceWeights, (traceWeightData, configDir))
+                                    executionSessionTraceWeightSaveFutures[traceWeightData.id] = traceSaveFuture
 
                     if needToResetPool and lastProcessPool is None:
                         needToResetPool = False
@@ -891,54 +939,25 @@ class TrainingManager:
         return session
 
     @staticmethod
-    def loadExecutionTrace(traceId, configDir):
+    def loadExecutionTrace(traceId, applicationId, configDir):
         config = KwolaCoreConfiguration(configDir)
-        trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True)
-        return pickle.dumps(trace)
+        trace = ExecutionTrace.loadFromDisk(traceId, config, omitLargeFields=True, applicationId=applicationId)
+        return pickle.dumps(trace, protocol=pickle.HIGHEST_PROTOCOL)
 
     @staticmethod
-    def loadExecutionTraceWeightData(traceId, sessionId, configDir, applicationId):
+    def loadExecutionSessionTraceWeights(sessionId, traceIds, configDir):
         try:
             config = KwolaCoreConfiguration(configDir)
 
-            weightFile = os.path.join(config.getKwolaUserDataDirectory("execution_trace_weight_files"), traceId + "-weight.json")
+            traceWeights = ExecutionSessionTraceWeights.loadFromDisk(sessionId, config, printErrorOnFailure=False)
+            if traceWeights is None:
+                traceWeights = ExecutionSessionTraceWeights(
+                    id=sessionId,
+                    weights={traceId: config['training_trace_selection_maximum_weight'] for traceId in traceIds}
+                )
+                traceWeights.saveToDisk(config)
 
-            data = {}
-            useDefault = False
-
-            # applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + applicationId + "-cache")
-            # blob = storage.Blob(os.path.join('execution_trace_weight_files', traceId + "-weight.json"), applicationStorageBucket)
-            #
-            # try:
-            #     # startTime = datetime.now()
-            #     data = json.loads(blob.download_as_string())
-            #
-            #     # finishTime = datetime.now()
-            #     # getLogger().info((finishTime - startTime).total_seconds())
-            #     useDefault = False
-            # except google.api_core.exceptions.NotFound as e:
-            #     useDefault = True
-            # except Exception as e:
-            #     getLogger().info(traceback.format_exc())
-
-            try:
-                with open(weightFile, "rt") as f:
-                    try:
-                        data = json.load(f)
-                        useDefault = False
-                    except json.JSONDecodeError:
-                        useDefault = True
-            except FileNotFoundError:
-                useDefault = True
-
-            if useDefault:
-                data = {"weight": config['training_trace_selection_maximum_weight']}
-
-            data['id'] = traceId
-            data['executionSessionId'] = sessionId
-
-            # getLogger().info(f"Loaded {traceId}")
-            return pickle.dumps(data)
+            return pickle.dumps(traceWeights, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception as e:
             getLogger().error(traceback.format_exc())
             return None

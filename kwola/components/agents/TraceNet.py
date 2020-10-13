@@ -42,8 +42,7 @@ class TraceNet(torch.nn.Module):
                 in_features=self.config['symbol_embedding_size'],
                 out_features=self.stampSize - self.timeEncodingSize
             ),
-            torch.nn.ELU(),
-            torch.nn.BatchNorm1d(num_features=self.stampSize - self.timeEncodingSize)
+            torch.nn.ELU()
         )
 
         self.mainModel = torch.nn.Sequential(

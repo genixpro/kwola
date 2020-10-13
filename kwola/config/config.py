@@ -121,6 +121,9 @@ class KwolaCoreConfiguration:
 
         return subDirectory
 
+    def __contains__(self, key):
+        return key in self.configData
+
     def __getitem__(self, key):
         try:
             return self.configData[key]
@@ -136,7 +139,7 @@ class KwolaCoreConfiguration:
             return self.configData[name]
         else:
             # Default behaviour
-            raise AttributeError
+            raise AttributeError()
 
     def saveConfig(self):
         with open(self.configFileName, "wt") as f:

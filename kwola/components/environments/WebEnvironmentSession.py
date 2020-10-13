@@ -26,6 +26,7 @@ from ...datamodels.actions.ClickTapAction import ClickTapAction
 from ...datamodels.actions.RightClickAction import RightClickAction
 from ...datamodels.actions.TypeAction import TypeAction
 from ...datamodels.actions.WaitAction import WaitAction
+from ...datamodels.actions.ScrollingAction import ScrollingAction
 from ...datamodels.errors.ExceptionError import ExceptionError
 from ...datamodels.errors.LogError import LogError
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
@@ -37,12 +38,14 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from ..proxy.ProxyProcess import ProxyProcess
+from ..utils.retry import autoretry
 import cv2
 import hashlib
 import numpy
 import numpy as np
 import re
 import os
+import shutil
 import os.path
 import selenium.common.exceptions
 import subprocess
@@ -51,6 +54,8 @@ import time
 import pickle
 import urllib.parse
 import urllib3
+import resource
+import psutil
 
 class WebEnvironmentSession:
     """
@@ -68,33 +73,71 @@ class WebEnvironmentSession:
             self.plugins = plugins
 
 
-        proxyPlugins = [plugin for plugin in self.plugins if isinstance(plugin, ProxyPluginBase)]
+        self.proxyPlugins = [plugin for plugin in self.plugins if isinstance(plugin, ProxyPluginBase)]
         self.plugins = [plugin for plugin in self.plugins if isinstance(plugin, WebEnvironmentPluginBase)]
 
         self.executionSession = executionSession
 
         self.targetHostRoot = self.getHostRoot(self.targetURL)
 
-        self.proxy = ProxyProcess(config, plugins=proxyPlugins)
         self.urlWhitelistRegexes = [re.compile(pattern) for pattern in self.config['web_session_restrict_url_to_regexes']]
 
+        self.proxy = None
+        self.driver = None
+
+        self.tabNumber = tabNumber
+        self.traceNumber = 0
+        self.noActivityTimeout = self.config['web_session_no_network_activity_timeout']
+
+        self.initializeProxy()
+        self.initializeWebBrowser()
+
+    def __del__(self):
+        self.shutdown()
+
+    def initializeProxy(self):
+        self.proxy = ProxyProcess(self.config, plugins=self.proxyPlugins)
+
+    def initialize(self):
+        self.fetchTargetWebpage()
+
+        if self.config.autologin:
+            self.runAutoLogin()
+
+        self.traceNumber = 0
+
+        for plugin in self.plugins:
+            if self.executionSession is not None:
+                plugin.browserSessionStarted(self.driver, self.proxy, self.executionSession)
+
+        self.enforceMemoryLimits()
+
+    def enforceMemoryLimits(self):
+        if self.driver.service.process.returncode is not None:
+            try:
+                pid = self.driver.service.process.pid  # is a Popen instance for the chromedriver process
+                p = psutil.Process(pid)
+
+                p.rlimit(psutil.RLIMIT_AS, (1024*1024*1024, 1024*1024*1024))
+                for child in p.children(recursive=True):
+                    child.rlimit(psutil.RLIMIT_AS, (1024*1024*1024, 1024*1024*1024))
+            except OSError:
+                pass
+
+    def initializeWebBrowser(self):
         chrome_options = Options()
-        chrome_options.headless = config['web_session_headless']
-        if config['web_session_enable_shared_chrome_cache']:
+        chrome_options.headless = self.config['web_session_headless']
+        if self.config['web_session_enable_shared_chrome_cache']:
             chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
             chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
 
-        chrome_options.add_argument(f"--no-sandbox")
         chrome_options.add_argument(f"--disable-gpu")
         chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument(f"--temp-profile")
+        chrome_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
 
         capabilities = webdriver.DesiredCapabilities.CHROME
         capabilities['loggingPrefs'] = {'browser': 'ALL'}
-        proxyConfig = Proxy()
-        proxyConfig.proxy_type = ProxyType.MANUAL
-        proxyConfig.http_proxy = f"localhost:{self.proxy.port}"
-        proxyConfig.ssl_proxy = f"localhost:{self.proxy.port}"
-        proxyConfig.add_to_capabilities(capabilities)
 
         self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
 
@@ -103,29 +146,30 @@ class WebEnvironmentSession:
               window.outerHeight - window.innerHeight + arguments[1]];
             """, self.config['web_session_width'], self.config['web_session_height'])
         self.driver.set_window_size(*window_size)
-        try:
-            self.driver.get(self.targetURL)
-        except selenium.common.exceptions.TimeoutException:
-            raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
 
-        time.sleep(2)
+    @autoretry()
+    def fetchTargetWebpage(self):
+        maxAttempts = 3
+        for attempt in range(maxAttempts):
+            try:
+                self.driver.get(self.targetURL)
+            except selenium.common.exceptions.TimeoutException:
+                raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
 
-        self.waitUntilNoNetworkActivity()
+            time.sleep(2)
 
-        time.sleep(3)
+            self.waitUntilNoNetworkActivity()
 
-        if self.config.autologin:
-            self.runAutoLogin()
+            time.sleep(6)
 
-        self.tabNumber = tabNumber
-        self.traceNumber = 0
+            # No action maps is a strong signal that the page has not loaded correctly.
+            actionMaps = self.getActionMaps()
+            if len(actionMaps) == 0:
+                time.sleep(2**attempt)
+                continue
+            else:
+                break
 
-        for plugin in self.plugins:
-            if self.executionSession is not None:
-                plugin.browserSessionStarted(self.driver, self.proxy, self.executionSession)
-
-    def __del__(self):
-        self.shutdown()
 
     def getHostRoot(self, url):
         host = str(urllib.parse.urlparse(url).hostname)
@@ -140,16 +184,25 @@ class WebEnvironmentSession:
         return hostRoot
 
     def shutdown(self):
-        if hasattr(self, 'plugins'):
+        if hasattr(self, 'plugins') and hasattr(self, "driver"):
             for plugin in self.plugins:
                 if self.executionSession is not None:
                     plugin.cleanup(self.driver, self.proxy, self.executionSession)
+            self.plugins = []
+
+        if hasattr(self, 'proxy'):
+            if self.proxy is not None:
+                self.proxy.shutdown()
+                self.proxy = None
 
         if hasattr(self, "driver"):
             if self.driver:
-                self.driver.quit()
+                try:
+                    self.driver.quit()
+                except ImportError:
+                    pass
 
-        self.driver = None
+            self.driver = None
 
     def waitUntilNoNetworkActivity(self):
         startTime = datetime.now()
@@ -158,17 +211,19 @@ class WebEnvironmentSession:
         while abs((self.proxy.getMostRecentNetworkActivityTime() - datetime.now()).total_seconds()) < self.config['web_session_no_network_activity_wait_time']:
             time.sleep(0.10)
             elapsedTime = abs((datetime.now() - startTime).total_seconds())
-            if elapsedTime > self.config['web_session_no_network_activity_timeout']:
-                if self.config['web_session_no_network_activity_timeout'] > 1:
-                    getLogger().warning(f"[{os.getpid()}] Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
-                          f" stop network activity all on its own? Try the config variable tweaking web_session_no_network_activity_wait_time down"
+            if elapsedTime > self.noActivityTimeout:
+                if self.noActivityTimeout > 1:
+                    getLogger().warning(f"Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
+                          f" stop network activity all on its own? Try changing the config value web_session_no_network_activity_wait_time lower"
                           f" if constant network activity is the expected behaviour. List of suspect paths: {set(self.proxy.getPathTrace()['recent']).difference(startPaths)}")
 
                     # We adjust the configuration value for this downwards so that if these timeouts are occuring, they're impact on the rest
                     # of the operations are gradually reduced so that the run can proceed
-                    self.config['web_session_no_network_activity_timeout'] = self.config['web_session_no_network_activity_timeout'] * 0.50
+                    self.noActivityTimeout = self.noActivityTimeout * 0.50
 
                 break
+        elapsedTime = abs((datetime.now() - startTime).total_seconds())
+        return elapsedTime
 
     def findElementsForAutoLogin(self):
         actionMaps = self.getActionMaps()
@@ -228,7 +283,7 @@ class WebEnvironmentSession:
                                                   source="autologin",
                                                   times=1,
                                                   type="click")
-                success = self.performActionInBrowser(loginClickAction)
+                success, networkWaitTime = self.performActionInBrowser(loginClickAction)
 
                 emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
 
@@ -236,7 +291,7 @@ class WebEnvironmentSession:
 
 
             if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
-                getLogger().warning(f"[{os.getpid()}] Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.")
+                getLogger().warning(f"Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.")
                 return
 
             if len(emailInputs) == 1:
@@ -277,9 +332,9 @@ class WebEnvironmentSession:
                                               times=1,
                                               type="click")
 
-            success1 = self.performActionInBrowser(emailTypeAction)
-            success2 = self.performActionInBrowser(passwordTypeAction)
-            success3 = self.performActionInBrowser(loginClickAction)
+            success1, networkWaitTime = self.performActionInBrowser(emailTypeAction)
+            success2, networkWaitTime = self.performActionInBrowser(passwordTypeAction)
+            success3, networkWaitTime = self.performActionInBrowser(loginClickAction)
 
             time.sleep(2)
             self.waitUntilNoNetworkActivity()
@@ -288,11 +343,11 @@ class WebEnvironmentSession:
 
             if success1 and success2 and success3:
                 if didURLChange:
-                    getLogger().info(f"[{os.getpid()}] Heuristic autologin appears to have worked!")
+                    getLogger().info(f"Heuristic autologin appears to have worked!")
                 else:
-                    getLogger().warning(f"[{os.getpid()}] Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
+                    getLogger().warning(f"Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
             else:
-                getLogger().warning(f"[{os.getpid()}] There was an error running one of the actions required for the heuristic auto login.")
+                getLogger().warning(f"There was an error running one of the actions required for the heuristic auto login.")
         except urllib3.exceptions.MaxRetryError:
             self.hasBrowserDied = True
             return None
@@ -335,6 +390,7 @@ class WebEnvironmentSession:
                         canClick: false,
                         canRightClick: false,
                         canType: false,
+                        canScroll: false,
                         left: bounds.left + paddingLeft + 3,
                         right: bounds.right - paddingRight - 3,
                         top: bounds.top + paddingTop + 3,
@@ -372,6 +428,9 @@ class WebEnvironmentSession:
                     const elemStyle = window.getComputedStyle(element);
                     if (elemStyle.getPropertyValue("cursor") === "pointer")
                         data.canClick = true;
+                    
+                    if (elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto")
+                        data.canScroll = true;
                     
                     if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
                         data.canType = true;
@@ -433,7 +492,7 @@ class WebEnvironmentSession:
                         }
                     }
                     
-                    if (data.canType || data.canClick || data.canRightClick)
+                    if (data.canType || data.canClick || data.canRightClick || data.canScroll)
                         if (data.width >= 1 && data.height >= 1)
                             actionMaps.push(data);
                 }
@@ -473,12 +532,12 @@ class WebEnvironmentSession:
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
                     if self.config['web_session_print_every_action']:
-                        getLogger().info(f"[{os.getpid()}] Clicking {action.x} {action.y} from {action.source}")
+                        getLogger().info(f"Clicking {action.x} {action.y} from {action.source}")
                     actionChain.click(on_element=element)
                     actionChain.pause(self.config.web_session_perform_action_wait_time)
                 elif action.times == 2:
                     if self.config['web_session_print_every_action']:
-                        getLogger().info(f"[{os.getpid()}] Double Clicking {action.x} {action.y} from {action.source}")
+                        getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source}")
                     actionChain.double_click(on_element=element)
                     actionChain.pause(self.config.web_session_perform_action_wait_time)
 
@@ -486,7 +545,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"[{os.getpid()}] Right Clicking {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Right Clicking {action.x} {action.y} from {action.source}")
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
@@ -495,7 +554,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"[{os.getpid()}] Typing {action.text} at {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Typing {action.text} at {action.x} {action.y} from {action.source}")
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
@@ -504,47 +563,57 @@ class WebEnvironmentSession:
                 actionChain.pause(self.config.web_session_perform_action_wait_time)
                 actionChain.perform()
 
+            if isinstance(action, ScrollingAction):
+                if self.config['web_session_print_every_action']:
+                    getLogger().info(f"Scrolling {action.direction} at {action.x} {action.y}")
+
+                if action.direction == "down":
+                    self.driver.execute_script("window.scrollTo(0, window.scrollY + 400)")
+                else:
+                    self.driver.execute_script("window.scrollTo(0, Math.max(0, window.scrollY - 400))")
+                time.sleep(1.0)
+
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"[{os.getpid()}] Clearing field at {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Clearing field at {action.x} {action.y} from {action.source}")
                 element.clear()
 
             if isinstance(action, WaitAction):
-                getLogger().info(f"[{os.getpid()}] Waiting for {action.time} at {action.x} {action.y} from {action.source}")
+                getLogger().info(f"Waiting for {action.time} at {action.x} {action.y} from {action.source}")
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MoveTargetOutOfBoundsException exception!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MoveTargetOutOfBoundsException exception!")
 
             success = False
         except selenium.common.exceptions.StaleElementReferenceException as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a StaleElementReferenceException!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a StaleElementReferenceException!")
             success = False
         except selenium.common.exceptions.InvalidElementStateException as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a InvalidElementStateException!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a InvalidElementStateException!")
 
             success = False
         except selenium.common.exceptions.TimeoutException as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a TimeoutException!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a TimeoutException!")
 
             success = False
         except selenium.common.exceptions.JavascriptException as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a JavascriptException!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a JavascriptException!")
 
             success = False
         except urllib3.exceptions.MaxRetryError as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MaxRetryError!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MaxRetryError!")
 
             success = False
         except AttributeError as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"[{os.getpid()}] Running {action.source} action {action.type} at {action.x},{action.y} failed due to an AttributeError!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to an AttributeError!")
 
             success = False
 
@@ -554,9 +623,9 @@ class WebEnvironmentSession:
         except selenium.common.exceptions.NoAlertPresentException:
             pass
 
-        self.waitUntilNoNetworkActivity()
+        networkWaitTime = self.waitUntilNoNetworkActivity()
 
-        return success
+        return success, networkWaitTime
 
     def checkOffsite(self, priorURL):
         try:
@@ -580,7 +649,7 @@ class WebEnvironmentSession:
                     offsite = True
 
                 if offsite:
-                    getLogger().info(f"[{os.getpid()}] The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
+                    getLogger().info(f"The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
                     self.driver.get(priorURL)
                     self.waitUntilNoNetworkActivity()
         except selenium.common.exceptions.TimeoutException:
@@ -589,7 +658,7 @@ class WebEnvironmentSession:
     def checkLoadFailure(self):
         try:
             if self.driver.current_url == "data:,":
-                getLogger().warning(f"[{os.getpid()}] The browser session needed to be reset back to the origin url {self.targetURL}")
+                getLogger().warning(f"The browser session needed to be reset back to the origin url {self.targetURL}")
                 self.driver.get(self.targetURL)
                 self.waitUntilNoNetworkActivity()
         except selenium.common.exceptions.TimeoutException:
@@ -600,7 +669,11 @@ class WebEnvironmentSession:
             if self.hasBrowserDied:
                 return None
 
+            actionExecutionTimes = {}
+
+            startTime = datetime.now()
             self.checkOffsite(priorURL=self.targetURL)
+            actionExecutionTimes['checkOffsite-first'] = (datetime.now() - startTime).total_seconds()
 
             executionTrace = ExecutionTrace(id=str(self.executionSession.id) + "_trace_" + str(self.traceNumber))
             executionTrace.time = datetime.now()
@@ -619,19 +692,36 @@ class WebEnvironmentSession:
             executionTrace.traceNumber = self.traceNumber
 
             for plugin in self.plugins:
+                startTime = datetime.now()
                 plugin.beforeActionRuns(self.driver, self.proxy, self.executionSession, executionTrace, action)
+                actionExecutionTimes[f"plugin-before-{type(plugin).__name__}"] = (datetime.now() - startTime).total_seconds()
 
-            success = self.performActionInBrowser(action)
+            startTime = datetime.now()
+            success, networkWaitTime = self.performActionInBrowser(action)
+            timeTaken = (datetime.now() - startTime).total_seconds()
+            actionExecutionTimes[f"performActionInBrowser-body"] = (timeTaken - networkWaitTime)
+            actionExecutionTimes[f"performActionInBrowser-networkWaitTime"] = networkWaitTime
 
             executionTrace.didActionSucceed = success
 
+            startTime = datetime.now()
             self.checkOffsite(priorURL=executionTrace.startURL)
+            actionExecutionTimes['checkOffsite-second'] = (datetime.now() - startTime).total_seconds()
+
+            startTime = datetime.now()
             self.checkLoadFailure()
+            actionExecutionTimes['checkLoadFailure'] = (datetime.now() - startTime).total_seconds()
 
             for plugin in self.plugins:
+                startTime = datetime.now()
                 plugin.afterActionRuns(self.driver, self.proxy, self.executionSession, executionTrace, action)
+                actionExecutionTimes[f"plugin-after-{type(plugin).__name__}"] = (datetime.now() - startTime).total_seconds()
 
             self.traceNumber += 1
+
+            self.enforceMemoryLimits()
+
+            executionTrace.actionExecutionTimes = actionExecutionTimes
 
             return executionTrace
         except urllib3.exceptions.MaxRetryError:
@@ -665,6 +755,9 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
         except urllib3.exceptions.ProtocolError:
+            self.hasBrowserDied = True
+            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+        except AttributeError:
             self.hasBrowserDied = True
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
 

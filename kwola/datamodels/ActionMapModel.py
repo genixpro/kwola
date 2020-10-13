@@ -45,6 +45,8 @@ class ActionMap(EmbeddedDocument):
 
     canRightClick = BooleanField()
 
+    canScroll = BooleanField()
+
     elementType = StringField()
     
     keywords = StringField()

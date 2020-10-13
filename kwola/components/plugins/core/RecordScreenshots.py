@@ -5,6 +5,7 @@ import hashlib
 import subprocess
 from kwola.config.logger import getLogger
 from ...utils.video import chooseBestFfmpegVideoCodec
+from ...utils.retry import autoretry
 
 class RecordScreenshots(WebEnvironmentPluginBase):
     def __init__(self):
@@ -61,7 +62,7 @@ class RecordScreenshots(WebEnvironmentPluginBase):
             errorMsg += str(result.stderr, 'utf8') + "\n"
             getLogger().error(errorMsg)
 
-
+    @autoretry()
     def addScreenshot(self, webDriver, executionSession):
         fileName = f"kwola-screenshot-{self.frameNumber[executionSession.id]:05d}.png"
 
@@ -94,7 +95,18 @@ class RecordScreenshots(WebEnvironmentPluginBase):
             os.unlink(self.movieFilePath(executionSession))
 
         if os.path.exists(self.screenshotDirectory[executionSession.id]):
-            os.rmdir(self.screenshotDirectory[executionSession.id])
+            try:
+                os.rmdir(self.screenshotDirectory[executionSession.id])
+            except OSError:
+                pass # Sometimes get "Directory not empty" here, not sure why,
+                     # since above commands should have removed all data in the directory.
+                     # Need to investigate more at somepoint
+
+        del self.screenshotDirectory[executionSession.id]
+        del self.screenshotPaths[executionSession.id]
+        del self.screenshotHashes[executionSession.id]
+        del self.frameNumber[executionSession.id]
+        del self.lastScreenshotHash[executionSession.id]
 
 
     def movieFilePath(self, executionSession):

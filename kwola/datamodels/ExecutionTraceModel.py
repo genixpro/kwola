@@ -143,6 +143,8 @@ class ExecutionTrace(Document):
     timeForActionExecution = FloatField()
     timeForMiscellaneous = FloatField()
 
+    actionExecutionTimes = DictField(FloatField())
+
     # We use Python getter / setter methods to transparently compress and decompress
     # these fields as they go into and out of the database model.
     @property
@@ -217,6 +219,13 @@ class ExecutionTrace(Document):
         return numpy.array(newArray)
 
     def saveToDisk(self, config):
+        cachedStartCumulativeBranchTrace = self.cachedStartCumulativeBranchTrace
+        cachedStartDecayingBranchTrace = self.cachedStartDecayingBranchTrace
+        cachedEndCumulativeBranchTrace = self.cachedEndCumulativeBranchTrace
+        cachedEndDecayingBranchTrace = self.cachedEndDecayingBranchTrace
+        cachedStartDecayingFutureBranchTrace = self.cachedStartDecayingFutureBranchTrace
+        cachedEndDecayingFutureBranchTrace = self.cachedEndDecayingFutureBranchTrace
+
         self.cachedStartCumulativeBranchTrace = None
         self.cachedStartDecayingBranchTrace = None
         self.cachedEndCumulativeBranchTrace = None
@@ -224,11 +233,17 @@ class ExecutionTrace(Document):
         self.cachedStartDecayingFutureBranchTrace = None
         self.cachedEndDecayingFutureBranchTrace = None
         saveObjectToDisk(self, "execution_traces", config)
+        self.cachedStartCumulativeBranchTrace = cachedStartCumulativeBranchTrace
+        self.cachedStartDecayingBranchTrace = cachedStartDecayingBranchTrace
+        self.cachedEndCumulativeBranchTrace = cachedEndCumulativeBranchTrace
+        self.cachedEndDecayingBranchTrace = cachedEndDecayingBranchTrace
+        self.cachedStartDecayingFutureBranchTrace = cachedStartDecayingFutureBranchTrace
+        self.cachedEndDecayingFutureBranchTrace = cachedEndDecayingFutureBranchTrace
 
 
     @staticmethod
-    def loadFromDisk(id, config, omitLargeFields=False, printErrorOnFailure=True):
-        trace = loadObjectFromDisk(ExecutionTrace, id, "execution_traces", config, printErrorOnFailure=printErrorOnFailure)
+    def loadFromDisk(id, config, omitLargeFields=False, printErrorOnFailure=True, applicationId=None):
+        trace = loadObjectFromDisk(ExecutionTrace, id, "execution_traces", config, printErrorOnFailure=printErrorOnFailure, applicationId=applicationId)
         if trace is not None:
             if omitLargeFields:
                 trace.branchExecutionTrace = []

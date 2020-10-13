@@ -26,6 +26,7 @@ import os.path
 import traceback
 import gzip
 import filetype
+import re
 from ..plugins.base.ProxyPluginBase import ProxyPluginBase
 
 class RewriteProxy:
@@ -33,7 +34,7 @@ class RewriteProxy:
         self.config = config
 
         self.memoryCache = {}
-
+        self.originalRewriteItemsBySize = {}
         self.plugins = plugins
 
     def getCacheFileName(self, fileHash, fileURL):
@@ -54,6 +55,7 @@ class RewriteProxy:
 
         # Replace all unicode characters with -CODE-, with CODE being replaced by the unicode character code
         fileNameRoot = str(fileNameRoot.encode('ascii', 'xmlcharrefreplace'), 'ascii').replace("&#", "-").replace(";", "-")
+        extension = str(extension.encode('ascii', 'xmlcharrefreplace'), 'ascii').replace("&#", "-").replace(";", "-")
 
         cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("proxy_cache"), fileNameRoot[:100] + "_" + fileHash + extension)
 
@@ -180,7 +182,41 @@ class RewriteProxy:
                     chosenPlugin = plugin
                     break
 
+            foundSimilarOriginal = False
             if chosenPlugin is not None:
+                size = len(unzippedFileContents)
+                if size not in self.originalRewriteItemsBySize:
+                    self.originalRewriteItemsBySize[size] = []
+
+                for sameSizedOriginal in self.originalRewriteItemsBySize[size]:
+                    charsDifferent = 0
+                    for chr, otherChr in zip(unzippedFileContents, sameSizedOriginal):
+                        if chr != otherChr:
+                            charsDifferent += 1
+                    portionDifferent = charsDifferent / size
+                    if portionDifferent < 0.20:
+                        # Basically we are looking at what is effectively the same file with some minor differences.
+                        # This is common with ad-serving, tracking tags and JSONP style responses.
+                        foundSimilarOriginal = True
+                        break
+
+                if not foundSimilarOriginal:
+                    self.originalRewriteItemsBySize[size].append(unzippedFileContents)
+
+            if foundSimilarOriginal:
+                # We don't translate it or save it in the cache. Just leave as is.
+                getLogger().warning(f"Decided not to translate file {flow.request.url} because it looks extremely similar to a request we have already seen. This is probably a JSONP style response, and we don't translate these since they are only ever called once, but can clog up the system.")
+
+                for plugin in self.plugins:
+                    plugin.observeRequest(url=flow.request.url,
+                                          statusCode=flow.response.status_code,
+                                          contentType=contentType,
+                                          headers=flow.request.headers,
+                                          origFileData=originalFileContents,
+                                          transformedFileData=originalFileContents,
+                                          didTransform=False
+                                          )
+            elif chosenPlugin is not None:
                 transformed = chosenPlugin.rewriteFile(fileURL, contentType, unzippedFileContents)
 
                 if gzipped:

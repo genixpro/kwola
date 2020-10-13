@@ -26,13 +26,16 @@ from .WebEnvironmentSession import WebEnvironmentSession
 from contextlib import closing
 from mitmproxy.tools.dump import DumpMaster
 from threading import Thread
+from pprint import pformat
 import asyncio
 import concurrent.futures
 from datetime import datetime
-import numpy as np
+import numpy
 import socket
 import time
 import os
+import psutil
+from ..utils.retry import autoretry
 from ..plugins.core.RecordAllPaths import RecordAllPaths
 from ..plugins.core.RecordBranchTrace import RecordBranchTrace
 from ..plugins.core.RecordCursorAtAction import RecordCursorAtAction
@@ -55,7 +58,7 @@ class WebEnvironment:
         defaultPlugins = [
             RecordCursorAtAction(),
             RecordExceptions(),
-            RecordLogEntriesAndLogErrors(),
+            RecordLogEntriesAndLogErrors(config),
             RecordNetworkErrors(),
             RecordPageURLs(),
             RecordAllPaths(),
@@ -69,14 +72,14 @@ class WebEnvironment:
         else:
             self.plugins = defaultPlugins + plugins
 
-        def createSession(number):
-            maxAttempts = 10
-            for attempt in range(maxAttempts):
-                try:
-                    return WebEnvironmentSession(config, number, self.plugins, self.executionSessions[number])
-                except Exception as e:
-                    if attempt == (maxAttempts - 1):
-                        raise
+        @autoretry()
+        def createSession(sessionNumber):
+            session = WebEnvironmentSession(config, sessionNumber, self.plugins, self.executionSessions[sessionNumber])
+            return session
+
+        @autoretry()
+        def initializeSession(session):
+            session.initialize()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
             sessionCount = config['web_session_parallel_execution_sessions']
@@ -90,13 +93,13 @@ class WebEnvironment:
 
             getLogger().info(f"[{os.getpid()}] Starting up {sessionCount} parallel browser sessions.")
 
-            sessionFutures = [
-                executor.submit(createSession, sessionNumber) for sessionNumber in range(sessionCount)
+            self.sessions = [
+                createSession(sessionNumber)
+                for sessionNumber in range(sessionCount)
             ]
 
-            self.sessions = [
-                future.result() for future in sessionFutures
-            ]
+            for sessionNumber in range(sessionCount):
+                executor.submit(initializeSession, self.sessions[sessionNumber])
 
     def shutdown(self):
         for session in self.sessions:
@@ -143,6 +146,7 @@ class WebEnvironment:
             :return:
         """
 
+        startTime = datetime.now()
         resultFutures = []
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -150,10 +154,29 @@ class WebEnvironment:
                 resultFuture = executor.submit(tab.runAction, action)
                 resultFutures.append(resultFuture)
 
-        results = [
+        traces = [
             resultFuture.result() for resultFuture in resultFutures
         ]
-        return results
+
+        self.synchronizeNoActivityTimeouts()
+
+        timeTaken = (datetime.now() - startTime).total_seconds()
+        subTimes = {}
+        if timeTaken > 10:
+            # Log data for all of the sub times
+            validTraces = [trace for trace in traces if trace is not None]
+            if len(validTraces) > 0:
+                for key in validTraces[0].actionExecutionTimes:
+                    subTimes[key] = {
+                        "min": numpy.min([trace.actionExecutionTimes[key] for trace in validTraces]),
+                        "max": numpy.max([trace.actionExecutionTimes[key] for trace in validTraces]),
+                        "mean": numpy.mean([trace.actionExecutionTimes[key] for trace in validTraces]),
+                        "median": numpy.median([trace.actionExecutionTimes[key] for trace in validTraces]),
+                        "std": numpy.std([trace.actionExecutionTimes[key] for trace in validTraces])
+                    }
+                getLogger().warning(f"Time taken to execute the actions in the browser was unusually long: {timeTaken} seconds. Here are the subtimes: {pformat(subTimes)}")
+
+        return traces
 
     def removeBadSessionIfNeeded(self):
         """
@@ -168,6 +191,16 @@ class WebEnvironment:
             if session.hasBrowserDied:
                 del self.sessions[sessionN]
                 return sessionN
+
+        stats = psutil.virtual_memory()
+        if stats.percent > 80 and len(self.sessions) > 1:
+            # If we are using more then 90% memory, then cleave off one session from the pack to try and cut back on memory usage
+            getLogger().warning(f"Had to kill one of the web browser sessions because the system was running out of available memory. Cleaving one to save the herd. The session being killed is {self.sessions[0].executionSession.id}")
+            sessionToDestroy = self.sessions.pop(0)
+            sessionToDestroy.shutdown()
+            time.sleep(3)
+            return 0
+
         return None
 
 
@@ -175,3 +208,16 @@ class WebEnvironment:
         for tab in self.sessions:
             tab.runSessionCompletedHooks()
 
+
+    def synchronizeNoActivityTimeouts(self):
+        # In this section we synchronize the no-activity timeouts of all the sessions. The session adjusts the no activity
+        # If we observe timeouts in one browser, we
+        # can assume it will likely show up in other browsers, so lets not hold thm all up.
+        minNoActivityTimeout = None
+        for session in self.sessions:
+            if minNoActivityTimeout is None:
+                minNoActivityTimeout = session.noActivityTimeout
+            else:
+                minNoActivityTimeout = min(minNoActivityTimeout, session.noActivityTimeout)
+        for session in self.sessions:
+            session.noActivityTimeout = minNoActivityTimeout

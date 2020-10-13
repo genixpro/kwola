@@ -19,6 +19,9 @@
 #
 
 import datetime
+from ...config.logger import getLogger
+import os
+import urllib.parse
 
 class PathTracer:
     def __init__(self):
@@ -33,8 +36,11 @@ class PathTracer:
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
     def request(self, flow):
-        self.seenPaths.add(flow.request.path)
-        self.recentPaths.add(flow.request.path)
+        parsed = urllib.parse.urlparse(flow.request.url)
+        trackingPath = parsed.scheme + "://" + parsed.netloc + parsed.path
+
+        self.seenPaths.add(trackingPath)
+        self.recentPaths.add(trackingPath)
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
 
     def responseheaders(self, flow):

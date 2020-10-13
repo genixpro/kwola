@@ -132,7 +132,7 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         "testingStepId": str(testingStep.id),
         "shouldBeRandom": False,
         "generateDebugVideo": generateDebugVideo and config['enable_debug_videos']
-    }, timeout=config['training_step_timeout'], config=config, logId=testingStep.id)
+    }, timeout=config['testing_step_timeout'], config=config, logId=testingStep.id)
     process.start()
     result = process.waitForProcessResult()
 
@@ -160,7 +160,7 @@ def updateModelSymbols(config, testingStepId):
 
         traces = []
         for executionTraceId in executionSession.executionTraces:
-            traces.append(ExecutionTrace.loadFromDisk(executionTraceId, config))
+            traces.append(ExecutionTrace.loadFromDisk(executionTraceId, config, applicationId=testingStep.applicationId))
 
         totalNewSymbols += agent.assignNewSymbols(traces)
 

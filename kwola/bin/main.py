@@ -107,7 +107,16 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                 "Enable random math symbol command?",
                 "Enable random other symbol command?",
                 "Enable double click command?",
-                "Enable right click command?"
+                "Enable right click command?",
+                "Enable scrolling command?",
+                "Enable type random letters command?",
+                "Enable type random address command?",
+                "Enable type random email command?",
+                "Enable type random phone command?",
+                "Enable type random paragraph command?",
+                "Enable type random date time command?",
+                "Enable type random credit card command?",
+                "Enable type random url command?"
             ]
 
             results = questionary.checkbox("Please select which commands you want to enable", choices=commandChoices).ask()
@@ -120,6 +129,15 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
             enableRandomOtherSymbolCommand = bool(commandChoices[3] in results)
             enableDoubleClickCommand = bool(commandChoices[4] in results)
             enableRightClickCommand = bool(commandChoices[5] in results)
+            enableScrolling = bool(commandChoices[6] in results)
+            enableRandomLettersCommand = bool(commandChoices[7] in results)
+            enableRandomAddressCommand = bool(commandChoices[8] in results)
+            enableRandomEmailCommand = bool(commandChoices[9] in results)
+            enableRandomPhoneNumberCommand = bool(commandChoices[10] in results)
+            enableRandomParagraphCommand = bool(commandChoices[11] in results)
+            enableRandomDateTimeCommand = bool(commandChoices[12] in results)
+            enableRandomCreditCardCommand = bool(commandChoices[13] in results)
+            enableRandomURLCommand = bool(commandChoices[14] in results)
 
             autologin = False
 
@@ -160,6 +178,15 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                             enableRandomOtherSymbolCommand=enableRandomOtherSymbolCommand,
                                                                             enableDoubleClickCommand=enableDoubleClickCommand,
                                                                             enableRightClickCommand=enableRightClickCommand,
+                                                                            enableRandomLettersCommand=enableRandomLettersCommand,
+                                                                            enableRandomAddressCommand=enableRandomAddressCommand,
+                                                                            enableRandomEmailCommand=enableRandomEmailCommand,
+                                                                            enableRandomPhoneNumberCommand=enableRandomPhoneNumberCommand,
+                                                                            enableRandomParagraphCommand=enableRandomParagraphCommand,
+                                                                            enableRandomDateTimeCommand=enableRandomDateTimeCommand,
+                                                                            enableRandomCreditCardCommand=enableRandomCreditCardCommand,
+                                                                            enableRandomURLCommand=enableRandomURLCommand,
+                                                                            enableScrolling=enableScrolling,
                                                                             autologin=autologin,
                                                                             prevent_offsite_links=prevent_offsite_links
                                                                             )

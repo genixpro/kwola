@@ -21,11 +21,7 @@
 
 from ..tasks.TaskProcess import TaskProcess
 import torch.distributed
-from google.cloud import storage
 from ..components.managers.TrainingManager import TrainingManager
-
-storageClient = storage.Client()
-
 
 def runTrainingStep(configDir, trainingSequenceId, trainingStepIndex, gpu=None, coordinatorTempFileName="kwola_distributed_coordinator", testingRunId=None, applicationId=None, gpuWorldSize=torch.cuda.device_count()):
     manager = TrainingManager(configDir, trainingSequenceId, trainingStepIndex, gpu, coordinatorTempFileName, testingRunId, applicationId, gpuWorldSize)

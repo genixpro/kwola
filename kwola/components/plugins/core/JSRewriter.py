@@ -4,6 +4,7 @@ import re
 import json
 import os
 import subprocess
+import re
 from kwola.config.logger import getLogger
 
 
@@ -20,6 +21,8 @@ class JSRewriter(ProxyPluginBase):
 
     def __init__(self, config):
         self.config = config
+
+        self.multipleBranchesCheckingRegex = re.compile(b"globalKwolaCounter_\\d{1,6}\\[1\\] \\+= 1;")
 
     def willRewriteFile(self, url, contentType, fileData):
         jsMimeTypes = [
@@ -70,6 +73,16 @@ class JSRewriter(ProxyPluginBase):
         else:
             return False
 
+    def checkIfRewrittenJSFileHasMultipleBranches(self, rewrittenJSFileData):
+        # This method is used to check if the given javascript file, which has already been rewritten,
+        # has multiple branches. It is common for old-school jsonp-style requests to use javascript
+        # files with no branches and only a single function call. These can clog up the Kwola system
+        # without actually delivering any value, since they are only called once.
+        match = self.multipleBranchesCheckingRegex.search(rewrittenJSFileData)
+        if match is None:
+            return False
+        else:
+            return True
 
 
     def rewriteFile(self, url, contentType, fileData):
@@ -129,6 +142,12 @@ class JSRewriter(ProxyPluginBase):
 
             return fileData
         else:
+            # Check to see if the resulting file object had multiple branches
+            if not self.checkIfRewrittenJSFileHasMultipleBranches(result.stdout):
+                getLogger().warning(f"[{os.getpid()}] Ignoring the javascript file {url} because it looks like a JSONP-style request, or some other javascript "
+                                    f"file without a significant number of code branches.")
+                return fileData
+
             getLogger().info(
                 f"[{os.getpid()}] Successfully translated {url} with Kwola branch counting and event tracing.")
             transformed = wrapperStart + result.stdout + wrapperEnd

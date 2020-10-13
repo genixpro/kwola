@@ -27,6 +27,10 @@ import json
 import os
 import os.path
 import pickle
+from google.cloud import storage
+import google
+import google.cloud
+from ..components.utils.retry import autoretry
 
 
 def getDataFormatAndCompressionForClass(modelClass, config, overrideSaveFormat=None, overrideCompression=None):
@@ -56,6 +60,7 @@ def getDataFormatAndCompressionForClass(modelClass, config, overrideSaveFormat=N
 
     return dataFormat, compression
 
+@autoretry()
 def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, overrideCompression=None):
     dataFormat, compression = getDataFormatAndCompressionForClass(type(targetObject), config, overrideSaveFormat, overrideCompression)
 
@@ -67,11 +72,11 @@ def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, over
         if compression == 0:
             fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".pickle")
             with openFileFunc(fileName, 'wb') as f:
-                pickle.dump(targetObject, f)
+                pickle.dump(targetObject, f, protocol=pickle.HIGHEST_PROTOCOL)
         else:
             fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".pickle.gz")
             with openFileFunc(fileName, 'wb') as f:
-                data = pickle.dumps(targetObject)
+                data = pickle.dumps(targetObject, protocol=pickle.HIGHEST_PROTOCOL)
                 f.write(gzip.compress(data, compresslevel=compression))
 
     elif dataFormat == "json":
@@ -87,8 +92,16 @@ def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, over
     elif dataFormat == "mongo":
         targetObject.save()
 
+    elif dataFormat == "gcs":
+        storageClient = storage.Client()
+        applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + targetObject.applicationId)
+        objectPath = f"{folder}/{targetObject.id}.json.gz"
+        objectBlob = storage.Blob(objectPath, applicationStorageBucket)
+        data = gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression)
+        objectBlob.upload_from_string(data)
 
-def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True):
+@autoretry()
+def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True, applicationId=None):
     openFileFunc = LockedFile
     if not config.data_enable_local_file_locking:
         openFileFunc = open
@@ -98,6 +111,17 @@ def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True)
 
         if dataFormat == "mongo":
             return modelClass.objects(id=id).first()
+        elif dataFormat == "gcs":
+            if applicationId is None:
+                raise RuntimeError("Can't load object from google cloud storage without an applicationId, which is used to indicate the bucket.")
+
+            storageClient = storage.Client()
+            applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + applicationId)
+            objectPath = f"{folder}/{id}.json.gz"
+            objectBlob = storage.Blob(objectPath, applicationStorageBucket)
+            data = objectBlob.download_as_string()
+            object = modelClass.from_json(str(gzip.decompress(data), "utf8"))
+            return object
 
         object = None
         pickleFileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(id) + ".pickle")
@@ -150,19 +174,31 @@ def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True)
 
         if object is None:
             if printErrorOnFailure:
-                getLogger().info(f"[{os.getpid()}] Error: Failed to load object. File not found. Tried: {pickleFileName}, {gzipPickleFileName}, {jsonFileName}, and {gzipJsonFileName}")
+                getLogger().info(f"Error: Failed to load object. File not found. Tried: {pickleFileName}, {gzipPickleFileName}, {jsonFileName}, and {gzipJsonFileName}")
             return None
 
         return object
     except json.JSONDecodeError:
         if printErrorOnFailure:
-            getLogger().info(f"[{os.getpid()}] Error: Failed to load object {id}. Bad JSON. Usually implies the file failed to write. "
+            getLogger().info(f"Error: Failed to load object {id}. Bad JSON. Usually implies the file failed to write. "
                                   "Sometimes this occurs if you kill the process while it is running. If this occurs "
                                   "during normal operations without interruption, that would indicate a bug.")
         return
     except EOFError:
         if printErrorOnFailure:
-            getLogger().info(f"[{os.getpid()}] Error: Failed to load object {id}. Bad pickle file. Usually implies the file failed to write. "
+            getLogger().info(f"Error: Failed to load object {id}. Bad pickle file. Usually implies the file failed to write. "
+                             "Sometimes this occurs if you kill the process while it is running. If this occurs "
+                             "during normal operations without interruption, that would indicate a bug.")
+        return
+    except FileNotFoundError:
+        if printErrorOnFailure:
+            getLogger().info(f"Error: Failed to load object {id}. File not found. Usually implies the file failed to write. "
+                                  "Sometimes this occurs if you kill the process while it is running. If this occurs "
+                                  "during normal operations without interruption, that would indicate a bug.")
+        return
+    except google.cloud.exceptions.NotFound:
+        if printErrorOnFailure:
+            getLogger().info(f"Error: Failed to load object {id}. Google cloud storage file not found. Usually implies the file failed to write. "
                                   "Sometimes this occurs if you kill the process while it is running. If this occurs "
                                   "during normal operations without interruption, that would indicate a bug.")
         return
