@@ -37,6 +37,7 @@ from kwola.components.plugins.core.LogSessionRewards import LogSessionRewards
 from kwola.components.plugins.core.PrecomputeSessionsForSampleCache import PrecomputeSessionsForSampleCache
 from kwola.components.plugins.core.RecordScreenshots import RecordScreenshots
 from kwola.errors import ProxyVerificationFailed
+from ..utils.file import loadKwolaFileData, saveKwolaFileData
 import atexit
 import billiard as multiprocessing
 import numpy
@@ -53,7 +54,7 @@ from pprint import pformat
 
 class TestingStepManager:
     def __init__(self, configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None):
-        getLogger().info(f"[{os.getpid()}] Starting New Testing Sequence")
+        getLogger().info(f"Starting New Testing Sequence")
 
         self.generateDebugVideo = generateDebugVideo
         self.shouldBeRandom = shouldBeRandom
@@ -65,6 +66,10 @@ class TestingStepManager:
         self.stepsRemaining = int(self.config['testing_sequence_length'])
 
         self.testStep = TestingStep.loadFromDisk(testingStepId, self.config)
+        # Make sure applicationId is set in the config and save it
+        if 'applicationId' not in self.config:
+            self.config['applicationId'] = self.testStep.applicationId
+            self.config.saveConfig()
 
         self.executionSessions = []
         self.executionSessionTraces = []
@@ -173,8 +178,6 @@ class TestingStepManager:
     def removeBadSessions(self):
         sessionToRemove = self.environment.removeBadSessionIfNeeded()
         while sessionToRemove is not None:
-            getLogger().warning(f"[{os.getpid()}] Removing web browser session at index {sessionToRemove} because the browser has crashed!")
-
             session = self.executionSessions[sessionToRemove]
             session.status = "failed"
             session.endTime = datetime.now()
@@ -224,7 +227,10 @@ class TestingStepManager:
             actionDecisionTime = (datetime.now() - taskStartTime).total_seconds()
 
             if actionDecisionTime > 15.0:
-                getLogger().info(f"Finished agent.nextBestActions after {actionDecisionTime} seconds. Subtimes: \n {pformat(times)}")
+                msg = f"Finished agent.nextBestActions after {actionDecisionTime} seconds. Subtimes:"
+                for key, time in times.items():
+                    msg += f"\n    {key}: {time:.5f}"
+                getLogger().info(msg)
 
         for plugin in self.testingStepPlugins:
             plugin.beforeActionsRun(self.testStep, self.executionSessions, actions)
@@ -295,17 +301,17 @@ class TestingStepManager:
 
     @autoretry()
     def savePlainVideoFiles(self):
-        getLogger().info(f"[{os.getpid()}] Creating movies for the execution sessions of this testing sequence.")
+        getLogger().info(f"Creating movies for the execution sessions of this testing sequence.")
 
         moviePlugin = [plugin for plugin in self.environment.plugins if isinstance(plugin, RecordScreenshots)][0]
-        videoPaths = [moviePlugin.movieFilePath(executionSession) for executionSession in self.executionSessions]
+        localVideoPaths = [moviePlugin.movieFilePath(executionSession) for executionSession in self.executionSessions]
 
         kwolaVideoDirectory = self.config.getKwolaUserDataDirectory("videos")
 
-        for executionSession, sessionN, videoPath in zip(self.executionSessions, range(len(videoPaths)), videoPaths):
-            with open(videoPath, 'rb') as origFile:
-                with open(os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4'), "wb") as cloneFile:
-                    cloneFile.write(origFile.read())
+        for executionSession, sessionN, localVideoPath in zip(self.executionSessions, range(len(localVideoPaths)), localVideoPaths):
+            with open(localVideoPath, 'rb') as origFile:
+                filePath = os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4')
+                saveKwolaFileData(filePath, origFile.read(), self.config)
 
 
     def shutdownEnvironment(self):
@@ -332,8 +338,8 @@ class TestingStepManager:
 
         def preloadFile(fileName):
             nonlocal loadedPastExecutionTraces
-            with open(fileName, 'rb') as file:
-                loadedPastExecutionTraces[fileName] = pickle.load(file)
+            fileData = loadKwolaFileData(fileName, config)
+            loadedPastExecutionTraces[fileName] = pickle.loads(fileData)
 
         preloadStartTime = datetime.now()
         with concurrent.futures.ThreadPoolExecutor(max_workers=config['testing_trace_load_workers']) as loadExecutor:
@@ -362,10 +368,10 @@ class TestingStepManager:
                     if fileName in loadedPastExecutionTraces:
                         pastExecutionTraces[sessionN].append(loadedPastExecutionTraces[fileName])
                     else:
-                        with open(fileName, 'rb') as file:
-                            trace = pickle.load(file)
-                            pastExecutionTraces[sessionN].append(trace)
-                            loadedPastExecutionTraces[fileName] = trace
+                        fileData = loadKwolaFileData(fileName, config)
+                        trace = pickle.loads(fileData)
+                        pastExecutionTraces[sessionN].append(trace)
+                        loadedPastExecutionTraces[fileName] = trace
 
 
             os.unlink(inferenceBatchFileName)
@@ -379,7 +385,10 @@ class TestingStepManager:
 
             nextBestActionsTime = (datetime.now() - nextBestActionsStartTime).total_seconds()
             if nextBestActionsTime > 5:
-                getLogger().info(f"Finished agent.nextBestActions after {nextBestActionsTime} seconds. Subtimes: \n {pformat(times)}")
+                msg = f"Finished agent.nextBestActions after {nextBestActionsTime} seconds. Subtimes:"
+                for key, time in times.items():
+                    msg += f"\n    {key}: {time:.5f}"
+                getLogger().info(msg)
 
             resultFileDescriptor, resultFileName = tempfile.mkstemp()
             with open(resultFileDescriptor, 'wb') as file:
@@ -393,7 +402,10 @@ class TestingStepManager:
         trace.saveToDisk(config)
 
     def runTesting(self):
-        getLogger().info(f"[{os.getpid()}] Starting New Testing Sequence")
+        if self.config['print_configuration_on_startup']:
+            getLogger().info(f"Starting New Testing Sequence with configuration:\n{pformat(self.config.configData)}")
+        else:
+            getLogger().info(f"Starting New Testing Sequence")
 
         resultValue = {'success': True}
 
@@ -447,20 +459,26 @@ class TestingStepManager:
 
             for session in self.executionSessions:
                 session.endTime = datetime.now()
-                session.status = "completed"
                 session.saveToDisk(self.config)
 
             # We shutdown the environment before generating the annotated videos in order
             # to conserve memory, since the environment is no longer needed after this point
             self.shutdownEnvironment()
 
-            self.testStep.status = "completed"
+            if len(self.executionSessions) == 0:
+                self.testStep.status = "failed"
+            else:
+                self.testStep.status = "completed"
             self.testStep.endTime = datetime.now()
             self.testStep.executionSessions = [session.id for session in self.executionSessions]
 
             if len(self.executionSessions) > 0:
                 for plugin in self.testingStepPlugins:
                     plugin.testingStepFinished(self.testStep, self.executionSessions)
+
+            for session in self.executionSessions:
+                session.status = "completed"
+                session.saveToDisk(self.config)
 
             self.testStep.saveToDisk(self.config)
             resultValue['successfulExecutionSessions'] = len(self.testStep.executionSessions)
@@ -475,21 +493,21 @@ class TestingStepManager:
             # with mitmproxy. Its not at all clear what causes it, but the system can't auto retry from it unless the whole container
             # is killed. So we just explicitly catch it here so we don't trigger an error level log message, which gets sent to slack.
             # The manager process will safely restart this testing step.
-            getLogger().warning(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
+            getLogger().warning(f"Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
             resultValue['success'] = False
             resultValue['exception'] = traceback.format_exc()
         except ProxyVerificationFailed:
             # Handle this errors gracefully without an error level message. This happens more often when our own servers go down
             # then when the proxy is actually not functioning
-            getLogger().warning(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
+            getLogger().warning(f"Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
             resultValue['success'] = False
             resultValue['exception'] = traceback.format_exc()
         except Exception as e:
-            getLogger().error(f"[{os.getpid()}] Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
+            getLogger().error(f"Unhandled exception occurred during testing sequence:\n{traceback.format_exc()}")
             resultValue['success'] = False
             resultValue['exception'] = traceback.format_exc()
 
         # This print statement will trigger the parent manager process to kill this process.
-        getLogger().info(f"[{os.getpid()}] Finished Running Testing Sequence!")
+        getLogger().info(f"Finished Running Testing Sequence!")
 
         return resultValue

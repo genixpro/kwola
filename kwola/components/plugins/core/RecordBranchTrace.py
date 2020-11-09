@@ -98,14 +98,14 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
         try:
             webDriver.execute_script(injected_javascript)
         except selenium.common.exceptions.TimeoutException:
-            getLogger().warning(f"[{os.getpid()}] Warning, timeout while running the script to reset the kwola line counters.")
+            getLogger().warning(f"Warning, timeout while running the script to reset the kwola line counters.")
 
         if result is not None:
             # Cast everything to a numpy array so we don't have to do it later
             for fileName, vector in result.items():
                 result[fileName] = numpy.array(vector)
         else:
-            getLogger().warning(f"[{os.getpid()}] Warning, did not find the kwola line counter object in the browser. This usually "
+            getLogger().warning(f"Warning, did not find the kwola line counter object in the browser. This usually "
                   "indicates that there was an error either in translating the javascript, an error "
                   "in loading the page, or that the page has absolutely no javascript. "
                   f"On page: {webDriver.current_url}")

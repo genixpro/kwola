@@ -28,6 +28,7 @@ import gzip
 import filetype
 import re
 from ..plugins.base.ProxyPluginBase import ProxyPluginBase
+from ..utils.file import loadKwolaFileData, saveKwolaFileData
 
 class RewriteProxy:
     def __init__(self, config, plugins):
@@ -64,23 +65,14 @@ class RewriteProxy:
 
     def findInCache(self, fileHash, fileURL):
         cacheFileName = self.getCacheFileName(fileHash, fileURL)
-        if os.path.exists(cacheFileName):
-            try:
-                with open(cacheFileName, 'rb') as f:
-                    return f.read()
-            except OSError:
-                return
+        return loadKwolaFileData(cacheFileName, self.config, printErrorOnFailure=False)
 
     def saveInCache(self, fileHash, fileURL, data):
         cacheFileName = self.getCacheFileName(fileHash, fileURL)
         try:
-            with open(cacheFileName, 'wb') as f:
-                return f.write(data)
+            return saveKwolaFileData(cacheFileName, data, self.config)
         except FileExistsError:
             pass
-        except OSError:
-            pass
-
 
     def request(self, flow):
         flow.request.headers['Accept-Encoding'] = 'identity'

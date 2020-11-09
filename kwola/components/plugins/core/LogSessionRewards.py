@@ -26,11 +26,11 @@ class LogSessionRewards(TestingStepPluginBase):
         totalRewards = []
         for session in executionSessions:
             getLogger().info(
-                f"[{os.getpid()}] Session {session.tabNumber} finished with total reward: {session.totalReward:.3f}")
+                f"Session {session.tabNumber} finished with total reward: {session.totalReward:.3f}")
             totalRewards.append(session.totalReward)
 
         if len(totalRewards) > 0:
-            getLogger().info(f"[{os.getpid()}] Mean total reward of all sessions: {numpy.mean(totalRewards):.3f}")
+            getLogger().info(f"Mean total reward of all sessions: {numpy.mean(totalRewards):.3f}")
 
     def sessionFailed(self, testingStep, executionSession):
         pass

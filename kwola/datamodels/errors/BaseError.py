@@ -21,6 +21,7 @@
 
 from mongoengine import *
 import datetime
+import stringdist
 
 class BaseError(EmbeddedDocument):
     """
@@ -33,6 +34,15 @@ class BaseError(EmbeddedDocument):
 
     page = StringField()
 
+    message = StringField()
+
 
     def computeHash(self):
         raise NotImplementedError()
+
+    def computeSimilarity(self, otherError):
+        distanceScore = stringdist.levenshtein(self.message, otherError.message) / max(len(self.message), len(otherError.message))
+        return 1.0 - distanceScore
+
+    def isDuplicateOf(self, otherError):
+        return self.computeSimilarity(otherError) >= 0.80

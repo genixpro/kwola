@@ -2,7 +2,7 @@ from ...utils.debug_video import createDebugVideoSubProcess
 from ..base.TestingStepPluginBase import TestingStepPluginBase
 import atexit
 import concurrent.futures
-import multiprocessing
+import billiard as multiprocessing
 
 
 class GenerateAnnotatedVideos(TestingStepPluginBase):
@@ -22,25 +22,18 @@ class GenerateAnnotatedVideos(TestingStepPluginBase):
         pass
 
     def testingStepFinished(self, testingStep, executionSessions):
-        debugVideoSubprocesses = []
+        pool = multiprocessing.Pool(self.config['video_generation_processes'], maxtasksperchild=1)
 
+        futures = []
         for session in executionSessions:
-            debugVideoSubprocess = multiprocessing.Process(target=createDebugVideoSubProcess, args=(self.config.configurationDirectory, str(session.id), "", False, False, None, None, "annotated_videos"))
-            atexit.register(lambda: debugVideoSubprocess.terminate() if debugVideoSubprocess is not None else None)
-            debugVideoSubprocesses.append(debugVideoSubprocess)
+            future = pool.apply_async(func=createDebugVideoSubProcess, args=(self.config.configurationDirectory, str(session.id), "", False, False, None, None, "annotated_videos"))
+            futures.append(future)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.config['video_generation_processes']) as executor:
-            futures = []
-            for debugVideoSubprocess in debugVideoSubprocesses:
-                futures.append(executor.submit(GenerateAnnotatedVideos.runAndJoinSubprocess, debugVideoSubprocess))
-            for future in futures:
-                future.result()
+        for future in futures:
+            future.get()
+
+        pool.close()
+        pool.join()
 
     def sessionFailed(self, testingStep, executionSession):
         pass
-
-    @staticmethod
-    def runAndJoinSubprocess(debugVideoSubprocess):
-        debugVideoSubprocess.start()
-        debugVideoSubprocess.join()
-

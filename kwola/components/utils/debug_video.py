@@ -24,6 +24,7 @@ from ...components.agents.DeepLearningAgent import DeepLearningAgent
 from ...config.config import KwolaCoreConfiguration
 from ...config.logger import getLogger, setupLocalLogging
 from ...datamodels.ExecutionSessionModel import ExecutionSession
+from ..utils.file import loadKwolaFileData, saveKwolaFileData
 import os
 from .retry import autoretry
 
@@ -45,11 +46,7 @@ def createDebugVideoSubProcess(configDir, executionSessionId, name="", includeNe
 
     videoData = agent.createDebugVideoForExecutionSession(executionSession, includeNeuralNetworkCharts=includeNeuralNetworkCharts, includeNetPresentRewardChart=includeNetPresentRewardChart, hilightStepNumber=hilightStepNumber, cutoffStepNumber=cutoffStepNumber)
 
-    @autoretry()
-    def writeVideo():
-        with open(os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4'), "wb") as cloneFile:
-            cloneFile.write(videoData)
-
-    writeVideo()
+    filePath = os.path.join(kwolaDebugVideoDirectory, f'{name + "_" if name else ""}{str(executionSession.id)}.mp4')
+    saveKwolaFileData(filePath, videoData, config)
 
     del agent

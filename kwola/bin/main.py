@@ -79,6 +79,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                         'medium',
                         'large',
                         'testing',
+                        'standard_experiment',
                         'pure_random'
                     ]).ask()  # returns value of selection
 

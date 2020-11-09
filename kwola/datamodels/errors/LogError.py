@@ -30,8 +30,6 @@ class LogError(BaseError):
         that is only detected in the log files.
     """
 
-    message = StringField()
-
     logLevel = StringField()
 
 

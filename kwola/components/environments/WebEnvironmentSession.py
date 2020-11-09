@@ -32,15 +32,22 @@ from ...datamodels.errors.LogError import LogError
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
 from ..plugins.base.ProxyPluginBase import ProxyPluginBase
 from ..plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
+from ...errors import AutologinFailure
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from ..proxy.ProxyProcess import ProxyProcess
 from ..utils.retry import autoretry
 import cv2
 import hashlib
+import traceback
 import numpy
 import numpy as np
 import re
@@ -66,6 +73,7 @@ class WebEnvironmentSession:
         self.config = config
         self.targetURL = config['url']
         self.hasBrowserDied = False
+        self.browserDeathReason = None
 
         if plugins is None:
             self.plugins = []
@@ -133,6 +141,7 @@ class WebEnvironmentSession:
 
         chrome_options.add_argument(f"--disable-gpu")
         chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument(f"--no-sandbox")
         chrome_options.add_argument(f"--temp-profile")
         chrome_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
 
@@ -146,29 +155,30 @@ class WebEnvironmentSession:
               window.outerHeight - window.innerHeight + arguments[1]];
             """, self.config['web_session_width'], self.config['web_session_height'])
         self.driver.set_window_size(*window_size)
+        self.driver.set_script_timeout(30)
+        self.driver.set_page_load_timeout(30)
 
-    @autoretry()
     def fetchTargetWebpage(self):
-        maxAttempts = 3
-        for attempt in range(maxAttempts):
-            try:
-                self.driver.get(self.targetURL)
-            except selenium.common.exceptions.TimeoutException:
-                raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
+        try:
+            self.driver.get(self.targetURL)
 
-            time.sleep(2)
+            for error in self.proxy.getNetworkErrors():
+                if error.url == self.targetURL and error.statusCode != 401 and error.statusCode != 403:
+                    raise RuntimeError(f"Received a fatal network error while attempting to load the starting page.")
 
-            self.waitUntilNoNetworkActivity()
+        except selenium.common.exceptions.TimeoutException:
+            raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
 
-            time.sleep(6)
+        time.sleep(2)
 
-            # No action maps is a strong signal that the page has not loaded correctly.
-            actionMaps = self.getActionMaps()
-            if len(actionMaps) == 0:
-                time.sleep(2**attempt)
-                continue
-            else:
-                break
+        self.waitUntilNoNetworkActivity()
+
+        time.sleep(6)
+
+        # No action maps is a strong signal that the page has not loaded correctly.
+        actionMaps = self.getActionMaps()
+        if len(actionMaps) == 0:
+            raise RuntimeError(f"Error: loading page {self.targetURL} lead to a page with no action maps.")
 
 
     def getHostRoot(self, url):
@@ -204,13 +214,30 @@ class WebEnvironmentSession:
 
             self.driver = None
 
+    def waitUntilDocumentReadyState(self):
+        startTime = datetime.now()
+        while self.driver.execute_script('return document.readyState;') != "complete":
+            time.sleep(0.50)
+            elapsedTime = abs((datetime.now() - startTime).total_seconds())
+            if elapsedTime > self.noActivityTimeout:
+                break
+
+        elapsedTime = abs((datetime.now() - startTime).total_seconds())
+        return elapsedTime
+
     def waitUntilNoNetworkActivity(self):
+        readyStateWaitTime = self.waitUntilDocumentReadyState()
+
         startTime = datetime.now()
         elapsedTime = 0
         startPaths = set(self.proxy.getPathTrace()['recent'])
-        while abs((self.proxy.getMostRecentNetworkActivityTime() - datetime.now()).total_seconds()) < self.config['web_session_no_network_activity_wait_time']:
+        while abs((self.proxy.getMostRecentNetworkActivityTimeAndPath()[0] - datetime.now()).total_seconds()) < self.config['web_session_no_network_activity_wait_time']:
             time.sleep(0.10)
             elapsedTime = abs((datetime.now() - startTime).total_seconds())
+            # if elapsedTime > 2.0:
+            #     recent = self.proxy.getMostRecentNetworkActivityTimeAndPath()
+            #     print(elapsedTime, abs((recent[0] - datetime.now()).total_seconds()), recent[1], recent[2], flush=True)
+
             if elapsedTime > self.noActivityTimeout:
                 if self.noActivityTimeout > 1:
                     getLogger().warning(f"Warning! There was a timeout while waiting for network activity from the browser to die down. Maybe it is causing non"
@@ -223,7 +250,7 @@ class WebEnvironmentSession:
 
                 break
         elapsedTime = abs((datetime.now() - startTime).total_seconds())
-        return elapsedTime
+        return elapsedTime + readyStateWaitTime
 
     def findElementsForAutoLogin(self):
         actionMaps = self.getActionMaps()
@@ -289,10 +316,37 @@ class WebEnvironmentSession:
 
                 loginButtons = list(filter(lambda button: button.keywords != loginTriggerButton.keywords, loginButtons))
 
+            hasTypedInEmail = False
 
-            if len(emailInputs) == 0 or len(passwordInputs) == 0 or len(loginButtons) == 0:
-                getLogger().warning(f"Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.")
-                return
+            # check to see if this is an "email first" login
+            if (len(emailInputs) > 0) and (len(passwordInputs) == 0) and len(loginButtons) > 0:
+                emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
+                                             y=emailInputs[0].top + 1,
+                                             source="autologin",
+                                             label="email",
+                                             text=self.config.email,
+                                             type="typeEmail")
+
+                success1, networkWaitTime = self.performActionInBrowser(emailTypeAction)
+
+                loginTriggerButton = loginButtons[0]
+
+                loginClickAction = ClickTapAction(x=loginTriggerButton.left + 1,
+                                                  y=loginTriggerButton.top + 1,
+                                                  source="autologin",
+                                                  times=1,
+                                                  type="click")
+
+                success, networkWaitTime = self.performActionInBrowser(loginClickAction)
+
+                emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
+
+                loginButtons = list(filter(lambda button: button.keywords != loginTriggerButton.keywords, loginButtons))
+
+                hasTypedInEmail = True
+
+            if (len(emailInputs) == 0 and not hasTypedInEmail) or len(passwordInputs) == 0 or len(loginButtons) == 0:
+                raise AutologinFailure(f"Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.")
 
             if len(emailInputs) == 1:
                 # Find the login button that is closest to the email input while being below it
@@ -312,12 +366,15 @@ class WebEnvironmentSession:
 
             startURL = self.driver.current_url
 
-            emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
-                                         y=emailInputs[0].top + 1,
-                                         source="autologin",
-                                         label="email",
-                                         text=self.config.email,
-                                         type="typeEmail")
+            emailTypeAction = None
+            success1 = True
+            if not hasTypedInEmail:
+                emailTypeAction = TypeAction(x=emailInputs[0].left + 1,
+                                             y=emailInputs[0].top + 1,
+                                             source="autologin",
+                                             label="email",
+                                             text=self.config.email,
+                                             type="typeEmail")
 
             passwordTypeAction = TypeAction(x=passwordInputs[0].left + 1,
                                             y=passwordInputs[0].top + 1,
@@ -332,7 +389,9 @@ class WebEnvironmentSession:
                                               times=1,
                                               type="click")
 
-            success1, networkWaitTime = self.performActionInBrowser(emailTypeAction)
+            if not hasTypedInEmail:
+                success1, networkWaitTime = self.performActionInBrowser(emailTypeAction)
+
             success2, networkWaitTime = self.performActionInBrowser(passwordTypeAction)
             success3, networkWaitTime = self.performActionInBrowser(loginClickAction)
 
@@ -345,17 +404,20 @@ class WebEnvironmentSession:
                 if didURLChange:
                     getLogger().info(f"Heuristic autologin appears to have worked!")
                 else:
-                    getLogger().warning(f"Warning! Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
+                    raise AutologinFailure(f"Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
             else:
-                getLogger().warning(f"There was an error running one of the actions required for the heuristic auto login.")
-        except urllib3.exceptions.MaxRetryError:
+                raise AutologinFailure(f"There was an error running one of the actions required for the heuristic auto login.")
+        except urllib3.exceptions.MaxRetryError as e:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during autologin: {traceback.format_exc()}"
             return None
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during autologin: {traceback.format_exc()}"
             return None
         except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during autologin: {traceback.format_exc()}"
             return None
 
     def getActionMaps(self):
@@ -398,20 +460,19 @@ class WebEnvironmentSession:
                         width: bounds.width - paddingLeft - paddingRight - 6,
                         height: bounds.height - paddingTop - paddingBottom - 6,
                         elementType: element.tagName.toLowerCase(),
-                        keywords: (element.textContent + " " + element.getAttribute("class") + " " + element.getAttribute("name") + " " + element.getAttribute("id") + " " + element.getAttribute("type")).toLowerCase() 
+                        keywords: (element.textContent + " " + element.getAttribute("class") + " " +
+                                element.getAttribute("name") + " " + element.getAttribute("id") + " " + 
+                                element.getAttribute("type") + " " + element.getAttribute("placeholder") + " " + 
+                                element.getAttribute("title") + " " + element.getAttribute("aria-label") + " " + 
+                                element.getAttribute("aria-placeholder") + " " + element.getAttribute("aria-roledescription")).toLowerCase() 
                     };
-                    
-                    // Skip this element if it covers basically the whole screen.
-                    if (data.width > (window.innerWidth * 0.80) && data.height > (window.innerHeight * 0.80))
-                    {
-                        continue;
-                    }
                     
                     if (element.tagName === "A"
                             || element.tagName === "BUTTON"
                             || element.tagName === "AREA"
                             || element.tagName === "AUDIO"
                             || element.tagName === "VIDEO"
+                            || element.tagName === "OPTION"
                             || element.tagName === "SELECT")
                         data.canClick = true;
                     
@@ -429,7 +490,8 @@ class WebEnvironmentSession:
                     if (elemStyle.getPropertyValue("cursor") === "pointer")
                         data.canClick = true;
                     
-                    if (elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto")
+                    if ((elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto")
+                         && element.scrollHeight > element.clientHeight)
                         data.canScroll = true;
                     
                     if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
@@ -492,9 +554,8 @@ class WebEnvironmentSession:
                         }
                     }
                     
-                    if (data.canType || data.canClick || data.canRightClick || data.canScroll)
-                        if (data.width >= 1 && data.height >= 1)
-                            actionMaps.push(data);
+                    if (data.width >= 1 && data.height >= 1)
+                        actionMaps.push(data);
                 }
                 
                 return actionMaps;
@@ -506,17 +567,45 @@ class WebEnvironmentSession:
                 actionMap = ActionMap(**actionMapData)
                 # Cut the keywords off at 1024 characters to prevent too much memory / storage usage
                 actionMap.keywords = actionMap.keywords[:self.config['web_session_action_map_max_keyword_size']]
-                actionMaps.append(actionMap)
 
-            return actionMaps
+                overlapMap = None
+                for existingMap in actionMaps:
+                    if existingMap.doesOverlapWith(actionMap, tolerancePixels=self.config['testing_repeat_action_pixel_overlap_tolerance']):
+                        overlapMap = existingMap
+                        break
+
+                if overlapMap is not None:
+                    overlapEventsCount = int(overlapMap.canScroll) + int(overlapMap.canClick) + int(overlapMap.canType) + int(overlapMap.canRightClick)
+                    actionMapEventsCount = int(actionMap.canScroll) + int(actionMap.canClick) + int(actionMap.canType) + int(actionMap.canRightClick)
+
+                    if actionMapEventsCount > overlapEventsCount:
+                        overlapMap.elementType = actionMap.elementType
+
+                    overlapMap.canScroll = overlapMap.canScroll or actionMap.canScroll
+                    overlapMap.canClick = overlapMap.canClick or actionMap.canClick
+                    overlapMap.canType = overlapMap.canType or actionMap.canType
+                    overlapMap.canRightClick = overlapMap.canRightClick or actionMap.canRightClick
+                    overlapMap.keywords = overlapMap.keywords + " " + actionMap.keywords
+                else:
+                    actionMaps.append(actionMap)
+
+            filteredActionMaps = []
+            for actionMap in actionMaps:
+                if actionMap.canType or actionMap.canClick or actionMap.canRightClick or actionMap.canScroll:
+                    filteredActionMaps.append(actionMap)
+
+            return filteredActionMaps
         except urllib3.exceptions.MaxRetryError:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred while fetching action maps: {traceback.format_exc()}"
             return []
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred while fetching action maps: {traceback.format_exc()}"
             return []
         except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred while fetching action maps: {traceback.format_exc()}"
             return []
 
     def performActionInBrowser(self, action):
@@ -631,10 +720,12 @@ class WebEnvironmentSession:
         try:
             # If the browser went off site and off site links are disabled, then we send it back to the url it started from
             if self.config['prevent_offsite_links']:
-                self.waitUntilNoNetworkActivity()
+                networkWaitTime = self.waitUntilNoNetworkActivity()
+
+                current_url = self.driver.current_url
 
                 offsite = False
-                if self.driver.current_url != "data:," and self.getHostRoot(self.driver.current_url) != self.targetHostRoot:
+                if current_url != "data:," and self.getHostRoot(current_url) != self.targetHostRoot:
                     offsite = True
 
                 whitelistMatched = False
@@ -642,40 +733,51 @@ class WebEnvironmentSession:
                     whitelistMatched = True
 
                 for regex in self.urlWhitelistRegexes:
-                    if regex.search(self.driver.current_url) is not None:
+                    if regex.search(current_url) is not None:
                         whitelistMatched = True
 
                 if not whitelistMatched:
                     offsite = True
 
                 if offsite:
-                    getLogger().info(f"The browser session went offsite (to {self.driver.current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
+                    getLogger().info(f"The browser session went offsite (to {current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
                     self.driver.get(priorURL)
-                    self.waitUntilNoNetworkActivity()
+                    networkWaitTime += self.waitUntilNoNetworkActivity()
+                return networkWaitTime
+            else:
+                return 0
         except selenium.common.exceptions.TimeoutException:
-            pass
+            return 0
 
-    def checkLoadFailure(self):
+    def checkLoadFailure(self, priorURL):
         try:
+            loadFailure = False
+
             if self.driver.current_url == "data:,":
+                loadFailure = True
+            elif len(self.getActionMaps()) == 0:
+                loadFailure = True
+
+            if loadFailure:
                 getLogger().warning(f"The browser session needed to be reset back to the origin url {self.targetURL}")
-                self.driver.get(self.targetURL)
+                self.driver.get(priorURL)
                 self.waitUntilNoNetworkActivity()
         except selenium.common.exceptions.TimeoutException:
             pass
 
     def runAction(self, action):
+        actionExecutionTimes = {}
         try:
             if self.hasBrowserDied:
-                return None
-
-            actionExecutionTimes = {}
+                return None, actionExecutionTimes
 
             startTime = datetime.now()
-            self.checkOffsite(priorURL=self.targetURL)
-            actionExecutionTimes['checkOffsite-first'] = (datetime.now() - startTime).total_seconds()
+            networkWaitTime = self.checkOffsite(priorURL=self.targetURL)
+            actionExecutionTimes['checkOffsite-first-networkWaitTime'] = networkWaitTime
+            actionExecutionTimes['checkOffsite-first-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
 
             executionTrace = ExecutionTrace(id=str(self.executionSession.id) + "_trace_" + str(self.traceNumber))
+            executionTrace.actionExecutionTimes = actionExecutionTimes
             executionTrace.time = datetime.now()
             executionTrace.actionPerformed = action
             executionTrace.errorsDetected = []
@@ -705,11 +807,12 @@ class WebEnvironmentSession:
             executionTrace.didActionSucceed = success
 
             startTime = datetime.now()
-            self.checkOffsite(priorURL=executionTrace.startURL)
-            actionExecutionTimes['checkOffsite-second'] = (datetime.now() - startTime).total_seconds()
+            networkWaitTime = self.checkOffsite(priorURL=executionTrace.startURL)
+            actionExecutionTimes['checkOffsite-second-networkWaitTime'] = networkWaitTime
+            actionExecutionTimes['checkOffsite-second-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
 
             startTime = datetime.now()
-            self.checkLoadFailure()
+            self.checkLoadFailure(priorURL=executionTrace.startURL)
             actionExecutionTimes['checkLoadFailure'] = (datetime.now() - startTime).total_seconds()
 
             for plugin in self.plugins:
@@ -721,18 +824,19 @@ class WebEnvironmentSession:
 
             self.enforceMemoryLimits()
 
-            executionTrace.actionExecutionTimes = actionExecutionTimes
-
-            return executionTrace
+            return executionTrace, actionExecutionTimes
         except urllib3.exceptions.MaxRetryError:
             self.hasBrowserDied = True
-            return None
+            self.browserDeathReason = f"Following fatal error occurred during runAction: {traceback.format_exc()}"
+            return None, actionExecutionTimes
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
-            return None
+            self.browserDeathReason = f"Following fatal error occurred during runAction: {traceback.format_exc()}"
+            return None, actionExecutionTimes
         except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
-            return None
+            self.browserDeathReason = f"Following fatal error occurred during runAction: {traceback.format_exc()}"
+            return None, actionExecutionTimes
 
     def screenshotSize(self):
         rect = self.driver.get_window_rect()
@@ -750,15 +854,19 @@ class WebEnvironmentSession:
             return image
         except urllib3.exceptions.MaxRetryError:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
         except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
         except AttributeError:
             self.hasBrowserDied = True
+            self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
             return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
 
     def runSessionCompletedHooks(self):

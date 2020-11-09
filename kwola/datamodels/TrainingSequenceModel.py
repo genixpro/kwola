@@ -44,7 +44,9 @@ class TrainingSequence(Document):
 
     endTime = DateTimeField()
 
+    # Deprecated. Eliminating this variable, replaced with trainingLoopsCompleted.
     trainingStepsCompleted = IntField()
+    trainingLoopsCompleted = IntField()
 
     initializationTestingSteps = ListField(StringField())
 
@@ -53,6 +55,9 @@ class TrainingSequence(Document):
     trainingSteps = ListField(StringField())
 
     averageTimePerStep = FloatField()
+
+    trainingStepsLaunched = IntField()
+    testingStepsLaunched = IntField()
 
 
     def saveToDisk(self, config):

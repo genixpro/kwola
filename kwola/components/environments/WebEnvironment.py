@@ -34,7 +34,9 @@ import numpy
 import socket
 import time
 import os
+import traceback
 import psutil
+from kwola.components.utils.asyncthreadfuture import AsyncThreadFuture
 from ..utils.retry import autoretry
 from ..plugins.core.RecordAllPaths import RecordAllPaths
 from ..plugins.core.RecordBranchTrace import RecordBranchTrace
@@ -77,7 +79,11 @@ class WebEnvironment:
             session = WebEnvironmentSession(config, sessionNumber, self.plugins, self.executionSessions[sessionNumber])
             return session
 
-        @autoretry()
+        def onInitializeFailure(session):
+            session.hasBrowserDied = True
+            session.browserDeathReason = f"A fatal error occurred during session initialization: {traceback.format_exc()}"
+
+        @autoretry(ignoreFailure=True, onFailure=onInitializeFailure, exponentialBackOffBase=2.5)
         def initializeSession(session):
             session.initialize()
 
@@ -91,7 +97,7 @@ class WebEnvironment:
             else:
                 self.executionSessions = executionSessions
 
-            getLogger().info(f"[{os.getpid()}] Starting up {sessionCount} parallel browser sessions.")
+            getLogger().info(f"Starting up {sessionCount} parallel browser sessions.")
 
             self.sessions = [
                 createSession(sessionNumber)
@@ -110,30 +116,43 @@ class WebEnvironment:
         return self.sessions[0].screenshotSize()
 
     def getImages(self):
+        results = []
         imageFutures = []
+        for session in self.sessions:
+            future = AsyncThreadFuture(session.getImage, [], timeout=self.config['testing_get_image_timeout'])
+            imageFutures.append(future)
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            for session in self.sessions:
-                resultFuture = executor.submit(session.getImage)
-                imageFutures.append(resultFuture)
+        for future, session in zip(imageFutures, self.sessions):
+            try:
+                result = future.result()
+            except TimeoutError:
+                getLogger().warning("Warning: timeout exceeded in WebEnvironment.getImages")
+                result = numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+                session.hasBrowserDied = True
+                session.browserDeathReason = f"The browser timed out while inside WebEnvironment.getImages"
+            results.append(result)
 
-        images = [
-            imageFuture.result() for imageFuture in imageFutures
-        ]
-        return images
+        return results
 
     def getActionMaps(self):
+        results = []
+
         actionMapFutures = []
+        for session in self.sessions:
+            future = AsyncThreadFuture(session.getActionMaps, [], timeout=self.config['testing_fetch_action_map_timeout'])
+            actionMapFutures.append(future)
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            for session in self.sessions:
-                resultFuture = executor.submit(session.getActionMaps)
-                actionMapFutures.append(resultFuture)
+        for future, session in zip(actionMapFutures, self.sessions):
+            try:
+                result = future.result()
+            except TimeoutError:
+                getLogger().warning("Warning: timeout exceeded in WebEnvironment.getActionMaps")
+                result = []
+                session.hasBrowserDied = True
+                session.browserDeathReason = f"The browser timed out while inside WebEnvironment.getActionMaps"
+            results.append(result)
 
-        actionMaps = [
-            imageFuture.result() for imageFuture in actionMapFutures
-        ]
-        return actionMaps
+        return results
 
     def numberParallelSessions(self):
         return len(self.sessions)
@@ -149,32 +168,51 @@ class WebEnvironment:
         startTime = datetime.now()
         resultFutures = []
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            for tab, action in zip(self.sessions, actions):
-                resultFuture = executor.submit(tab.runAction, action)
-                resultFutures.append(resultFuture)
+        results = []
+        for session, action in zip(self.sessions, actions):
+            future = AsyncThreadFuture(session.runAction, [action], timeout=self.config['testing_run_action_timeout'])
+            resultFutures.append(future)
+
+        for session, future in zip(self.sessions, resultFutures):
+            try:
+                result = future.result()
+            except TimeoutError:
+                getLogger().warning("Warning: timeout exceeded in WebEnvironment.runActions")
+                result = (None, {})
+                session.hasBrowserDied = True
+                session.browserDeathReason = f"The browser timed out while inside WebEnvironment.runActions"
+
+            results.append(result)
 
         traces = [
-            resultFuture.result() for resultFuture in resultFutures
+            result[0] for result in results
+        ]
+
+        actionExecutionTimes = [
+            result[1] for result in results
         ]
 
         self.synchronizeNoActivityTimeouts()
 
         timeTaken = (datetime.now() - startTime).total_seconds()
-        subTimes = {}
         if timeTaken > 10:
+            timeList = []
+
             # Log data for all of the sub times
-            validTraces = [trace for trace in traces if trace is not None]
-            if len(validTraces) > 0:
-                for key in validTraces[0].actionExecutionTimes:
-                    subTimes[key] = {
-                        "min": numpy.min([trace.actionExecutionTimes[key] for trace in validTraces]),
-                        "max": numpy.max([trace.actionExecutionTimes[key] for trace in validTraces]),
-                        "mean": numpy.mean([trace.actionExecutionTimes[key] for trace in validTraces]),
-                        "median": numpy.median([trace.actionExecutionTimes[key] for trace in validTraces]),
-                        "std": numpy.std([trace.actionExecutionTimes[key] for trace in validTraces])
-                    }
-                getLogger().warning(f"Time taken to execute the actions in the browser was unusually long: {timeTaken} seconds. Here are the subtimes: {pformat(subTimes)}")
+            for key in actionExecutionTimes[0]:
+                timeList.append({
+                    "key": key,
+                    "min": numpy.min([times[key] for times in actionExecutionTimes if key in times]),
+                    "max": numpy.max([times[key] for times in actionExecutionTimes if key in times]),
+                    "mean": numpy.mean([times[key] for times in actionExecutionTimes if key in times]),
+                    "median": numpy.median([times[key] for times in actionExecutionTimes if key in times]),
+                    "std": numpy.std([times[key] for times in actionExecutionTimes if key in times])
+                })
+
+            timeList = sorted(timeList, key=lambda x: x['max'], reverse=True)
+            maxTimes = [(t['key'], t['max']) for t in timeList if t['max'] > 0.5]
+
+            getLogger().warning(f"Time taken to execute the actions in the browser was unusually long: {timeTaken} seconds. Here are the subtimes: {pformat(maxTimes)}")
 
         return traces
 
@@ -189,6 +227,8 @@ class WebEnvironment:
 
         for sessionN, session in enumerate(self.sessions):
             if session.hasBrowserDied:
+                getLogger().warning(
+                    f"Removing web browser session at index {sessionN} because the browser has failed. Reason: {self.sessions[sessionN].browserDeathReason}")
                 del self.sessions[sessionN]
                 return sessionN
 

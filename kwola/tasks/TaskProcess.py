@@ -24,6 +24,8 @@ from datetime import datetime
 import json
 import sys
 import os
+import psutil
+import time
 
 class TaskProcess:
     """
@@ -40,10 +42,10 @@ class TaskProcess:
 
     def run(self):
         setupLocalLogging()
-        getLogger().info(f"[{os.getpid()}] TaskProcess: Waiting for input from stdin")
+        getLogger().info(f"TaskProcess: Waiting for input from stdin")
         dataStr = sys.stdin.readline()
         data = json.loads(dataStr)
-        getLogger().info(f"[{os.getpid()}] Running process with following data:\n{json.dumps(data, indent=4)}")
+        getLogger().info(f"Running process with following data:\n{json.dumps(data, indent=4)}")
         result = self.targetFunc(**data)
         print(TaskProcess.resultStartString + json.dumps(result) + TaskProcess.resultFinishString, flush=True)
         exit(0)

@@ -2,7 +2,7 @@ from ...utils.debug_video import createDebugVideoSubProcess
 from ..base.TestingStepPluginBase import TestingStepPluginBase
 import atexit
 import concurrent.futures
-import multiprocessing
+import billiard as multiprocessing
 import time
 
 

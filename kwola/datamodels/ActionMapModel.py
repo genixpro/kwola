@@ -52,9 +52,6 @@ class ActionMap(EmbeddedDocument):
     keywords = StringField()
 
     def doesOverlapWith(self, other, tolerancePixels=0):
-        if self.elementType != other.elementType:
-            return False
-
         if abs(self.left - other.left) > tolerancePixels:
             return False
 
@@ -73,6 +70,15 @@ class ActionMap(EmbeddedDocument):
         if abs(self.height - other.height) > tolerancePixels:
             return False
 
+        return True
+
+    def isSameAs(self, other, tolerancePixels=0):
+        if self.elementType != other.elementType:
+            return False
+
+        if not self.doesOverlapWith(other):
+            return False
+
         if self.canClick != other.canClick:
             return False
 
@@ -80,6 +86,9 @@ class ActionMap(EmbeddedDocument):
             return False
 
         if self.canType != other.canType:
+            return False
+
+        if self.canScroll != other.canScroll:
             return False
 
         return True

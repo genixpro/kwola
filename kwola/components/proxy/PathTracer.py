@@ -28,12 +28,18 @@ class PathTracer:
         self.seenPaths = set()
         self.recentPaths = set()
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = ""
+        self.mostRecentNetworkActivityEvent = ""
 
     def http_connect(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = flow.request.url
+        self.mostRecentNetworkActivityEvent = "http_connect"
 
     def requestheaders(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = flow.request.url
+        self.mostRecentNetworkActivityEvent = "requestheaders"
 
     def request(self, flow):
         parsed = urllib.parse.urlparse(flow.request.url)
@@ -42,15 +48,23 @@ class PathTracer:
         self.seenPaths.add(trackingPath)
         self.recentPaths.add(trackingPath)
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = flow.request.url
+        self.mostRecentNetworkActivityEvent = "request"
 
     def responseheaders(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = flow.request.url
+        self.mostRecentNetworkActivityEvent = "responseheaders"
 
     def response(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = flow.request.url
+        self.mostRecentNetworkActivityEvent = "response"
 
     def error(self, flow):
         self.mostRecentNetworkActivityTime = datetime.datetime.now()
+        self.mostRecentNetworkActivityURL = flow.request.url
+        self.mostRecentNetworkActivityEvent = "error"
 
 addons = [
     PathTracer()

@@ -30,7 +30,7 @@ from threading import Thread
 import asyncio
 # import billiard as multiprocessing
 import socket
-import multiprocessing
+import billiard as multiprocessing
 import time
 import requests
 import traceback
@@ -64,7 +64,10 @@ class ProxyProcess:
         self.resultQueue = ProxyProcess.sharedMultiprocessingContext.Queue()
 
         self.proxyProcess = ProxyProcess.sharedMultiprocessingContext.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue, pickle.dumps(self.plugins, protocol=pickle.HIGHEST_PROTOCOL)), daemon=True)
-        self.proxyProcess.start()
+        try:
+            self.proxyProcess.start()
+        except BrokenPipeError:
+            raise ProxyVerificationFailed(f"Error in the proxy - unable to start the child proxy process. Received a BrokenPipeError - it is not known why this happens.")
 
         # Wait for the result indicating that the proxy process is ready
         self.port = self.resultQueue.get()
@@ -94,8 +97,8 @@ class ProxyProcess:
     def resetPathTrace(self):
         self.commandQueue.put("resetPathTrace")
 
-    def getMostRecentNetworkActivityTime(self):
-        self.commandQueue.put("getMostRecentNetworkActivityTime")
+    def getMostRecentNetworkActivityTimeAndPath(self):
+        self.commandQueue.put("getMostRecentNetworkActivityTimeAndPath")
         return self.resultQueue.get()
 
     def getNetworkErrors(self):
@@ -154,8 +157,8 @@ class ProxyProcess:
             if message == "getNetworkErrors":
                 resultQueue.put(pickle.dumps(networkErrorTracer.errors, protocol=pickle.HIGHEST_PROTOCOL))
 
-            if message == "getMostRecentNetworkActivityTime":
-                resultQueue.put(pathTracer.mostRecentNetworkActivityTime)
+            if message == "getMostRecentNetworkActivityTimeAndPath":
+                resultQueue.put((pathTracer.mostRecentNetworkActivityTime, pathTracer.mostRecentNetworkActivityURL, pathTracer.mostRecentNetworkActivityEvent))
 
             if message == "exit":
                 exit(0)
@@ -181,7 +184,7 @@ class ProxyProcess:
         while True:
             try:
                 port = ProxyProcess.findFreePort()
-                opts = options.Options(listen_port=port, http2=False)
+                opts = options.Options(listen_port=port, http2=False, ssl_insecure=True)
                 pconf = proxy.config.ProxyConfig(opts)
 
                 m = DumpMaster(opts, with_termlog=False, with_dumper=False)

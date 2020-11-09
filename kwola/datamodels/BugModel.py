@@ -61,9 +61,5 @@ class BugModel(Document):
     def generateBugText(self):
         return self.error.generateErrorDescription()
 
-    def computeSimilarity(self, otherBug):
-        distanceScore = stringdist.levenshtein(self.error.message, otherBug.error.message) / max(len(self.error.message), len(otherBug.error.message))
-        return 1.0 - distanceScore
-
     def isDuplicateOf(self, otherBug):
-        return self.computeSimilarity(otherBug) >= 0.80
+        return self.error.isDuplicateOf(otherBug.error) >= 0.80

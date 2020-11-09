@@ -23,6 +23,7 @@ from .test_chromedriver import testChromedriver
 from .test_ffmpeg import testFfmpeg
 from .test_neural_network import testNeuralNetworkAllGPUs
 from .test_javascript_rewriting import testJavascriptRewriting
+import multiprocessing
 
 def testInstallation(verbose=True):
     """
@@ -33,10 +34,25 @@ def testInstallation(verbose=True):
     if verbose:
         print("Verifying your Kwola installation ... Please wait a moment")
 
-    chromedriverWorking = testChromedriver(verbose=False)
-    ffmpegWorking = testFfmpeg(verbose=False)
-    neuralNetworkWorking = testNeuralNetworkAllGPUs(verbose=False)
-    jsRewritingWorking = testJavascriptRewriting(verbose=False)
+    try:
+        multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        pass
+
+    subprocessPool = multiprocessing.Pool(4)
+
+    chromedriverWorking = subprocessPool.apply_async(testChromedriver, kwds={"verbose": False})
+    ffmpegWorking = subprocessPool.apply_async(testFfmpeg, kwds={"verbose": False})
+    neuralNetworkWorking = subprocessPool.apply_async(testNeuralNetworkAllGPUs, kwds={"verbose": False})
+    jsRewritingWorking = subprocessPool.apply_async(testJavascriptRewriting, kwds={"verbose": False})
+
+    chromedriverWorking = chromedriverWorking.get()
+    ffmpegWorking = ffmpegWorking.get()
+    neuralNetworkWorking = neuralNetworkWorking.get()
+    jsRewritingWorking = jsRewritingWorking.get()
+
+    subprocessPool.close()
+    subprocessPool.join()
 
     if chromedriverWorking and ffmpegWorking and neuralNetworkWorking and jsRewritingWorking:
         if verbose:

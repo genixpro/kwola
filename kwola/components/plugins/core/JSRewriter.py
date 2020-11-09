@@ -63,7 +63,7 @@ class JSRewriter(ProxyPluginBase):
                 return True
             else:
                 getLogger().info(
-                    f"[{os.getpid()}] Warning: Ignoring the javascript file '{cleanedFileName}' because it matches the javascript ignore keyword '{ignoreKeyword}'. "
+                    f"Warning: Ignoring the javascript file '{cleanedFileName}' because it matches the javascript ignore keyword '{ignoreKeyword}'. "
                     f"This means that no learnings will take place on the code in this file. If this file is actually part of your "
                     f"application and should be learned on, then please modify your config file kwola.json and remove the ignore "
                     f"keyword '{ignoreKeyword}' from the variable 'web_session_ignored_javascript_file_keywords'. This file will be "
@@ -125,7 +125,7 @@ class JSRewriter(ProxyPluginBase):
                 mime = kind.mime
 
             getLogger().warning(
-                f"[{os.getpid()}] Unable to install Kwola line-counting in the Javascript file {url}. Most"
+                f"Unable to install Kwola line-counting in the Javascript file {url}. Most"
                 f" likely this is because Babel thinks your javascript has invalid syntax, or that"
                 f" babel is not working / not able to find the babel-plugin-kwola / unable to"
                 f" transpile the javascript for some other reason. See the following truncated"
@@ -144,12 +144,12 @@ class JSRewriter(ProxyPluginBase):
         else:
             # Check to see if the resulting file object had multiple branches
             if not self.checkIfRewrittenJSFileHasMultipleBranches(result.stdout):
-                getLogger().warning(f"[{os.getpid()}] Ignoring the javascript file {url} because it looks like a JSONP-style request, or some other javascript "
+                getLogger().warning(f"Ignoring the javascript file {url} because it looks like a JSONP-style request, or some other javascript "
                                     f"file without a significant number of code branches.")
                 return fileData
 
             getLogger().info(
-                f"[{os.getpid()}] Successfully translated {url} with Kwola branch counting and event tracing.")
+                f"Successfully translated {url} with Kwola branch counting and event tracing.")
             transformed = wrapperStart + result.stdout + wrapperEnd
 
             if strictMode:

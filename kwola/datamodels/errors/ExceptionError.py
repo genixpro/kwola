@@ -31,8 +31,6 @@ class ExceptionError(BaseError):
 
     stacktrace = StringField()
 
-    message = StringField()
-
     source = StringField()
 
     lineNumber = IntField()
