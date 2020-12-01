@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import re
+import sys
 from kwola.config.logger import getLogger
 
 
@@ -22,7 +23,7 @@ class JSRewriter(ProxyPluginBase):
     def __init__(self, config):
         self.config = config
 
-        self.multipleBranchesCheckingRegex = re.compile(b"globalKwolaCounter_\\d{1,6}\\[1\\] \\+= 1;")
+        self.multipleBranchesCheckingRegex = re.compile(b"globalKwolaCounter_\\d{1,8}\\[1\\] \\+= 1;")
 
     def willRewriteFile(self, url, contentType, fileData):
         jsMimeTypes = [
@@ -35,7 +36,11 @@ class JSRewriter(ProxyPluginBase):
 
         cleanedFileName = self.getCleanedFileName(url)
 
-        if ('_js' in url and not "_json" in url and not "_jsp" in url and not url.endswith("_css")) or str(contentType).strip().lower() in jsMimeTypes:
+        if ('_js' in cleanedFileName
+                and not "_json" in cleanedFileName
+                and not "_jsp" in cleanedFileName
+                and not cleanedFileName.endswith("_css")) \
+              or str(contentType).split(";")[0].strip().lower() in jsMimeTypes:
             kind = filetype.guess(fileData)
             mime = ''
             if kind is not None:
@@ -58,18 +63,7 @@ class JSRewriter(ProxyPluginBase):
             if fileData.startswith(b"<html>"):
                 return False
 
-            ignoreKeyword = self.findMatchingJavascriptFilenameIgnoreKeyword(cleanedFileName)
-            if ignoreKeyword is None:
-                return True
-            else:
-                getLogger().info(
-                    f"Warning: Ignoring the javascript file '{cleanedFileName}' because it matches the javascript ignore keyword '{ignoreKeyword}'. "
-                    f"This means that no learnings will take place on the code in this file. If this file is actually part of your "
-                    f"application and should be learned on, then please modify your config file kwola.json and remove the ignore "
-                    f"keyword '{ignoreKeyword}' from the variable 'web_session_ignored_javascript_file_keywords'. This file will be "
-                    f"cached without Kwola line counting installed. Its faster to install line counting only in the files that need "
-                    f"it.")
-                return False
+            return True
         else:
             return False
 
@@ -107,14 +101,36 @@ class JSRewriter(ProxyPluginBase):
 
         fileNameForBabel = shortFileHash + "_" + cleanedFileName
 
+        environment = dict(os.environ)
+
+        environment['KWOLA_ENABLE_LINE_COUNTING'] = 'true'
+        environment['KWOLA_ENABLE_EVENT_HANDLER_TRACKING'] = 'true'
+
+        noLineCountingKeyword = self.findMatchingJavascriptFilenameNoLineCountingKeyword(cleanedFileName)
+        if noLineCountingKeyword is not None:
+            environment['KWOLA_ENABLE_LINE_COUNTING'] = 'false'
+
+            getLogger().info(
+                f"Warning: Not installing line counting in the javascript file '{cleanedFileName}' because it matches the "
+                f"javascript no line counting keyword '{noLineCountingKeyword}'. Event handler tracking will still be installed."
+                f"This means that no learnings will take place on the code in this file. If this file is actually part of your "
+                f"application and should be learned on, then please modify your config file kwola.json and remove the ignore "
+                f"keyword '{noLineCountingKeyword}' from the variable 'web_session_no_line_counting_javascript_file_keywords'. This file will be "
+                f"cached without Kwola line counting installed. Its faster to install line counting only in the files that need "
+                f"it.")
+
+        babelCmd = 'babel'
+        if sys.platform == "win32" or sys.platform == "win64":
+            babelCmd = 'babel.cmd'
+
         result = subprocess.run(
-            ['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
-             "script"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            [babelCmd, '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
+             "script"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
 
         if result.returncode != 0 and "'import' and 'export' may appear only with" in str(result.stderr, 'utf8'):
             result = subprocess.run(
-                ['babel', '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
-                 "module"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                [babelCmd, '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
+                 "module"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
 
         if result.returncode != 0:
             cutoffLength = 250
@@ -143,13 +159,13 @@ class JSRewriter(ProxyPluginBase):
             return fileData
         else:
             # Check to see if the resulting file object had multiple branches
-            if not self.checkIfRewrittenJSFileHasMultipleBranches(result.stdout):
+            if noLineCountingKeyword is None and not self.checkIfRewrittenJSFileHasMultipleBranches(result.stdout):
                 getLogger().warning(f"Ignoring the javascript file {url} because it looks like a JSONP-style request, or some other javascript "
                                     f"file without a significant number of code branches.")
                 return fileData
 
             getLogger().info(
-                f"Successfully translated {url} with Kwola branch counting and event tracing.")
+                f"Successfully translated {url} with Kwola modifications.")
             transformed = wrapperStart + result.stdout + wrapperEnd
 
             if strictMode:
@@ -157,8 +173,8 @@ class JSRewriter(ProxyPluginBase):
 
             return transformed
 
-    def findMatchingJavascriptFilenameIgnoreKeyword(self, fileName):
-        for ignoreKeyword in self.config['web_session_ignored_javascript_file_keywords']:
+    def findMatchingJavascriptFilenameNoLineCountingKeyword(self, fileName):
+        for ignoreKeyword in self.config['web_session_no_line_counting_javascript_file_keywords']:
             if ignoreKeyword in fileName:
                 return ignoreKeyword
 

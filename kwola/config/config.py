@@ -29,6 +29,7 @@ import pymongo.errors
 import mongoengine
 import mongoengine.connection
 from pprint import pprint
+from ..components.utils.regex import sharedUrlRegex
 
 
 globalCachedPrebuiltConfigs = {}
@@ -188,15 +189,7 @@ class KwolaCoreConfiguration:
 
     @staticmethod
     def isValidURL(url):
-        regex = re.compile(
-            r'^(?:http|ftp)s?://'  # http:// or https://
-            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
-            r'localhost|'  # localhost...
-            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
-            r'(?::\d+)?'  # optional port
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-
-        return re.match(regex, url) is not None
+        return re.match(sharedUrlRegex, url) is not None
 
     @staticmethod
     def getPrebuiltConfigData(prebuild):
@@ -212,7 +205,7 @@ class KwolaCoreConfiguration:
                 globalCachedPrebuiltConfigs[prebuild] = data
                 return data
         else:
-            data = json.loads(pkg_resources.resource_string("kwola", f"config/prebuilt_configs/{prebuild}.json"))
+            data = json.loads(pkg_resources.resource_string("kwola", os.path.join("config", "prebuilt_configs", f"{prebuild}.json")))
             globalCachedPrebuiltConfigs[prebuild] = data
             return data
 

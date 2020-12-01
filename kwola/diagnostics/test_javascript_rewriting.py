@@ -19,6 +19,7 @@
 #
 
 import subprocess
+import sys
 
 def testJavascriptRewriting(verbose=True):
     """
@@ -37,7 +38,11 @@ def testJavascriptRewriting(verbose=True):
     }
     """
 
-    result = subprocess.run(['babel', '-f', "test.js", '--plugins', 'babel-plugin-kwola'], input=bytes(testFile, "utf8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    babelCmd = 'babel'
+    if sys.platform == "win32" or sys.platform == "win64":
+        babelCmd = 'babel.cmd'
+
+    result = subprocess.run([babelCmd, '-f', "test.js", '--plugins', 'babel-plugin-kwola'], input=bytes(testFile, "utf8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     failure = None
 

@@ -53,13 +53,15 @@ from pprint import pformat
 
 
 class TestingStepManager:
-    def __init__(self, configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None):
+    def __init__(self, configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None, browser=None, windowSize=None):
         getLogger().info(f"Starting New Testing Sequence")
 
         self.generateDebugVideo = generateDebugVideo
         self.shouldBeRandom = shouldBeRandom
         self.configDir = configDir
         self.config = KwolaCoreConfiguration(configDir)
+        self.browser = browser
+        self.windowSize = windowSize
 
         self.environment = None
 
@@ -130,7 +132,9 @@ class TestingStepManager:
                 startTime=datetime.now(),
                 endTime=None,
                 tabNumber=sessionN,
-                executionTraces=[]
+                executionTraces=[],
+                browser=self.browser,
+                windowSize=self.windowSize
             )
             for sessionN in range(self.config['web_session_parallel_execution_sessions'])
         ]
@@ -270,10 +274,10 @@ class TestingStepManager:
             self.executionSessionTraces[sessionN].append(trace)
             self.executionSessions[sessionN].totalReward = float(numpy.sum(DeepLearningAgent.computePresentRewards(self.executionSessionTraces[sessionN], self.config)))
 
-            self.agent.computeCachedCumulativeBranchTraces(self.executionSessionTraces[sessionN])
-            self.agent.computeCachedDecayingBranchTrace(self.executionSessionTraces[sessionN])
+            self.agent.symbolMapper.computeCachedCumulativeBranchTraces(self.executionSessionTraces[sessionN])
+            self.agent.symbolMapper.computeCachedDecayingBranchTrace(self.executionSessionTraces[sessionN])
             # Don't need to compute the future branch trace since it is only used in training and not at inference time
-            # self.agent.computeCachedDecayingFutureBranchTrace(self.executionSessionTraces[sessionN])
+            # self.agent.symbolMapper.computeCachedDecayingFutureBranchTrace(self.executionSessionTraces[sessionN])
 
             if self.config['testing_enable_prediction_subprocess']:
                 # We clear the actionMaps field on the trace object prior to saving the temporary pickle file. This is to reduce the amount of time
@@ -288,10 +292,6 @@ class TestingStepManager:
                     pickle.dump(trace, file, protocol=pickle.HIGHEST_PROTOCOL)
                 self.executionSessionTraceLocalPickleFiles[sessionN].append(traceFileName)
                 trace.actionMaps = actionMaps
-
-            # Submit a lambda to save this trace to disk. This is done in the background to avoid
-            # holding up the main loop. Saving the trace to disk can be time consuming.
-            self.traceSaveExecutor.submit(TestingStepManager.saveTrace, trace, self.config)
 
         if len(validTraces) > 0:
             for plugin in self.testingStepPlugins:
@@ -428,7 +428,7 @@ class TestingStepManager:
             for plugin in self.testingStepPlugins:
                 plugin.testingStepStarted(self.testStep, self.executionSessions)
 
-            self.environment = WebEnvironment(config=self.config, executionSessions=self.executionSessions, plugins=self.webEnvironmentPlugins)
+            self.environment = WebEnvironment(config=self.config, executionSessions=self.executionSessions, plugins=self.webEnvironmentPlugins, browser=self.browser, windowSize=self.windowSize)
 
             self.loopTime = datetime.now()
             while self.stepsRemaining > 0:
@@ -450,7 +450,15 @@ class TestingStepManager:
                 self.killAndJoinTestingSubprocesses()
             self.removeBadSessions()
 
+            # Compute the code prevalence scores for all of the traces
+            allTraces = [trace for traceList in self.executionSessionTraces for trace in traceList]
+            self.agent.symbolMapper.load()
+            self.agent.symbolMapper.computeCodePrevalenceScores(allTraces)
+
             # Ensure all the trace objects get saved to disc
+            for trace in allTraces:
+                self.traceSaveExecutor.submit(TestingStepManager.saveTrace, trace, self.config)
+
             self.traceSaveExecutor.shutdown()
 
             self.environment.runSessionCompletedHooks()
@@ -469,6 +477,9 @@ class TestingStepManager:
                 self.testStep.status = "failed"
             else:
                 self.testStep.status = "completed"
+                self.testStep.browser = self.browser
+                self.testStep.userAgent = self.executionSessions[0].userAgent
+
             self.testStep.endTime = datetime.now()
             self.testStep.executionSessions = [session.id for session in self.executionSessions]
 
@@ -482,7 +493,10 @@ class TestingStepManager:
 
             self.testStep.saveToDisk(self.config)
             resultValue['successfulExecutionSessions'] = len(self.testStep.executionSessions)
-            resultValue['success'] = True
+            if len(self.testStep.executionSessions) == 0:
+                resultValue['success'] = False
+            else:
+                resultValue['success'] = True
 
             for traceList in self.executionSessionTraceLocalPickleFiles:
                 for fileName in traceList:

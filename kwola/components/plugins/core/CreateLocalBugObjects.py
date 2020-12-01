@@ -9,6 +9,7 @@ import atexit
 import concurrent.futures
 import billiard as multiprocessing
 import os
+import numpy
 
 
 
@@ -24,6 +25,7 @@ class CreateLocalBugObjects(TestingStepPluginBase):
         self.newErrorsThisTestingStep = {}
         self.newErrorOriginalExecutionSessionIds = {}
         self.newErrorOriginalStepNumbers = {}
+        self.executionSessionTraces = {}
 
 
     def testingStepStarted(self, testingStep, executionSessions):
@@ -33,6 +35,9 @@ class CreateLocalBugObjects(TestingStepPluginBase):
         self.newErrorOriginalStepNumbers[testingStep.id] = []
 
         self.loadKnownErrorHashes(testingStep)
+
+        for session in executionSessions:
+            self.executionSessionTraces[session.id] = []
 
 
     def beforeActionsRun(self, testingStep, executionSessions, actions):
@@ -53,12 +58,18 @@ class CreateLocalBugObjects(TestingStepPluginBase):
                     self.newErrorOriginalExecutionSessionIds[testingStep.id].append(str(executionSession.id))
                     self.newErrorOriginalStepNumbers[testingStep.id].append(trace.traceNumber)
 
+            self.executionSessionTraces[executionSession.id].append(trace)
+
     def testingStepFinished(self, testingStep, executionSessions):
         kwolaVideoDirectory = self.config.getKwolaUserDataDirectory("videos")
 
         existingBugs = self.loadAllBugs(testingStep)
 
         bugObjects = []
+
+        executionSessionsById = {}
+        for session in executionSessions:
+            executionSessionsById[session.id] = session
 
         for errorIndex, error, executionSessionId, stepNumber in zip(range(len(self.newErrorsThisTestingStep[testingStep.id])),
                                                                      self.newErrorsThisTestingStep[testingStep.id],
@@ -83,7 +94,6 @@ class CreateLocalBugObjects(TestingStepPluginBase):
                     continue # Skip this error
 
             bug = BugModel()
-            bug.id = CustomIDField.generateNewUUID(BugModel, self.config)
             bug.owner = testingStep.owner
             bug.applicationId = testingStep.applicationId
             bug.testingStepId = testingStep.id
@@ -92,6 +102,17 @@ class CreateLocalBugObjects(TestingStepPluginBase):
             bug.stepNumber = stepNumber
             bug.error = error
             bug.testingRunId = testingStep.testingRunId
+            bug.actionsPerformed = [
+                trace.actionPerformed for trace in self.executionSessionTraces[executionSessionId]
+            ][:(bug.stepNumber + 2)]
+            bug.browser = executionSessionsById[executionSessionId].browser
+            bug.userAgent = executionSessionsById[executionSessionId].userAgent
+            bug.windowSize = executionSessionsById[executionSessionId].windowSize
+            bug.codePrevalenceScore = numpy.mean([
+                trace.codePrevalenceScore for trace in self.executionSessionTraces[executionSessionId][max(0, stepNumber-5):(stepNumber + 1)]
+            ])
+            bug.recomputeBugQualitativeFeatures()
+            bug.isBugNew = True
 
             duplicate = False
             for existingBug in existingBugs:
@@ -100,6 +121,7 @@ class CreateLocalBugObjects(TestingStepPluginBase):
                     break
 
             if not duplicate:
+                bug.id = CustomIDField.generateNewUUID(BugModel, self.config)
                 bug.saveToDisk(self.config, overrideSaveFormat="json", overrideCompression=0)
                 bug.saveToDisk(self.config)
 
@@ -137,6 +159,7 @@ class CreateLocalBugObjects(TestingStepPluginBase):
             else:
                 n += 1
 
+        del self.executionSessionTraces[executionSession.id]
 
     def loadKnownErrorHashes(self, testingStep):
         for bug in self.loadAllBugs(testingStep):

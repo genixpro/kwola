@@ -186,7 +186,7 @@ def generateLossChart(configDir, applicationId, attribute, title, fileName):
     _, localFilePath = tempfile.mkstemp(suffix=".png")
     fig.savefig(localFilePath)
     with open(localFilePath, 'rb') as f:
-        filePath = f"{config.getKwolaUserDataDirectory('charts')}/{fileName}"
+        filePath = os.path.join(config.getKwolaUserDataDirectory('charts'), fileName)
         saveKwolaFileData(filePath, f.read(), config)
     os.unlink(localFilePath)
 

@@ -4,6 +4,13 @@ import google.cloud
 from ...config.logger import getLogger, setupLocalLogging
 from ...components.utils.retry import autoretry
 
+globalStorageClient = None
+def getSharedGCSStorageClient():
+    global globalStorageClient
+    if globalStorageClient is None:
+        globalStorageClient = storage.Client()
+
+    return globalStorageClient
 
 @autoretry()
 def saveKwolaFileData(filePath, fileData, config):
@@ -14,7 +21,7 @@ def saveKwolaFileData(filePath, fileData, config):
         if 'applicationId' not in config or config.applicationId is None:
             raise RuntimeError("Can't load object from google cloud storage without an applicationId, which is used to indicate the bucket.")
 
-        storageClient = storage.Client()
+        storageClient = getSharedGCSStorageClient()
         applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + config.applicationId)
         gcsFilePath = filePath[len(config.configurationDirectory)+1:]
         objectBlob = storage.Blob(gcsFilePath, applicationStorageBucket)
@@ -33,7 +40,7 @@ def loadKwolaFileData(filePath, config, printErrorOnFailure=True):
             if 'applicationId' not in config or config.applicationId is None:
                 raise RuntimeError("Can't load object from google cloud storage without an applicationId, which is used to indicate the bucket.")
 
-            storageClient = storage.Client()
+            storageClient = getSharedGCSStorageClient()
             applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + config.applicationId)
             gcsFilePath = filePath[len(config.configurationDirectory)+1:]
             objectBlob = storage.Blob(gcsFilePath, applicationStorageBucket)

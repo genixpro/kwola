@@ -35,13 +35,16 @@ from ..plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
 from ...errors import AutologinFailure
 from datetime import datetime
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.edge.options import Options as EdgeOptions
+from selenium.webdriver.common.proxy import Proxy
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
+from ..utils.video import chooseBestFfmpegVideoCodec
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from ..proxy.ProxyProcess import ProxyProcess
 from ..utils.retry import autoretry
@@ -49,8 +52,10 @@ import cv2
 import hashlib
 import traceback
 import numpy
+import copy
 import numpy as np
 import re
+from pprint import pprint
 import os
 import shutil
 import os.path
@@ -61,17 +66,24 @@ import time
 import pickle
 import urllib.parse
 import urllib3
-import resource
 import psutil
+import sys
 
 class WebEnvironmentSession:
     """
         This class represents a single tab in the web environment.
     """
 
-    def __init__(self, config, tabNumber, plugins=None, executionSession=None):
+    def __init__(self, config, tabNumber, plugins=None, executionSession=None, browser=None, windowSize=None):
         self.config = config
         self.targetURL = config['url']
+        self.browser = browser
+
+        if windowSize is None:
+            self.windowSize = "desktop"
+        else:
+            self.windowSize = windowSize
+
         self.hasBrowserDied = False
         self.browserDeathReason = None
 
@@ -93,6 +105,8 @@ class WebEnvironmentSession:
         self.proxy = None
         self.driver = None
 
+        self.edgeUserDataDir = None
+
         self.tabNumber = tabNumber
         self.traceNumber = 0
         self.noActivityTimeout = self.config['web_session_no_network_activity_timeout']
@@ -104,7 +118,15 @@ class WebEnvironmentSession:
         self.shutdown()
 
     def initializeProxy(self):
-        self.proxy = ProxyProcess(self.config, plugins=self.proxyPlugins)
+        testingRunId = None
+        testingStepId = None
+        executionSessionId = None
+        if self.executionSession is not None:
+            testingRunId = self.executionSession.testingRunId
+            testingStepId = self.executionSession.testingStepId
+            executionSessionId = self.executionSession.id
+
+        self.proxy = ProxyProcess(self.config, plugins=self.proxyPlugins, testingRunId=testingRunId, testingStepId=testingStepId, executionSessionId=executionSessionId)
 
     def initialize(self):
         self.fetchTargetWebpage()
@@ -120,6 +142,12 @@ class WebEnvironmentSession:
 
         self.enforceMemoryLimits()
 
+        # Set the browser and user agent on the execution session
+        if self.executionSession is not None:
+            self.executionSession.windowSize = self.windowSize
+            self.executionSession.browser = self.browser
+            self.executionSession.userAgent = self.proxy.getUserAgent()
+
     def enforceMemoryLimits(self):
         if self.driver.service.process.returncode is not None:
             try:
@@ -133,27 +161,66 @@ class WebEnvironmentSession:
                 pass
 
     def initializeWebBrowser(self):
-        chrome_options = Options()
-        chrome_options.headless = self.config['web_session_headless']
-        if self.config['web_session_enable_shared_chrome_cache']:
-            chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
-            chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
+        if self.browser is None or self.browser == "chrome":
+            chrome_options = ChromeOptions()
+            chrome_options.headless = self.config['web_session_headless']
+            if self.config['web_session_enable_shared_chrome_cache']:
+                chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
+                chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
 
-        chrome_options.add_argument(f"--disable-gpu")
-        chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
-        chrome_options.add_argument(f"--no-sandbox")
-        chrome_options.add_argument(f"--temp-profile")
-        chrome_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
+            chrome_options.add_argument(f"--disable-gpu")
+            chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
+            chrome_options.add_argument(f"--no-sandbox")
+            chrome_options.add_argument(f"--temp-profile")
+            chrome_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
+            if sys.platform == "win32" or sys.platform == "win64":
+                chrome_options.add_argument(f"--disable-dev-shm-usage")
 
-        capabilities = webdriver.DesiredCapabilities.CHROME
-        capabilities['loggingPrefs'] = {'browser': 'ALL'}
+            capabilities = webdriver.DesiredCapabilities.CHROME
+            capabilities['loggingPrefs'] = {'browser': 'ALL'}
 
-        self.driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
+            self.driver = webdriver.Chrome(desired_capabilities=capabilities, options=chrome_options)
+        elif self.browser == "edge":
+            edge_options = EdgeOptions()
+            edge_options.use_chromium = True
+            edge_options.headless = self.config['web_session_headless']
+            if self.config['web_session_enable_shared_edge_cache']:
+                edge_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('edge_cache')}")
+                edge_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
+
+            self.edgeUserDataDir = tempfile.mkdtemp()
+            edge_options.add_argument(f"--user-data-dir={self.edgeUserDataDir}")
+
+            edge_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
+
+            capabilities = webdriver.DesiredCapabilities.EDGE
+            capabilities['loggingPrefs'] = {'browser': 'ALL'}
+
+            self.driver = webdriver.Edge(capabilities=capabilities, options=edge_options)
+        elif self.browser == 'firefox':
+            firefox_options = FirefoxOptions()
+            firefox_options.headless = self.config['web_session_headless']
+
+            proxy = Proxy()
+            proxy.http_proxy = f"localhost:{self.proxy.port}"
+            firefox_options.proxy = proxy
+
+            firefox_options.log.level = "info"
+
+            capabilities = webdriver.DesiredCapabilities.FIREFOX
+            capabilities['loggingPrefs'] = {'browser': 'ALL'}
+
+            self.driver = webdriver.Firefox(desired_capabilities=capabilities,
+                                            options=firefox_options,
+                                            service_log_path=tempfile.mkstemp()[1])
+        else:
+            raise ValueError(f"Unsupported value for browser '{self.browser}'. Valid values are 'firefox', 'chrome' or 'edge'.")
 
         window_size = self.driver.execute_script("""
             return [window.outerWidth - window.innerWidth + arguments[0],
               window.outerHeight - window.innerHeight + arguments[1]];
-            """, self.config['web_session_width'], self.config['web_session_height'])
+            """, self.config['web_session_width'][self.windowSize], self.config['web_session_height'][self.windowSize])
+
         self.driver.set_window_size(*window_size)
         self.driver.set_script_timeout(30)
         self.driver.set_page_load_timeout(30)
@@ -164,20 +231,21 @@ class WebEnvironmentSession:
 
             for error in self.proxy.getNetworkErrors():
                 if error.url == self.targetURL and error.statusCode != 401 and error.statusCode != 403:
+                    self.driver.get("data:,")
                     raise RuntimeError(f"Received a fatal network error while attempting to load the starting page.")
 
         except selenium.common.exceptions.TimeoutException:
+            self.driver.get("data:,")
             raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
-
-        time.sleep(2)
 
         self.waitUntilNoNetworkActivity()
 
-        time.sleep(6)
+        time.sleep(self.config['web_session_initial_fetch_sleep_time'])
 
         # No action maps is a strong signal that the page has not loaded correctly.
         actionMaps = self.getActionMaps()
         if len(actionMaps) == 0:
+            self.driver.get("data:,")
             raise RuntimeError(f"Error: loading page {self.targetURL} lead to a page with no action maps.")
 
 
@@ -213,6 +281,11 @@ class WebEnvironmentSession:
                     pass
 
             self.driver = None
+
+        if hasattr(self, "edgeUserDataDir"):
+            if self.edgeUserDataDir is not None:
+                shutil.rmtree(self.edgeUserDataDir)
+                self.edgeUserDataDir = None
 
     def waitUntilDocumentReadyState(self):
         startTime = datetime.now()
@@ -262,7 +335,7 @@ class WebEnvironmentSession:
 
         emailKeywords = ['use', 'mail', 'name']
         passwordKeywords = ['pass']
-        loginKeywords = ['log', 'sub', 'sign']
+        loginKeywords = ['log', 'sub', 'sign', 'connexion']
 
         for map in actionMaps:
             found = False
@@ -290,15 +363,64 @@ class WebEnvironmentSession:
 
         return emailInputs, passwordInputs, loginButtons
 
-    def runAutoLogin(self):
+    def runAutoLogin(self, createLoginVideo=False):
         """
             This method is used to perform the automatic heuristic based login.
         """
         try:
-            time.sleep(2)
+            screenshotIndex = 0
+            autologinMoviePath = None
+            screenshotDirectory = None
+
+            if createLoginVideo:
+                screenshotDirectory = tempfile.mkdtemp()
+
+            def addLoginVideoFrame():
+                nonlocal screenshotIndex
+                if createLoginVideo:
+                    filePath = os.path.join(screenshotDirectory, f"kwola-screenshot-{screenshotIndex}.png")
+                    self.driver.save_screenshot(filePath)
+                    screenshotIndex += 1
+
+            def renderAutologinVideo():
+                nonlocal autologinMoviePath
+                if createLoginVideo:
+                    autologinMoviePath = os.path.join(screenshotDirectory, "autologin.mp4")
+
+                    result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "1", '-i', 'kwola-screenshot-%01d.png', '-vcodec',
+                                             chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', '-preset',
+                                             'veryslow', autologinMoviePath],
+                                            cwd=screenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+                    if result.returncode != 0:
+                        errorMsg = f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:\n"
+                        errorMsg += str(result.stdout, 'utf8') + "\n"
+                        errorMsg += str(result.stderr, 'utf8') + "\n"
+                        getLogger().error(errorMsg)
+
+            addLoginVideoFrame()
+
+            time.sleep(self.config['web_session_autologin_sleep_times'])
             self.waitUntilNoNetworkActivity()
 
+            addLoginVideoFrame()
+
             emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
+
+            # Scroll down to the input elements so that they are all within view.
+            if len(emailInputs) > 0 or len(passwordInputs) > 0 or len(loginButtons) > 0:
+                scrollMargin = 250
+
+                elem = None
+                if len(emailInputs) > 0:
+                    elem = emailInputs[0]
+                if len(passwordInputs) > 0:
+                    elem = passwordInputs[0]
+                if len(loginButtons) > 0:
+                    elem = loginButtons[0]
+
+                self.driver.execute_script(f"""window.scrollTo(0, {max(0, elem.top - scrollMargin)});""")
+                emailInputs, passwordInputs, loginButtons = self.findElementsForAutoLogin()
 
             # check to see if there is a "login" button that we need to click first to expose
             # the login form
@@ -316,6 +438,8 @@ class WebEnvironmentSession:
 
                 loginButtons = list(filter(lambda button: button.keywords != loginTriggerButton.keywords, loginButtons))
 
+                addLoginVideoFrame()
+
             hasTypedInEmail = False
 
             # check to see if this is an "email first" login
@@ -328,6 +452,8 @@ class WebEnvironmentSession:
                                              type="typeEmail")
 
                 success1, networkWaitTime = self.performActionInBrowser(emailTypeAction)
+
+                addLoginVideoFrame()
 
                 loginTriggerButton = loginButtons[0]
 
@@ -345,8 +471,11 @@ class WebEnvironmentSession:
 
                 hasTypedInEmail = True
 
+                addLoginVideoFrame()
+
             if (len(emailInputs) == 0 and not hasTypedInEmail) or len(passwordInputs) == 0 or len(loginButtons) == 0:
-                raise AutologinFailure(f"Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.")
+                renderAutologinVideo()
+                raise AutologinFailure(f"Error! Did not detect the all of the necessary HTML elements to perform an autologin. Found: {len(emailInputs)} email looking elements, {len(passwordInputs)} password looking elements, and {len(loginButtons)} submit looking elements. Kwola will be proceeding without automatically logging in.", autologinMoviePath)
 
             if len(emailInputs) == 1:
                 # Find the login button that is closest to the email input while being below it
@@ -392,21 +521,36 @@ class WebEnvironmentSession:
             if not hasTypedInEmail:
                 success1, networkWaitTime = self.performActionInBrowser(emailTypeAction)
 
+            addLoginVideoFrame()
+
             success2, networkWaitTime = self.performActionInBrowser(passwordTypeAction)
+
+            addLoginVideoFrame()
+
             success3, networkWaitTime = self.performActionInBrowser(loginClickAction)
 
-            time.sleep(2)
+            addLoginVideoFrame()
+
+            time.sleep(self.config['web_session_autologin_sleep_times'])
             self.waitUntilNoNetworkActivity()
+
+            addLoginVideoFrame()
+
+            renderAutologinVideo()
 
             didURLChange = bool(startURL != self.driver.current_url)
 
             if success1 and success2 and success3:
                 if didURLChange:
                     getLogger().info(f"Heuristic autologin appears to have worked!")
+                    return autologinMoviePath
                 else:
-                    raise AutologinFailure(f"Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change.")
+                    message = f"Unable to verify that the heuristic login worked. The login actions were performed but the URL did not change."
+                    # raise AutologinFailure(message, autologinMoviePath)
+                    getLogger().warning(message)
+                    return autologinMoviePath
             else:
-                raise AutologinFailure(f"There was an error running one of the actions required for the heuristic auto login.")
+                raise AutologinFailure(f"There was an error running one of the actions required for the heuristic auto login.", autologinMoviePath)
         except urllib3.exceptions.MaxRetryError as e:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during autologin: {traceback.format_exc()}"
@@ -460,11 +604,12 @@ class WebEnvironmentSession:
                         width: bounds.width - paddingLeft - paddingRight - 6,
                         height: bounds.height - paddingTop - paddingBottom - 6,
                         elementType: element.tagName.toLowerCase(),
-                        keywords: (element.textContent + " " + element.getAttribute("class") + " " +
-                                element.getAttribute("name") + " " + element.getAttribute("id") + " " + 
-                                element.getAttribute("type") + " " + element.getAttribute("placeholder") + " " + 
-                                element.getAttribute("title") + " " + element.getAttribute("aria-label") + " " + 
-                                element.getAttribute("aria-placeholder") + " " + element.getAttribute("aria-roledescription")).toLowerCase() 
+                        keywords: ( element.textContent + " " + element.getAttribute("class") + " " +
+                                    element.getAttribute("name") + " " + element.getAttribute("id") + " " + 
+                                    element.getAttribute("type") + " " + element.getAttribute("placeholder") + " " + 
+                                    element.getAttribute("title") + " " + element.getAttribute("aria-label") + " " + 
+                                    element.getAttribute("aria-placeholder") + " " + element.getAttribute("aria-roledescription")
+                                  ).toLowerCase().replace(/\\s+/g, " ")
                     };
                     
                     if (element.tagName === "A"
@@ -490,7 +635,9 @@ class WebEnvironmentSession:
                     if (elemStyle.getPropertyValue("cursor") === "pointer")
                         data.canClick = true;
                     
-                    if ((elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto")
+                    if ((elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto" ||
+                        (elemStyle.getPropertyValue("overflow-y") === "visible" && (element.tagName.toLowerCase() === "html" || element.tagName.toLowerCase() === "body") )
+                       )
                          && element.scrollHeight > element.clientHeight)
                         data.canScroll = true;
                     
@@ -654,7 +801,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, ScrollingAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"Scrolling {action.direction} at {action.x} {action.y}")
+                    getLogger().info(f"Scrolling {action.direction} at {action.x} {action.y} from {action.source}")
 
                 if action.direction == "down":
                     self.driver.execute_script("window.scrollTo(0, window.scrollY + 400)")
@@ -792,6 +939,14 @@ class WebEnvironmentSession:
             executionTrace.isScreenshotNew = False
             executionTrace.tabNumber = self.tabNumber
             executionTrace.traceNumber = self.traceNumber
+            executionTrace.browser = self.browser
+            executionTrace.userAgent = self.proxy.getUserAgent()
+            executionTrace.windowSize = self.windowSize
+
+            # Set the execution trace id in the proxy. The proxy will add on headers
+            # to all http requests sent by the browser with information identifying
+            # which execution trace that particular request is associated with
+            self.proxy.setExecutionTraceId(executionTrace.id)
 
             for plugin in self.plugins:
                 startTime = datetime.now()
@@ -845,7 +1000,7 @@ class WebEnvironmentSession:
     def getImage(self):
         try:
             if self.hasBrowserDied:
-                return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+                return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
 
             image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
 
@@ -855,19 +1010,19 @@ class WebEnvironmentSession:
         except urllib3.exceptions.MaxRetryError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+            return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
         except selenium.common.exceptions.WebDriverException:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+            return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
         except urllib3.exceptions.ProtocolError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+            return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
         except AttributeError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
-            return numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+            return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
 
     def runSessionCompletedHooks(self):
         if self.hasBrowserDied:

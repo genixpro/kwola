@@ -24,6 +24,7 @@ import selenium
 import selenium.common
 import selenium.webdriver.chrome.options
 import time
+import sys
 
 def testChromedriver(verbose=True):
     """
@@ -38,6 +39,8 @@ def testChromedriver(verbose=True):
     chrome_options = selenium.webdriver.chrome.options.Options()
     chrome_options.headless = True
     chrome_options.add_argument(f"--no-sandbox")
+    if sys.platform == "win32" or sys.platform == "win64":
+        chrome_options.add_argument(f"--disable-dev-shm-usage")
 
     capabilities = selenium.webdriver.DesiredCapabilities.CHROME
     capabilities['loggingPrefs'] = {'browser': 'ALL'}

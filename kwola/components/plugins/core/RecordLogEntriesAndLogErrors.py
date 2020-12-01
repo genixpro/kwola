@@ -5,6 +5,7 @@ from kwola.config.logger import getLogger
 import re
 from kwola.datamodels.errors.LogError import LogError
 from .common import kwolaJSRewriteErrorDetectionStrings
+from selenium.webdriver import Firefox, Chrome, Edge
 
 class RecordLogEntriesAndLogErrors(WebEnvironmentPluginBase):
     networkErrorRegex = re.compile(r"(\D[45]\d\d$)|(\D[45]\d\d\D)")
@@ -22,15 +23,59 @@ class RecordLogEntriesAndLogErrors(WebEnvironmentPluginBase):
 
 
     def beforeActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionToExecute):
-        startLogCount = len(webDriver.get_log('browser'))
-
-        self.startLogCounts[executionSession.id] = startLogCount
+        if isinstance(webDriver, Firefox):
+            # Inject log message detection script
+            webDriver.execute_script("""
+                if (!window.kwolaLogs)
+                {
+                    window.kwolaLogs = [];
+                    
+                    const handler = {
+                      get: function(obj, prop)
+                      {
+                        if (prop === "error")
+                        {
+                            return function()
+                            {
+                                window.kwolaLogs.push([prop, Array.from(arguments)]);
+                                obj.error.apply(obj, arguments);
+                            };
+                        }
+                        else
+                        {
+                            return obj[prop];
+                        }
+                      }
+                    };
+                    window.console = new Proxy(window.console, handler);
+                }
+            """)
+        elif isinstance(webDriver, Chrome) or isinstance(webDriver, Edge):
+            startLogCount = len(webDriver.get_log('browser'))
+            self.startLogCounts[executionSession.id] = startLogCount
+        else:
+            raise RuntimeError("Unrecognized web driver class")
 
 
     def afterActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionExecuted):
-        logEntries = webDriver.get_log('browser')[self.startLogCounts[executionSession.id]:]
+        if isinstance(webDriver, Firefox):
+            logEntries = []
+
+            rawLogs = webDriver.execute_script("""const logs = window.kwolaLogs; window.kwolaLogs = []; return logs;""")
+            if rawLogs is not None:
+                for entry in rawLogs:
+                    logEntries.append({
+                        "level": entry[0],
+                        "message": " ".join([str(m) for m in entry[1]])
+                    })
+
+        elif isinstance(webDriver, Chrome) or isinstance(webDriver, Edge):
+            logEntries = webDriver.get_log('browser')[self.startLogCounts[executionSession.id]:]
+        else:
+            raise RuntimeError("Unrecognized web driver class")
+
         for log in logEntries:
-            if log['level'] == 'SEVERE':
+            if log['level'] == 'SEVERE' or log['level'] == 'error':
                 message = str(log['message'])
                 message = message.replace("\\n", "\n")
 

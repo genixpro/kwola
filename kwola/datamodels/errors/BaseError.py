@@ -20,8 +20,11 @@
 
 
 from mongoengine import *
+from ...components.utils.regex import sharedNonJavascriptCodeUrlRegex, sharedHexUuidRegex, sharedMongoObjectIdRegex, sharedISO8601DateRegex, sharedStandardBase64Regex, sharedAlphaNumericalCodeRegex, sharedISO8601TimeRegex, sharedIPAddressRegex, sharedLongNumberRegex
+import re
 import datetime
-import stringdist
+import functools
+import edlib
 
 class BaseError(EmbeddedDocument):
     """
@@ -40,9 +43,39 @@ class BaseError(EmbeddedDocument):
     def computeHash(self):
         raise NotImplementedError()
 
-    def computeSimilarity(self, otherError):
-        distanceScore = stringdist.levenshtein(self.message, otherError.message) / max(len(self.message), len(otherError.message))
+    @staticmethod
+    @functools.lru_cache(maxsize=1024)
+    def computeReducedErrorComparisonMessage(message):
+        deduplicationIgnoreRegexes = [
+            sharedNonJavascriptCodeUrlRegex,
+            sharedHexUuidRegex,
+            sharedMongoObjectIdRegex,
+            sharedISO8601DateRegex,
+            sharedISO8601TimeRegex,
+            sharedIPAddressRegex,
+            sharedLongNumberRegex,
+            sharedStandardBase64Regex,
+            sharedAlphaNumericalCodeRegex
+        ]
+
+        for regex in deduplicationIgnoreRegexes:
+            message = re.sub(regex, "", message)
+
+        return message
+
+    @staticmethod
+    def computeErrorMessageSimilarity(message, otherMessage):
+        message = BaseError.computeReducedErrorComparisonMessage(message)
+        otherMessage = BaseError.computeReducedErrorComparisonMessage(otherMessage)
+
+        distanceScore = edlib.align(message, otherMessage)['editDistance'] / max(len(message), len(otherMessage))
         return 1.0 - distanceScore
 
+    def computeSimilarity(self, otherError):
+        message = self.message
+        otherMessage = otherError.message
+
+        return BaseError.computeErrorMessageSimilarity(message, otherMessage)
+
     def isDuplicateOf(self, otherError):
-        return self.computeSimilarity(otherError) >= 0.80
+        return self.computeSimilarity(otherError) >= 0.90

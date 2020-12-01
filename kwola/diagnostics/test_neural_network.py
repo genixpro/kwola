@@ -24,6 +24,8 @@ import torch
 import torch.distributed
 import traceback
 import shutil
+import os
+import tempfile
 
 def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
     try:
@@ -92,7 +94,7 @@ def testNeuralNetworkAllGPUs(verbose=True):
             torch.distributed.init_process_group(backend="gloo",
                                                  world_size=1,
                                                  rank=0,
-                                                 init_method="file:///tmp/kwola_distributed_coordinator", )
+                                                 init_method=f"file://{os.path.join(tempfile.gettempdir(), 'kwola_distributed_coordinator')}", )
 
             for gpu in range(gpus):
                 if verbose:

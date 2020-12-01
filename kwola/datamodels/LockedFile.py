@@ -21,7 +21,9 @@
 
 import time
 import os.path
-import fcntl
+import sys
+if sys.platform != "win32" and sys.platform != "win64":
+    import fcntl
 
 class LockedFile(object):
     def __init__(self, filePath, mode):
@@ -32,8 +34,8 @@ class LockedFile(object):
 
     @staticmethod
     def getLockFilePath(filePath):
-        fileName = filePath.split("/")[-1]
-        folder = "/".join(filePath.split("/")[:-1])
+        fileName = os.path.split(filePath)[-1]
+        folder = os.path.join(*os.path.split(filePath)[:-1])
         lockFile = os.path.join(folder, "." + fileName + ".lock")
         return lockFile
 
@@ -61,7 +63,8 @@ class LockedFile(object):
             except FileExistsError:
                 self.readFile = open(self.filePath, 'r')
 
-        fcntl.flock(self.readFile, fcntl.LOCK_EX)
+        if sys.platform != "win32" and sys.platform != "win64":
+            fcntl.flock(self.readFile, fcntl.LOCK_EX)
         self.file = open(self.filePath, self.mode)
         return self.file
 
@@ -69,7 +72,8 @@ class LockedFile(object):
         if 'w' in self.mode:
             os.unlink(self.lockFile)
 
-        fcntl.flock(self.readFile, fcntl.LOCK_UN)
+        if sys.platform != "win32" and sys.platform != "win64":
+            fcntl.flock(self.readFile, fcntl.LOCK_UN)
         self.file.close()
         self.readFile.close()
 

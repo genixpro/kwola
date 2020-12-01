@@ -103,6 +103,14 @@ class ExecutionTrace(Document):
 
     cursor = StringField()
 
+    browser = StringField()
+
+    userAgent = StringField()
+
+    windowSize = StringField()
+
+    codePrevalenceScore = FloatField()
+
     # This field is stores the execution trace for this round.
     # The dictionary maps file names to lists which then contain the line execution counts for that file
     # It is transparently compressed and decompressed on the fly
@@ -110,6 +118,9 @@ class ExecutionTrace(Document):
 
     # This field is used by the training routine to track how much loss the network had on this execution trace.
     lastTrainingRewardLoss = FloatField(default=1.0)
+
+    # This is a cache of the uncompressed branch trace
+    cachedUncompressedBranchTrace = DictField(ListField(), default=None)
 
     # Cached cumulative branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
@@ -149,10 +160,13 @@ class ExecutionTrace(Document):
     # these fields as they go into and out of the database model.
     @property
     def branchTrace(self):
-        return {
-            fileName: self.decompressArray(self.branchTraceCompressed[fileName])
-            for fileName in self.branchTraceCompressed.keys()
-        }
+        if self.cachedUncompressedBranchTrace is None:
+            self.cachedUncompressedBranchTrace = {
+                fileName: self.decompressArray(self.branchTraceCompressed[fileName])
+                for fileName in self.branchTraceCompressed.keys()
+            }
+
+        return self.cachedUncompressedBranchTrace
 
     @branchTrace.setter
     def branchTrace(self, value):
@@ -160,6 +174,8 @@ class ExecutionTrace(Document):
             fileName: self.compressArray(value[fileName])
             for fileName in value.keys()
         }
+
+        self.cachedUncompressedBranchTrace = {fileName: numpy.copy(data) for fileName, data in value.items()}
 
     def compressArray(self, array):
         """
@@ -219,6 +235,7 @@ class ExecutionTrace(Document):
         return numpy.array(newArray)
 
     def saveToDisk(self, config):
+        cachedUncompressedBranchTrace = self.cachedUncompressedBranchTrace
         cachedStartCumulativeBranchTrace = self.cachedStartCumulativeBranchTrace
         cachedStartDecayingBranchTrace = self.cachedStartDecayingBranchTrace
         cachedEndCumulativeBranchTrace = self.cachedEndCumulativeBranchTrace
@@ -226,6 +243,7 @@ class ExecutionTrace(Document):
         cachedStartDecayingFutureBranchTrace = self.cachedStartDecayingFutureBranchTrace
         cachedEndDecayingFutureBranchTrace = self.cachedEndDecayingFutureBranchTrace
 
+        self.cachedUncompressedBranchTrace = None
         self.cachedStartCumulativeBranchTrace = None
         self.cachedStartDecayingBranchTrace = None
         self.cachedEndCumulativeBranchTrace = None
@@ -233,6 +251,7 @@ class ExecutionTrace(Document):
         self.cachedStartDecayingFutureBranchTrace = None
         self.cachedEndDecayingFutureBranchTrace = None
         saveObjectToDisk(self, "execution_traces", config)
+        self.cachedUncompressedBranchTrace = cachedUncompressedBranchTrace
         self.cachedStartCumulativeBranchTrace = cachedStartCumulativeBranchTrace
         self.cachedStartDecayingBranchTrace = cachedStartDecayingBranchTrace
         self.cachedEndCumulativeBranchTrace = cachedEndCumulativeBranchTrace

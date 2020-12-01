@@ -14,30 +14,31 @@ class RecordExceptions(WebEnvironmentPluginBase):
 
 
     def browserSessionStarted(self, webDriver, proxy, executionSession):
+        self.errorHashes[executionSession.id] = set()
+
+    def beforeActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionToExecute):
         # Inject bug detection script
         webDriver.execute_script("""
-            window.kwolaExceptions = [];
-            var kwolaCurrentOnError = window.onerror;
-            window.onerror=function(msg, source, lineno, colno, error) {
-                let stack = null;
-                if (error)
-                {
-                    stack = error.stack;
-                }
-
-                window.kwolaExceptions.push([msg, source, lineno, colno, stack]);
-                if (kwolaCurrentOnError)
-                {
-                    kwolaCurrentOnError(msg, source, lineno, colno, error);
+            if (!window.kwolaExceptions)
+            {
+                window.kwolaExceptions = [];
+                var kwolaCurrentOnError = window.onerror;
+                window.onerror=function(msg, source, lineno, colno, error) {
+                    let stack = null;
+                    if (error)
+                    {
+                        stack = error.stack;
+                    }
+    
+                    window.kwolaExceptions.push([msg, source, lineno, colno, stack]);
+                    if (kwolaCurrentOnError)
+                    {
+                        kwolaCurrentOnError(msg, source, lineno, colno, error);
+                    }
                 }
             }
         """)
 
-        self.errorHashes[executionSession.id] = set()
-
-
-    def beforeActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionToExecute):
-        pass
 
 
     def afterActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionExecuted):

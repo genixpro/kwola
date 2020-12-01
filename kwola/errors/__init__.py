@@ -13,6 +13,10 @@ class ProxyVerificationFailed(KwolaError):
 
 
 class AutologinFailure(KwolaError):
-    pass
+    def __init__(self, message, autologinMoviePath=None):
+        super(AutologinFailure, self).__init__(message)
+
+        self.autologinMoviePath = autologinMoviePath
+
 
 

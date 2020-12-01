@@ -54,7 +54,7 @@ class WebEnvironment:
         with the software.
     """
 
-    def __init__(self, config, sessionLimit=None, plugins=None, executionSessions=None):
+    def __init__(self, config, sessionLimit=None, plugins=None, executionSessions=None, browser=None, windowSize=None):
         self.config = config
 
         defaultPlugins = [
@@ -76,14 +76,14 @@ class WebEnvironment:
 
         @autoretry()
         def createSession(sessionNumber):
-            session = WebEnvironmentSession(config, sessionNumber, self.plugins, self.executionSessions[sessionNumber])
+            session = WebEnvironmentSession(config, sessionNumber, self.plugins, self.executionSessions[sessionNumber], browser=browser, windowSize=windowSize)
             return session
 
         def onInitializeFailure(session):
             session.hasBrowserDied = True
             session.browserDeathReason = f"A fatal error occurred during session initialization: {traceback.format_exc()}"
 
-        @autoretry(ignoreFailure=True, onFailure=onInitializeFailure, exponentialBackOffBase=2.5)
+        @autoretry(ignoreFailure=True, onFinalFailure=onInitializeFailure, exponentialBackOffBase=2.5)
         def initializeSession(session):
             session.initialize()
 

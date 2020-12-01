@@ -18,16 +18,22 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
+import datetime
+from ...config.logger import getLogger
+import os
+import urllib.parse
 
-from ..tasks.TaskProcess import TaskProcess
-from ..components.managers.TestingStepManager import TestingStepManager
+class UserAgentTracer:
+    def __init__(self):
+        self.lastUserAgent = ""
+
+    def requestheaders(self, flow):
+        if 'User-Agent' in flow.request.headers:
+            self.lastUserAgent = flow.request.headers['User-Agent'].replace(" Kwola", "")
+        elif 'user-agent' in flow.request.headers:
+            self.lastUserAgent = flow.request.headers['user-agent'].replace(" Kwola", "")
 
 
-def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None, browser=None, windowSize=None):
-    manager = TestingStepManager(configDir, testingStepId, shouldBeRandom, generateDebugVideo, plugins, browser=browser, windowSize=windowSize)
-    return manager.runTesting()
-
-
-if __name__ == "__main__":
-    task = TaskProcess(runTestingStep)
-    task.run()
+addons = [
+    UserAgentTracer()
+]

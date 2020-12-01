@@ -27,16 +27,21 @@ import traceback
 import gzip
 import filetype
 import re
+from pprint import pformat
 from ..plugins.base.ProxyPluginBase import ProxyPluginBase
 from ..utils.file import loadKwolaFileData, saveKwolaFileData
 
 class RewriteProxy:
-    def __init__(self, config, plugins):
+    def __init__(self, config, plugins, testingRunId=None, testingStepId=None, executionSessionId=None):
         self.config = config
 
         self.memoryCache = {}
         self.originalRewriteItemsBySize = {}
         self.plugins = plugins
+        self.testingRunId = testingRunId
+        self.testingStepId = testingStepId
+        self.executionSessionId = executionSessionId
+        self.executionTraceId = None
 
     def getCacheFileName(self, fileHash, fileURL):
         fileName = ProxyPluginBase.getCleanedFileName(fileURL)
@@ -44,7 +49,7 @@ class RewriteProxy:
         fileNameSplit = fileName.split("_")
 
         if len(fileNameSplit) > 1:
-            extension = "." + fileNameSplit[-1]
+            extension = fileNameSplit[-1]
             fileNameRoot = "_".join(fileNameSplit[:-1])
         else:
             extension = ""
@@ -52,13 +57,14 @@ class RewriteProxy:
 
         badChars = "%=~`!@#$^&*(){}[]\\|'\":;,<>/?+"
         for char in badChars:
+            extension = extension.replace(char, "-")
             fileNameRoot = fileNameRoot.replace(char, "-")
 
         # Replace all unicode characters with -CODE-, with CODE being replaced by the unicode character code
         fileNameRoot = str(fileNameRoot.encode('ascii', 'xmlcharrefreplace'), 'ascii').replace("&#", "-").replace(";", "-")
         extension = str(extension.encode('ascii', 'xmlcharrefreplace'), 'ascii').replace("&#", "-").replace(";", "-")
 
-        cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("proxy_cache"), fileNameRoot[:100] + "_" + fileHash + extension)
+        cacheFileName = os.path.join(self.config.getKwolaUserDataDirectory("proxy_cache"), fileNameRoot[:100] + "_" + fileHash + "." + extension)
 
         return cacheFileName
 
@@ -77,6 +83,35 @@ class RewriteProxy:
     def request(self, flow):
         flow.request.headers['Accept-Encoding'] = 'identity'
 
+    def requestheaders(self, flow):
+        flow.request.headers['Accept-Encoding'] = 'identity'
+
+        # Add in a bunch of Kwola related headers to the request. This makes it possible for upstream
+        # systems to identify kwola related requests and separate them
+        flow.request.headers['X-Kwola'] = 'true'
+
+        if 'applicationId' in self.config and self.config['applicationId'] is not None:
+            flow.request.headers['X-Kwola-Application-Id'] = self.config['applicationId']
+
+        if self.testingRunId is not None:
+            flow.request.headers['X-Kwola-Testing-Run-Id'] = self.testingRunId
+
+        if self.testingStepId is not None:
+            flow.request.headers['X-Kwola-Testing-Step-Id'] = self.testingStepId
+
+        if self.executionSessionId is not None:
+            flow.request.headers['X-Kwola-Execution-Session-Id'] = self.executionSessionId
+
+        if self.executionTraceId is not None:
+            flow.request.headers['X-Kwola-Execution-Trace-Id'] = self.executionTraceId
+
+        # Add the word "Kwola" to the user agent string
+        if 'User-Agent' in flow.request.headers:
+            flow.request.headers['User-Agent'] = flow.request.headers['User-Agent'] + " Kwola"
+        elif 'user-agent' in flow.request.headers:
+            flow.request.headers['user-agent'] = flow.request.headers['user-agent'] + " Kwola"
+        else:
+            flow.request.headers['User-Agent'] = "Kwola"
 
     @concurrent
     def responseheaders(self, flow):

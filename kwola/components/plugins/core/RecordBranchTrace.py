@@ -3,6 +3,7 @@ import selenium.common.exceptions
 from kwola.config.logger import getLogger
 import numpy
 import os
+from selenium.webdriver import Firefox, Chrome, Edge
 
 
 
@@ -78,9 +79,28 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
 
     def extractBranchTrace(self, webDriver):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
-        injected_javascript = (
-            'return window.kwolaCounters;'
-        )
+        if isinstance(webDriver, Firefox):
+            injected_javascript = (
+                'const newCounters = {};'
+                'if (window.kwolaCounters)'
+                '{'
+                '   for (const [key, value] of Object.entries(window.kwolaCounters))'
+                '   {'
+                '       newCounters[key] = Array.from(value);'
+                '   }'
+                '   return newCounters;'
+                '}'
+                'else'
+                '{'
+                '    return null;'
+                '}'
+            )
+        elif isinstance(webDriver, Chrome) or isinstance(webDriver, Edge):
+            injected_javascript = (
+                'return window.kwolaCounters;'
+            )
+        else:
+            raise RuntimeError("Unrecognized web driver class.")
 
         result = webDriver.execute_script(injected_javascript)
 

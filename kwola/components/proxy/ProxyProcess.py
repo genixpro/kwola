@@ -20,6 +20,7 @@
 
 from ...components.proxy.RewriteProxy import RewriteProxy
 from ...components.proxy.PathTracer import PathTracer
+from ...components.proxy.UserAgentTracer import UserAgentTracer
 from ...components.proxy.NetworkErrorTracer import NetworkErrorTracer
 from ...config.logger import getLogger, setupLocalLogging
 from ..plugins.core.JSRewriter import JSRewriter
@@ -48,22 +49,26 @@ class ProxyProcess:
 
     sharedMultiprocessingContext = multiprocessing.get_context('spawn')
 
-    def __init__(self, config, plugins=None):
+    def __init__(self, config, plugins=None, testingRunId=None, testingStepId=None, executionSessionId=None):
         if plugins is None:
             self.plugins = []
         else:
             self.plugins = plugins
 
-        self.plugins = [
-            JSRewriter(config),
-            HTMLRewriter(config)
-        ] + self.plugins
+        builtinPlugins = []
+        if config['web_session_enable_js_rewriting']:
+            builtinPlugins.append(JSRewriter(config))
+
+        if config['web_session_enable_html_rewriting']:
+            builtinPlugins.append(HTMLRewriter(config))
+
+        self.plugins = builtinPlugins + self.plugins
 
         self.config = config
         self.commandQueue = ProxyProcess.sharedMultiprocessingContext.Queue()
         self.resultQueue = ProxyProcess.sharedMultiprocessingContext.Queue()
 
-        self.proxyProcess = ProxyProcess.sharedMultiprocessingContext.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue, pickle.dumps(self.plugins, protocol=pickle.HIGHEST_PROTOCOL)), daemon=True)
+        self.proxyProcess = ProxyProcess.sharedMultiprocessingContext.Process(target=self.runProxyServerSubprocess, args=(self.config, self.commandQueue, self.resultQueue, pickle.dumps(self.plugins, protocol=pickle.HIGHEST_PROTOCOL), testingRunId, testingStepId, executionSessionId), daemon=True)
         try:
             self.proxyProcess.start()
         except BrokenPipeError:
@@ -108,6 +113,15 @@ class ProxyProcess:
     def resetNetworkErrors(self):
         self.commandQueue.put("resetNetworkErrors")
 
+    def setExecutionTraceId(self, traceId):
+        self.commandQueue.put("setExecutionTraceId")
+        self.commandQueue.put(traceId)
+        return self.resultQueue.get()
+
+    def getUserAgent(self):
+        self.commandQueue.put("getUserAgent")
+        return self.resultQueue.get()
+
     @autoretry(logRetries=False)
     def checkProxyFunctioning(self):
         proxies = {
@@ -125,13 +139,14 @@ class ProxyProcess:
 
 
     @staticmethod
-    def runProxyServerSubprocess(config, commandQueue, resultQueue, plugins):
+    def runProxyServerSubprocess(config, commandQueue, resultQueue, plugins, testingRunId, testingStepId, executionSessionId):
         setupLocalLogging()
 
         plugins = pickle.loads(plugins)
 
-        codeRewriter = RewriteProxy(config, plugins)
+        codeRewriter = RewriteProxy(config, plugins, testingRunId=testingRunId, testingStepId=testingStepId, executionSessionId=executionSessionId)
         pathTracer = PathTracer()
+        userAgentTracer = UserAgentTracer()
         networkErrorTracer = NetworkErrorTracer()
 
         proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(codeRewriter, pathTracer, networkErrorTracer, resultQueue), daemon=True)
@@ -159,6 +174,14 @@ class ProxyProcess:
 
             if message == "getMostRecentNetworkActivityTimeAndPath":
                 resultQueue.put((pathTracer.mostRecentNetworkActivityTime, pathTracer.mostRecentNetworkActivityURL, pathTracer.mostRecentNetworkActivityEvent))
+
+            if message == "setExecutionTraceId":
+                traceId = commandQueue.get()
+                codeRewriter.executionTraceId = traceId
+                resultQueue.put(None)
+
+            if message == "getUserAgent":
+                resultQueue.put(userAgentTracer.lastUserAgent)
 
             if message == "exit":
                 exit(0)

@@ -54,6 +54,11 @@ class TestingStep(Document):
 
     applicationId = StringField(required=False)
 
+    browser = StringField()
+
+    userAgent = StringField()
+
+    windowSize = StringField()
 
     def saveToDisk(self, config):
         saveObjectToDisk(self, "testing_steps", config)

@@ -68,6 +68,7 @@ import copy
 from ..utils.retry import autoretry
 from faker import Faker
 from ...config.logger import setupLocalLogging
+from .SymbolMapper import SymbolMapper
 mpl.use("Agg")
 
 
@@ -351,18 +352,7 @@ class DeepLearningAgent:
         # consistent as long as the action names haven't changed.
         self.actionsSorted = sorted(self.actions.keys())
 
-        # Create the symbol map. This maps symbols in their string form to
-        # specific indexes in the embedding table
-        self.symbolMap = {
-            "": 0,
-            None: 0
-        }
-
-        # Create a set to efficiently hold the list of known files
-        self.knownFiles = set()
-
-        # Stores the index where the next symbol should be added
-        self.nextSymbolIndex = 1
+        self.symbolMapper = SymbolMapper(self.config)
 
     def randomString(self, chars, len):
         """
@@ -432,14 +422,11 @@ class DeepLearningAgent:
     def loadSymbolMap(self):
         # We also need to load the symbol map - this is the mapping between symbol strings
         # and their index values within the embedding structure
-        symbolMapData = loadKwolaFileData(self.symbolMapPath, self.config, printErrorOnFailure=False)
-        if symbolMapData is not None:
-            (self.symbolMap, self.knownFiles, self.nextSymbolIndex) = pickle.loads(symbolMapData)
+        self.symbolMapper.load()
 
     @autoretry()
     def saveSymbolMap(self):
-        fileData = pickle.dumps((self.symbolMap, self.knownFiles, self.nextSymbolIndex), protocol=pickle.HIGHEST_PROTOCOL)
-        saveKwolaFileData(self.symbolMapPath, fileData, self.config)
+        self.symbolMapper.save()
 
     def getTorchDevices(self):
         """
@@ -605,10 +592,13 @@ class DeepLearningAgent:
             # containing within an action map, we set those actions to 1. This allows the model to
             # know on a pixel by pixel basis what actions are possible to be executed on that pixel.
             for actionTypeIndex in actionTypes:
-                pixelActionMap[actionTypeIndex, int(element['top'] * self.config['model_image_downscale_ratio'])
-                                                :int(element['bottom'] * self.config['model_image_downscale_ratio']),
-                int(element['left'] * self.config['model_image_downscale_ratio'])
-                :int(element['right'] * self.config['model_image_downscale_ratio'])] = 1
+                top = max(0, int(element['top'] * self.config['model_image_downscale_ratio']))
+                bottom = min(height, int(element['bottom'] * self.config['model_image_downscale_ratio']))
+
+                left = max(0, int(element['left'] * self.config['model_image_downscale_ratio']))
+                right = min(width, int(element['right'] * self.config['model_image_downscale_ratio']))
+
+                pixelActionMap[actionTypeIndex, top:bottom, left:right] = 1
 
         return pixelActionMap
 
@@ -721,10 +711,10 @@ class DeepLearningAgent:
 
         startTime = datetime.now()
         for pastExecutionTraceList in pastExecutionTraces:
-            self.computeCachedCumulativeBranchTraces(pastExecutionTraceList)
-            self.computeCachedDecayingBranchTrace(pastExecutionTraceList)
+            self.symbolMapper.computeCachedCumulativeBranchTraces(pastExecutionTraceList)
+            self.symbolMapper.computeCachedDecayingBranchTrace(pastExecutionTraceList)
             # Don't need to compute the future branch trace since it is only used in training and not at inference time.
-            # self.computeCachedDecayingFutureBranchTrace(pastExecutionTraceList)
+            # self.symbolMapper.computeCachedDecayingFutureBranchTrace(pastExecutionTraceList)
 
         cacheUpdateTime = (datetime.now() - startTime).total_seconds()
         startTime = datetime.now()
@@ -764,7 +754,7 @@ class DeepLearningAgent:
         symbolWeights = []
         for pastExecutionTraceList in pastExecutionTraces:
             if len(pastExecutionTraceList) > 0:
-                symbols, weights = self.computeAllSymbolsForTrace(pastExecutionTraceList[-1])
+                symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(pastExecutionTraceList[-1])
             else:
                 symbols = [0]
                 weights = [1]
@@ -1366,8 +1356,6 @@ class DeepLearningAgent:
         # into other libraries that can load videos into numpy arrays
         cap = cv2.VideoCapture(localTemp)
 
-        os.unlink(localTemp)
-
         rawImages = []
 
         # We basically just keep looping until we have loaded all of the frames.
@@ -1379,6 +1367,9 @@ class DeepLearningAgent:
                 rawImages.append(rawImage)
             else:
                 break
+
+        del cap
+        os.unlink(localTemp)
 
         # Return the list of frames
         return rawImages
@@ -1447,9 +1438,9 @@ class DeepLearningAgent:
         if len(executionTracesFiltered) != (len(executionTraces)):
             getLogger().error(f"Warning while generating a debug video for execution session {executionSession.id}. Some of the traces failed to load from disk. This likely means that an ExecutionTrace object failed to save correctly and was ignored by the system.")
 
-        self.computeCachedCumulativeBranchTraces(executionTracesFiltered)
-        self.computeCachedDecayingBranchTrace(executionTracesFiltered)
-        self.computeCachedDecayingFutureBranchTrace(executionTracesFiltered)
+        self.symbolMapper.computeCachedCumulativeBranchTraces(executionTracesFiltered)
+        self.symbolMapper.computeCachedDecayingBranchTrace(executionTracesFiltered)
+        self.symbolMapper.computeCachedDecayingFutureBranchTrace(executionTracesFiltered)
 
         presentRewards = DeepLearningAgent.computePresentRewards(executionTracesFiltered, self.config)
 
@@ -1649,7 +1640,7 @@ class DeepLearningAgent:
 
         uniqueActions = set([tuple(data) for data in numpy.reshape(numpy.transpose(pixelActionMap), newshape=[-1, len(self.actionsSorted)])])
 
-        symbols, weights = self.computeAllSymbolsForTrace(trace)
+        symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(trace)
 
         symbolListBatch = symbols
         symbolWeightBatch = weights
@@ -2299,12 +2290,12 @@ class DeepLearningAgent:
 
         # Here we make sure that the left and top positions actually fit within the image, and we adjust them
         # so that the cropped image stays within the bounds of the overall image
-        cropLeft = max(0, cropLeft)
         cropLeft = min(imageWidth - cropWidth, cropLeft)
+        cropLeft = max(0, cropLeft)
         cropLeft = int(cropLeft)
 
-        cropTop = max(0, cropTop)
         cropTop = min(imageHeight - cropHeight, cropTop)
+        cropTop = max(0, cropTop)
         cropTop = int(cropTop)
 
         # Right and bottom coordinates are a cinch once we know left and top
@@ -2365,9 +2356,9 @@ class DeepLearningAgent:
                 processedImages.append(processedImage)
                 executionTraces.append(trace)
 
-        self.computeCachedCumulativeBranchTraces(executionTraces)
-        self.computeCachedDecayingBranchTrace(executionTraces)
-        self.computeCachedDecayingFutureBranchTrace(executionTraces)
+        self.symbolMapper.computeCachedCumulativeBranchTraces(executionTraces)
+        self.symbolMapper.computeCachedDecayingBranchTrace(executionTraces)
+        self.symbolMapper.computeCachedDecayingFutureBranchTrace(executionTraces)
 
         # First compute the present reward at each time step
         presentRewards = DeepLearningAgent.computePresentRewards(executionTraces, self.config)
@@ -2383,13 +2374,13 @@ class DeepLearningAgent:
             height = processedImage.shape[1]
 
             # Compute the symbols and weights for the current trace
-            symbols, weights = self.computeAllSymbolsForTrace(trace)
+            symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(trace)
 
             # Compute the decaying future symbols and decaying future weights for the current trace
-            decayingFutureSymbolIndexes, decayingFutureSymbolWeights = self.computeDecayingFutureBranchTraceSymbolsList(trace)
+            decayingFutureSymbolIndexes, decayingFutureSymbolWeights = self.symbolMapper.computeDecayingFutureBranchTraceSymbolsList(trace)
 
             # We do the same for the next trace
-            nextSymbols, nextWeights = self.computeAllSymbolsForTrace(nextTrace)
+            nextSymbols, nextWeights = self.symbolMapper.computeAllSymbolsForTrace(nextTrace)
 
             # Create the pixel action maps for both of the traces
             pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
@@ -2980,206 +2971,12 @@ class DeepLearningAgent:
 
             :param executionTraces: A list or generator providing kwola.datamodels.ExecutionTraceModel objects
 
-            :return: An integer providing the number of new symbols added
+            :return: A tuple with two integers, first providing the number of new symbols added,
+                     and second providing the number of symbols that were split in two
 
 
         """
-        newSymbolCount = 0
-        tooManyCount = 0
-        for trace in executionTraces:
-            for fileName in trace.branchTrace.keys():
-                if fileName not in self.knownFiles:
-                    for n in range(len(trace.branchTrace[fileName])):
-                        if (self.nextSymbolIndex + 2) >= self.config['symbol_dictionary_size']:
-                            tooManyCount += 1
-                        else:
-                            self.symbolMap[DeepLearningAgent.branchCoveredSymbol(fileName, n)] = self.nextSymbolIndex
-                            self.nextSymbolIndex += 1
-                            self.symbolMap[DeepLearningAgent.branchRecentlyExecutedSymbol(fileName, n)] = self.nextSymbolIndex
-                            self.nextSymbolIndex += 1
-                            newSymbolCount += 2
-                self.knownFiles.add(fileName)
 
+        newSymbolCount, splitSymbolCount = self.symbolMapper.assignNewSymbols(executionTraces)
 
-        if tooManyCount > 0:
-            getLogger().warning(f"Warning: The number of symbols detected in the application has exceeded the size of the dictionary by {tooManyCount} symbols. "
-                  "These are not able to be added to the dictionary and thus won't be considered by the model. Try increasing the symbol_dictionary_size "
-                  "parameter.")
-
-        return newSymbolCount
-
-    def computeCachedCumulativeBranchTraces(self, executionTraces):
-        if len(executionTraces) == 0:
-            return
-
-        executionTraces[0].cachedStartCumulativeBranchTrace = {
-            name: numpy.zeros_like(numpy.array(value))
-            for name, value in executionTraces[0].branchTrace.items()
-        }
-
-        executionTraces[0].cachedEndCumulativeBranchTrace = {
-            name: numpy.array(value)
-            for name, value in executionTraces[0].branchTrace.items()
-        }
-
-        lastTrace = executionTraces[0]
-
-        for trace in executionTraces[1:]:
-            if trace.cachedStartCumulativeBranchTrace is None:
-                trace.cachedStartCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedEndCumulativeBranchTrace)
-                trace.cachedEndCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedEndCumulativeBranchTrace)
-
-                for fileName in trace.branchTrace.keys():
-                    if fileName in trace.cachedEndCumulativeBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedEndCumulativeBranchTrace[fileName]):
-                            trace.cachedEndCumulativeBranchTrace[fileName] += numpy.array(trace.branchTrace[fileName])
-                    else:
-                        trace.cachedEndCumulativeBranchTrace[fileName] = trace.branchTrace[fileName]
-            lastTrace = trace
-
-
-    def computeCachedDecayingBranchTrace(self, executionTraces):
-        if len(executionTraces) == 0:
-            return
-
-        executionTraces[0].cachedStartDecayingBranchTrace = {
-            name: numpy.zeros_like(numpy.array(value))
-            for name, value in executionTraces[0].branchTrace.items()
-        }
-
-        executionTraces[0].cachedEndDecayingBranchTrace = {
-            name: numpy.minimum(numpy.ones_like(value), numpy.array(value)) * self.config['decaying_branch_trace_scale']
-            for name, value in executionTraces[0].branchTrace.items()
-        }
-
-        lastTrace = executionTraces[0]
-
-        for trace in executionTraces[1:]:
-            if trace.cachedStartDecayingBranchTrace is None:
-                trace.cachedStartDecayingBranchTrace = copy.deepcopy(lastTrace.cachedEndDecayingBranchTrace)
-                trace.cachedEndDecayingBranchTrace = copy.deepcopy(lastTrace.cachedEndDecayingBranchTrace)
-
-                for fileName in trace.cachedEndDecayingBranchTrace.keys():
-                    trace.cachedEndDecayingBranchTrace[fileName] *= self.config['decaying_branch_trace_decay_rate']
-
-                for fileName in trace.branchTrace.keys():
-                    branchesExecuted = numpy.minimum(numpy.ones_like(trace.branchTrace[fileName]),
-                                                     numpy.array(trace.branchTrace[fileName]))*self.config['decaying_branch_trace_scale']
-
-                    if fileName in trace.cachedEndDecayingBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedEndDecayingBranchTrace[fileName]):
-                            trace.cachedEndDecayingBranchTrace[fileName] += branchesExecuted
-                    else:
-                        trace.cachedEndDecayingBranchTrace[fileName] = branchesExecuted
-
-            lastTrace = trace
-
-    def computeCachedDecayingFutureBranchTrace(self, executionTraces):
-        # Create the decaying future execution trace for the prediction algorithm
-        # The decaying future execution trace is basically a vector that describes
-        # what is going to happen in the future. Its similar to the decaying branch
-        # trace that is fed as an input to the algorithm. The difference is this.
-        # The decaying branch trace shows what happened in the past, with the lines
-        # of code that get executed set to 1 in the vector and then decaying thereafter.
-        # The decaying future trace is exactly the same but in reverse - it provides
-        # what is going to happen next after this trace. The lines of code which
-        # execute immediately next are set to 1, and ones that execute further in the
-        # future have some decayed value based on the decay rate. What this does is
-        # provide an additional, highly supervised target for a secondary loss function.
-
-        if len(executionTraces) == 0:
-            return
-
-        reversedExecutionTraces = list(executionTraces)
-        reversedExecutionTraces.reverse()
-
-        reversedExecutionTraces[0].cachedEndDecayingFutureBranchTrace = {
-            name: numpy.zeros_like(value)
-            for name, value in reversedExecutionTraces[0].branchTrace.items()
-        }
-
-        reversedExecutionTraces[0].cachedStartDecayingFutureBranchTrace = {
-            name: numpy.minimum(numpy.ones_like(value), numpy.array(value)) * self.config['decaying_future_branch_trace_scale']
-            for name, value in reversedExecutionTraces[0].branchTrace.items()
-        }
-
-        nextTrace = reversedExecutionTraces[0]
-
-        for trace in reversedExecutionTraces[1:]:
-            if trace.cachedStartDecayingFutureBranchTrace is None:
-                trace.cachedStartDecayingFutureBranchTrace = copy.deepcopy(nextTrace.cachedStartDecayingFutureBranchTrace)
-
-                trace.cachedEndDecayingFutureBranchTrace = copy.deepcopy(nextTrace.cachedStartDecayingFutureBranchTrace)
-
-                for fileName in trace.cachedStartDecayingFutureBranchTrace.keys():
-                    trace.cachedStartDecayingFutureBranchTrace[fileName] *= self.config['decaying_future_execution_trace_decay_rate']
-
-                for fileName in trace.branchTrace.keys():
-                    traceNumpyArray = numpy.array(trace.branchTrace[fileName])
-
-                    branchesExecuted = numpy.minimum(numpy.ones_like(traceNumpyArray), traceNumpyArray) * self.config['decaying_future_branch_trace_scale']
-
-                    if fileName in trace.cachedStartDecayingFutureBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedStartDecayingFutureBranchTrace[fileName]):
-                            trace.cachedStartDecayingFutureBranchTrace[fileName] += branchesExecuted
-                    else:
-                        trace.cachedStartDecayingFutureBranchTrace[fileName] = branchesExecuted
-
-            nextTrace = trace
-
-    def computeCoverageSymbolsList(self, executionTrace):
-        symbols = []
-        weights = []
-        for fileName in executionTrace.cachedStartCumulativeBranchTrace:
-            for branchIndex in range(len(executionTrace.cachedStartCumulativeBranchTrace[fileName])):
-                if executionTrace.cachedStartCumulativeBranchTrace[fileName][branchIndex] > 0:
-                    symbol = DeepLearningAgent.branchCoveredSymbol(fileName, branchIndex)
-                    symbolIndex = self.symbolMap.get(symbol, -1)
-                    if symbolIndex > 0:
-                        symbols.append(symbolIndex)
-                        weights.append(1.0)
-
-        return symbols, weights
-
-
-    def computeDecayingBranchTraceSymbolsList(self, executionTrace):
-        symbols = []
-        weights = []
-        for fileName in executionTrace.cachedStartDecayingBranchTrace:
-            for branchIndex in range(len(executionTrace.cachedStartDecayingBranchTrace[fileName])):
-                if executionTrace.cachedStartDecayingBranchTrace[fileName][branchIndex] > self.config['decaying_branch_trace_minimum_weight_for_symbol_inclusion']:
-                    symbol = DeepLearningAgent.branchRecentlyExecutedSymbol(fileName, branchIndex)
-                    symbolIndex = self.symbolMap.get(symbol, -1)
-                    if symbolIndex > 0:
-                        symbols.append(symbolIndex)
-                        weights.append(executionTrace.cachedStartDecayingBranchTrace[fileName][branchIndex])
-
-        return symbols, weights
-
-    def computeDecayingFutureBranchTraceSymbolsList(self, executionTrace):
-        symbols = []
-        weights = []
-        for fileName in executionTrace.cachedEndDecayingFutureBranchTrace:
-            for branchIndex in range(len(executionTrace.cachedEndDecayingFutureBranchTrace[fileName])):
-                if executionTrace.cachedEndDecayingFutureBranchTrace[fileName][branchIndex] > self.config['decaying_branch_trace_minimum_weight_for_symbol_inclusion']:
-                    symbol = DeepLearningAgent.branchRecentlyExecutedSymbol(fileName, branchIndex)
-                    symbolIndex = self.symbolMap.get(symbol, -1)
-                    if symbolIndex > 0:
-                        symbols.append(symbolIndex)
-                        weights.append(executionTrace.cachedEndDecayingFutureBranchTrace[fileName][branchIndex])
-
-        return symbols, weights
-
-    def computeAllSymbolsForTrace(self, executionTrace):
-        allSymbolList = []
-        allWeightList = []
-
-        symbols, weights = self.computeCoverageSymbolsList(executionTrace)
-        allSymbolList.extend(symbols)
-        allWeightList.extend(weights)
-
-        symbols, weights = self.computeDecayingBranchTraceSymbolsList(executionTrace)
-        allSymbolList.extend(symbols)
-        allWeightList.extend(weights)
-
-        return allSymbolList, allWeightList
+        return newSymbolCount, splitSymbolCount
