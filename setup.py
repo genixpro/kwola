@@ -53,7 +53,7 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.1.44',
+    version='0.1.45',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
