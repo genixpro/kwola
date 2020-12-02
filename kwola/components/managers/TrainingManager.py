@@ -712,8 +712,6 @@ class TrainingManager:
             testingSteps = sorted([step for step in TrainingManager.loadAllTestingSteps(config, applicationId) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
             testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
 
-            allWindowSizes = list(set([step.windowSize for step in testingSteps]))
-
             if len(testingSteps) == 0:
                 getLogger().warning(f"Error, no test sequences to train on for training step.")
                 subProcessBatchResultQueue.put("error")
@@ -736,6 +734,8 @@ class TrainingManager:
             getLogger().info(f"Found {len(executionSessionIds)} total execution sessions that can be learned.")
 
             getLogger().info(f"Starting loading of execution trace weight datas.")
+
+            allWindowSizes = list(set(session.windowSize for session in executionSessions))
 
             executionSessionTraceWeightDatasBySize = {
                 windowSize: []

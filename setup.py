@@ -47,7 +47,8 @@ requirements = [
     "bs4",
     "google-cloud-storage",
     "Faker",
-    "giturlparse"
+    "giturlparse",
+    "edlib"
 ]
 
 setup(

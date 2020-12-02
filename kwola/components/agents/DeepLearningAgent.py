@@ -1905,7 +1905,7 @@ class DeepLearningAgent:
                 rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
                 rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (debugVideoImageChannels,))
 
-                image[topSize + imageHeight:-self.config.debug_video_bottom_reward_chart_bottom_margin, leftSize:-rightSize] = rewardChart
+                image[topSize + imageHeight:-self.config.debug_video_bottom_reward_chart_bottom_margin, leftSize:(leftSize + rewardChart.shape[1])] = rewardChart
 
                 vline.remove()
                 hline.remove()

@@ -199,7 +199,7 @@
   "state_value_convolution_stride": 1,
   "symbol_dictionary_size": 100000,
   "symbol_embedding_size": 128,
-  "testing_enable_prediction_subprocess": true,
+  "testing_enable_prediction_subprocess": false,
   "testing_fetch_action_map_timeout": 30,
   "testing_get_image_timeout": 30,
   "testing_max_repeat_action_maps_without_new_branches": 3,
