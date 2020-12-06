@@ -66,6 +66,9 @@ def getAvailableBrowsers(config):
             chromeCmd = "google-chrome"
             if sys.platform == "win32" or sys.platform == "win64":
                 chromeCmd = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+                if not os.path.exists(chromeCmd):
+                    chromeCmd = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
             result3 = subprocess.run([chromeCmd, '--headless', '--version'], stdout=subprocess.PIPE)
         except FileNotFoundError:
             result3 = None

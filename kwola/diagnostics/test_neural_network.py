@@ -25,6 +25,7 @@ import torch.distributed
 import traceback
 import shutil
 import os
+import sys
 import tempfile
 
 def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
@@ -91,10 +92,15 @@ def testNeuralNetworkAllGPUs(verbose=True):
 
         gpus = torch.cuda.device_count()
         if gpus > 0:
+            init_method = f"file://{os.path.join(tempfile.gettempdir(), 'kwola_distributed_coordinator')}"
+
+            if sys.platform == "win32" or sys.platform == "win64":
+                init_method = f"file:///{os.path.join(tempfile.gettempdir(), 'kwola_distributed_coordinator')}"
+
             torch.distributed.init_process_group(backend="gloo",
                                                  world_size=1,
                                                  rank=0,
-                                                 init_method=f"file://{os.path.join(tempfile.gettempdir(), 'kwola_distributed_coordinator')}", )
+                                                 init_method=init_method)
 
             for gpu in range(gpus):
                 if verbose:
