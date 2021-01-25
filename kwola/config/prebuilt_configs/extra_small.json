@@ -143,7 +143,7 @@
   "print_configuration_on_startup": false,
   "print_loss_iterations": 10,
   "print_loss_moving_average_length": 50,
-  "profile": "small",
+  "profile": "extra_small",
   "random_html_element_a_weight": 0.2,
   "random_html_element_button_weight": 0.7,
   "random_html_element_canvas_weight": 1.0,

@@ -2658,7 +2658,7 @@ class DeepLearningAgent:
                 "decayingFutureSymbolOffsets": decayingFutureSymbolListOffsetsTensor,
                 "outputStamp": False,
                 "outputFutureSymbolEmbedding": self.config['enable_trace_prediction_loss'],
-                "computeExtras": True,
+                "computeExtras": False,
                 "computeActionProbabilities": True,
                 "computeStateValues": True,
                 "computeAdvantageValues": True,
