@@ -39,7 +39,7 @@ def main():
         exit(1)
 
     configDir = getConfigurationDirFromCommandLineArgs()
-    config = KwolaCoreConfiguration(configDir)
+    config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
 
     testingStep = TestingStep(id=CustomIDField.generateNewUUID(TestingStep, config))
     testingStep.saveToDisk(config)

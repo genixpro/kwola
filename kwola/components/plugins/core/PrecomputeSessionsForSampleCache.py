@@ -25,7 +25,7 @@ class PrecomputeSessionsForSampleCache(TestingStepPluginBase):
 
     @staticmethod
     def addExecutionSessionToSampleCache(id, config):
-        setupLocalLogging()
+        setupLocalLogging(config)
         return TrainingManager.addExecutionSessionToSampleCache(id, config)
 
     @autoretry()

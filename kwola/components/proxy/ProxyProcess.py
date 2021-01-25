@@ -22,9 +22,12 @@ from ...components.proxy.RewriteProxy import RewriteProxy
 from ...components.proxy.PathTracer import PathTracer
 from ...components.proxy.UserAgentTracer import UserAgentTracer
 from ...components.proxy.NetworkErrorTracer import NetworkErrorTracer
+from ...components.proxy.DotNetRPCErrorTracer import DotNetRPCErrorTracer
 from ...config.logger import getLogger, setupLocalLogging
 from ..plugins.core.JSRewriter import JSRewriter
 from ..plugins.core.HTMLRewriter import HTMLRewriter
+from ..plugins.base.ProxyPluginBase import ProxyPluginBase
+from ...datamodels.ResourceModel import Resource
 from contextlib import closing
 import pickle
 from threading import Thread
@@ -113,6 +116,9 @@ class ProxyProcess:
     def resetNetworkErrors(self):
         self.commandQueue.put("resetNetworkErrors")
 
+    def resetDotNetRPCErrors(self):
+        self.commandQueue.put("resetDotNetRPCErrors")
+
     def setExecutionTraceId(self, traceId):
         self.commandQueue.put("setExecutionTraceId")
         self.commandQueue.put(traceId)
@@ -120,6 +126,15 @@ class ProxyProcess:
 
     def getUserAgent(self):
         self.commandQueue.put("getUserAgent")
+        return self.resultQueue.get()
+
+    def getDotNetRPCErrors(self):
+        self.commandQueue.put("getDotNetRPCErrors")
+        return pickle.loads(self.resultQueue.get())
+
+    def getResourceVersion(self, url):
+        self.commandQueue.put("getResourceVersion")
+        self.commandQueue.put(url)
         return self.resultQueue.get()
 
     @autoretry(logRetries=False)
@@ -140,7 +155,7 @@ class ProxyProcess:
 
     @staticmethod
     def runProxyServerSubprocess(config, commandQueue, resultQueue, plugins, testingRunId, testingStepId, executionSessionId):
-        setupLocalLogging()
+        setupLocalLogging(config)
 
         plugins = pickle.loads(plugins)
 
@@ -148,8 +163,17 @@ class ProxyProcess:
         pathTracer = PathTracer()
         userAgentTracer = UserAgentTracer()
         networkErrorTracer = NetworkErrorTracer()
+        dotNetRPCErrorTracer = DotNetRPCErrorTracer()
 
-        proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(codeRewriter, pathTracer, networkErrorTracer, resultQueue), daemon=True)
+        mitmProxyPlugins = [
+            codeRewriter,
+            pathTracer,
+            userAgentTracer,
+            networkErrorTracer,
+            dotNetRPCErrorTracer
+        ]
+
+        proxyThread = Thread(target=ProxyProcess.runProxyServerThread, args=(mitmProxyPlugins, resultQueue), daemon=True)
         proxyThread.start()
 
         while True:
@@ -160,6 +184,9 @@ class ProxyProcess:
 
             if message == "resetNetworkErrors":
                 networkErrorTracer.errors = []
+
+            if message == "resetDotNetRPCErrors":
+                dotNetRPCErrorTracer.errors = []
 
             if message == "getPathTrace":
                 pathTrace = {
@@ -172,6 +199,9 @@ class ProxyProcess:
             if message == "getNetworkErrors":
                 resultQueue.put(pickle.dumps(networkErrorTracer.errors, protocol=pickle.HIGHEST_PROTOCOL))
 
+            if message == "getDotNetRPCErrors":
+                resultQueue.put(pickle.dumps(dotNetRPCErrorTracer.errors, protocol=pickle.HIGHEST_PROTOCOL))
+            
             if message == "getMostRecentNetworkActivityTimeAndPath":
                 resultQueue.put((pathTracer.mostRecentNetworkActivityTime, pathTracer.mostRecentNetworkActivityURL, pathTracer.mostRecentNetworkActivityEvent))
 
@@ -180,6 +210,15 @@ class ProxyProcess:
                 codeRewriter.executionTraceId = traceId
                 resultQueue.put(None)
 
+            if message == "getResourceVersion":
+                resourceUrl = commandQueue.get()
+                versionId = codeRewriter.seenResourceVersionsByURL.get(resourceUrl)
+                if versionId is not None:
+                    data = codeRewriter.memoryCache[versionId]
+                else:
+                    data = None
+                resultQueue.put((versionId, data))
+
             if message == "getUserAgent":
                 resultQueue.put(userAgentTracer.lastUserAgent)
 
@@ -187,15 +226,15 @@ class ProxyProcess:
                 exit(0)
 
     @staticmethod
-    def runProxyServerThread(codeRewriter, pathTracer, networkErrorTracer, resultQueue):
+    def runProxyServerThread(mitmProxyPlugins, resultQueue):
         while True:
             try:
-                ProxyProcess.runProxyServerOnce(codeRewriter, pathTracer, networkErrorTracer, resultQueue)
+                ProxyProcess.runProxyServerOnce(mitmProxyPlugins, resultQueue)
             except Exception:
                 getLogger().warning(f"Had to restart the mitmproxy due to an exception: {traceback.format_exc()}")
 
     @staticmethod
-    def runProxyServerOnce(codeRewriter, pathTracer, networkErrorTracer, resultQueue):
+    def runProxyServerOnce(mitmProxyPlugins, resultQueue):
         from mitmproxy import proxy, options
         from mitmproxy.tools.dump import DumpMaster
         import mitmproxy.exceptions
@@ -212,9 +251,8 @@ class ProxyProcess:
 
                 m = DumpMaster(opts, with_termlog=False, with_dumper=False)
                 m.server = proxy.server.ProxyServer(pconf)
-                m.addons.add(codeRewriter)
-                m.addons.add(pathTracer)
-                m.addons.add(networkErrorTracer)
+                for plugin in mitmProxyPlugins:
+                    m.addons.add(plugin)
                 break
             except mitmproxy.exceptions.ServerException:
                 getLogger().warning(f"Had to restart the mitmproxy due to an exception: {traceback.format_exc()}")

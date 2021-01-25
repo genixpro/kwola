@@ -75,6 +75,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                 configName = questionary.select(
                     "Which configuration do you want to load for your model?",
                     choices=[
+                        'extra_small',
                         'small',
                         'medium',
                         'large',
@@ -103,42 +104,74 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                 exit(0)
 
             commandChoices = [
-                "Enable random number command?",
-                "Enable random bracket command?",
-                "Enable random math symbol command?",
-                "Enable random other symbol command?",
-                "Enable double click command?",
-                "Enable right click command?",
-                "Enable scrolling command?",
-                "Enable type random letters command?",
-                "Enable type random address command?",
-                "Enable type random email command?",
-                "Enable type random phone command?",
-                "Enable type random paragraph command?",
-                "Enable type random date time command?",
-                "Enable type random credit card command?",
-                "Enable type random url command?"
+                questionary.Choice("Enable random number command?", checked=False),
+                questionary.Choice("Enable random bracket command?", checked=False),
+                questionary.Choice("Enable random math symbol command?", checked=False),
+                questionary.Choice("Enable random other symbol command?", checked=False),
+                questionary.Choice("Enable double click command?", checked=False),
+                questionary.Choice("Enable right click command?", checked=False),
+                questionary.Choice("Enable scrolling command?", checked=True),
+                questionary.Choice("Enable type random letters command?", checked=True),
+                questionary.Choice("Enable type random address command?", checked=False),
+                questionary.Choice("Enable type random email command?", checked=False),
+                questionary.Choice("Enable type random phone command?", checked=False),
+                questionary.Choice("Enable type random paragraph command?", checked=False),
+                questionary.Choice("Enable type random date time command?", checked=False),
+                questionary.Choice("Enable type random credit card command?", checked=False),
+                questionary.Choice("Enable type random url command?", checked=False),
+                questionary.Choice("Enable type login email?", checked=False),
+                questionary.Choice("Enable type login password?", checked=False)
             ]
 
             results = questionary.checkbox("Please select which commands you want to enable", choices=commandChoices).ask()
             if results is None:
                 exit(0)
 
-            enableRandomNumberCommand = bool(commandChoices[0] in results)
-            enableRandomBracketCommand = bool(commandChoices[1] in results)
-            enableRandomMathCommand = bool(commandChoices[2] in results)
-            enableRandomOtherSymbolCommand = bool(commandChoices[3] in results)
-            enableDoubleClickCommand = bool(commandChoices[4] in results)
-            enableRightClickCommand = bool(commandChoices[5] in results)
-            enableScrolling = bool(commandChoices[6] in results)
-            enableRandomLettersCommand = bool(commandChoices[7] in results)
-            enableRandomAddressCommand = bool(commandChoices[8] in results)
-            enableRandomEmailCommand = bool(commandChoices[9] in results)
-            enableRandomPhoneNumberCommand = bool(commandChoices[10] in results)
-            enableRandomParagraphCommand = bool(commandChoices[11] in results)
-            enableRandomDateTimeCommand = bool(commandChoices[12] in results)
-            enableRandomCreditCardCommand = bool(commandChoices[13] in results)
-            enableRandomURLCommand = bool(commandChoices[14] in results)
+            enableRandomNumberCommand = bool(commandChoices[0].title in results)
+            enableRandomBracketCommand = bool(commandChoices[1].title in results)
+            enableRandomMathCommand = bool(commandChoices[2].title in results)
+            enableRandomOtherSymbolCommand = bool(commandChoices[3].title in results)
+            enableDoubleClickCommand = bool(commandChoices[4].title in results)
+            enableRightClickCommand = bool(commandChoices[5].title in results)
+            enableScrolling = bool(commandChoices[6].title in results)
+            enableRandomLettersCommand = bool(commandChoices[7].title in results)
+            enableRandomAddressCommand = bool(commandChoices[8].title in results)
+            enableRandomEmailCommand = bool(commandChoices[9].title in results)
+            enableRandomPhoneNumberCommand = bool(commandChoices[10].title in results)
+            enableRandomParagraphCommand = bool(commandChoices[11].title in results)
+            enableRandomDateTimeCommand = bool(commandChoices[12].title in results)
+            enableRandomCreditCardCommand = bool(commandChoices[13].title in results)
+            enableRandomURLCommand = bool(commandChoices[14].title in results)
+            enableTypeEmail = bool(commandChoices[15].title in results)
+            enableTypePassword = bool(commandChoices[16].title in results)
+
+            browserChoices = [
+                questionary.Choice("Chrome", checked=True),
+                questionary.Choice("Firefox", checked=False),
+                questionary.Choice("Edge", checked=False)
+            ]
+
+            results = questionary.checkbox("Please select which browsers you want to enable", choices=browserChoices).ask()
+            if results is None:
+                exit(0)
+
+            enableChrome = bool(browserChoices[0].title in results)
+            enableFirefox = bool(browserChoices[1].title in results)
+            enableEdge = bool(browserChoices[2].title in results)
+
+            windowSizeChoices = [
+                questionary.Choice("Desktop", checked=True),
+                questionary.Choice("Tablet", checked=False),
+                questionary.Choice("Smartphone", checked=False)
+            ]
+
+            results = questionary.checkbox("Please select which window sizes you want to enable", choices=windowSizeChoices).ask()
+            if results is None:
+                exit(0)
+
+            enableDesktop = bool(windowSizeChoices[0].title in results)
+            enableTablet = bool(windowSizeChoices[1].title in results)
+            enableSmartphone = bool(windowSizeChoices[2].title in results)
 
             autologin = False
 
@@ -171,8 +204,8 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                             password=password,
                                                                             name=name,
                                                                             paragraph=paragraph,
-                                                                            enableTypeEmail=True,
-                                                                            enableTypePassword=True,
+                                                                            enableTypeEmail=enableTypeEmail,
+                                                                            enableTypePassword=enableTypePassword,
                                                                             enableRandomNumberCommand=enableRandomNumberCommand,
                                                                             enableRandomBracketCommand=enableRandomBracketCommand,
                                                                             enableRandomMathCommand=enableRandomMathCommand,
@@ -189,7 +222,13 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                             enableRandomURLCommand=enableRandomURLCommand,
                                                                             enableScrolling=enableScrolling,
                                                                             autologin=autologin,
-                                                                            prevent_offsite_links=prevent_offsite_links
+                                                                            prevent_offsite_links=prevent_offsite_links,
+                                                                            web_session_enable_chrome=enableChrome,
+                                                                            web_session_enable_firefox=enableFirefox,
+                                                                            web_session_enable_edge=enableEdge,
+                                                                            web_session_enable_window_size_desktop=enableDesktop,
+                                                                            web_session_enable_window_size_tablet=enableTablet,
+                                                                            web_session_enable_window_size_mobile=enableSmartphone
                                                                             )
             if askTuneQuestion:
                 needToChange = questionary.select(
@@ -239,4 +278,4 @@ def main():
         exit(1)
 
     configDir = getConfigurationDirFromCommandLineArgs()
-    TrainAgentLoop.trainAgent(configDir)
+    TrainAgentLoop.trainAgent(KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir))

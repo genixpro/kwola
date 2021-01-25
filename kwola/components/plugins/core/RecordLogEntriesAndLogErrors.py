@@ -114,7 +114,7 @@ class RecordLogEntriesAndLogErrors(WebEnvironmentPluginBase):
 
                     getLogger().info(logMsgString)
                 else:
-                    error = LogError(type="log", page=executionTrace.startURL, message=message, logLevel=log['level'])
+                    error = LogError(type="log", page=executionTrace.finishURL, message=message, logLevel=log['level'])
                     executionTrace.errorsDetected.append(error)
                     errorHash = error.computeHash()
 

@@ -21,6 +21,7 @@
 
 from ..config.logger import getLogger, setupLocalLogging
 from ..components.agents.DeepLearningAgent import DeepLearningAgent
+from ..components.agents.SymbolMapper import SymbolMapper
 from ..components.environments.WebEnvironment import WebEnvironment
 from ..tasks.ManagedTaskSubprocess import ManagedTaskSubprocess
 from ..config.config import KwolaCoreConfiguration
@@ -32,12 +33,12 @@ from ..datamodels.ExecutionSessionModel import ExecutionSession
 from ..datamodels.ExecutionTraceModel import ExecutionTrace
 from ..components.managers.TrainingManager import TrainingManager
 from ..components.utils.charts import generateAllCharts
-from ..datamodels.LockedFile import LockedFile
 from ..components.utils.asyncthreadfuture import AsyncThreadFuture
 from concurrent.futures import as_completed, wait
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import billiard as multiprocessing
+from kwolacloud.components.core.BehaviouralChangeDetector import BehaviourChangeDetector
 import os
 import os.path
 import time
@@ -148,7 +149,7 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
         testingStep.saveToDisk(config)
 
         process = ManagedTaskSubprocess([sys.executable, "-m", "kwola.tasks.RunTestingStep"], {
-            "configDir": config.configurationDirectory,
+            "config": config.serialize(),
             "testingStepId": str(testingStep.id),
             "shouldBeRandom": True,
             "generateDebugVideo": False,
@@ -199,7 +200,7 @@ def runRandomInitialization(config, trainingSequence, exitOnFail=True):
 def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber, coordinatorTempFileName):
     try:
         process = ManagedTaskSubprocess([sys.executable, "-m", "kwola.tasks.RunTrainingStep"], {
-            "configDir": config.configurationDirectory,
+            "config": config.serialize(),
             "trainingSequenceId": str(trainingSequence.id),
             "trainingStepIndex": trainingStepIndex,
             "gpu": gpuNumber,
@@ -239,7 +240,7 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         testingStep.saveToDisk(config)
 
         process = ManagedTaskSubprocess([sys.executable, "-m", "kwola.tasks.RunTestingStep"], {
-            "configDir": config.configurationDirectory,
+            "config": config.serialize(),
             "testingStepId": str(testingStep.id),
             "shouldBeRandom": False,
             "generateDebugVideo": generateDebugVideo and config['enable_debug_videos'],
@@ -265,10 +266,8 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         raise
 
 def updateModelSymbols(config, testingStepId):
-    # Load and save the agent to make sure all training subprocesses are synced
-    agent = DeepLearningAgent(config=config, whichGpu=None)
-    agent.initialize(enableTraining=False)
-    agent.load()
+    symbolMap = SymbolMapper(config)
+    symbolMap.load()
 
     testingStep = TestingStep.loadFromDisk(testingStepId, config)
 
@@ -282,19 +281,19 @@ def updateModelSymbols(config, testingStepId):
             traces.append(ExecutionTrace.loadFromDisk(executionTraceId, config, applicationId=testingStep.applicationId))
 
         if len(traces) > 1000:
-            newSymbols, splitSymbols = agent.assignNewSymbols(traces)
+            newSymbols, splitSymbols = symbolMap.assignNewSymbols(traces)
             totalNewSymbols += newSymbols
             totalSplitSymbols += splitSymbols
             traces = []
 
-    newSymbols, splitSymbols = agent.assignNewSymbols(traces)
+    newSymbols, splitSymbols = symbolMap.assignNewSymbols(traces)
     totalNewSymbols += newSymbols
     totalSplitSymbols += splitSymbols
-
     traces = []
+
     getLogger().info(f"There were {totalNewSymbols} new symbols and {totalSplitSymbols} split symbols from testing step {testingStepId}")
 
-    agent.save()
+    symbolMap.save()
 
 def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
     stepStartTime = datetime.now()
@@ -307,7 +306,7 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
         getLogger().info(f"Starting a single training loop. Loops completed: {trainingSequence.trainingLoopsCompleted}")
 
         with ThreadPoolExecutor(max_workers=(config['testing_sequences_in_parallel_per_training_loop'] + numberOfTrainingStepsInParallel)) as executor:
-            coordinatorTempFileName = "kwola_distributed_coordinator-" + str(random.randint(0, 1e8))
+            coordinatorTempFileName = "kwola_distributed_coordinator-" + str(random.randint(0, int(1e8)))
             coordinatorTempFilePath = os.path.join(tempfile.gettempdir(), coordinatorTempFileName)
             if os.path.exists(coordinatorTempFilePath):
                 os.unlink(coordinatorTempFilePath)
@@ -396,16 +395,13 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
 
     generateAllCharts(config, applicationId=None, enableCumulativeCoverage=True)
 
-def trainAgent(configDir, exitOnFail=False):
+def trainAgent(config, exitOnFail=False):
     try:
         multiprocessing.set_start_method('spawn')
     except RuntimeError:
         pass
 
-    config = KwolaCoreConfiguration(configDir)
-
-    # Create the bugs directory. This is just temporary
-    config.getKwolaUserDataDirectory("bugs")
+    config = KwolaCoreConfiguration(config)
 
     # Load and save the agent to make sure all training subprocesses are synced
     agent = DeepLearningAgent(config=config, whichGpu=None)
@@ -413,15 +409,6 @@ def trainAgent(configDir, exitOnFail=False):
     agent.load()
     agent.save()
     del agent
-
-    browsers = getAvailableBrowsers(config)
-
-    # Create and destroy an environment, which forces a lot of the initial javascript in the application
-    # to be loaded and translated. It also just verifies that the system can access the target URL prior
-    # to trying to run a full sequence
-    environment = WebEnvironment(config, sessionLimit=1, browser=browsers[0])
-    environment.shutdown()
-    del environment
 
     files = [fileName for fileName in os.listdir(config.getKwolaUserDataDirectory("training_sequences")) if ".lock" not in fileName]
 
@@ -440,11 +427,21 @@ def trainAgent(configDir, exitOnFail=False):
         sequenceId = sequenceId.replace(".json", "")
         sequenceId = sequenceId.replace(".gz", "")
 
-        LockedFile.clearLockFile(os.path.join(config.getKwolaUserDataDirectory("training_sequences"), files[0]))
         trainingSequence = TrainingSequence.loadFromDisk(sequenceId, config)
 
     testingSteps = [step for step in TrainingManager.loadAllTestingSteps(config) if step.status == "completed"]
+
     if len(testingSteps) == 0:
+        browsers = getAvailableBrowsers(config)
+
+        # Create and destroy an environment, which forces a lot of the initial javascript in the application
+        # to be loaded and translated. It also just verifies that the system can access the target URL prior
+        # to trying to run a full sequence
+        environment = WebEnvironment(config, sessionLimit=1, browser=browsers[0])
+        environment.shutdown()
+        del environment
+
+    if len(testingSteps) < config['training_random_initialization_sequences']:
         runRandomInitialization(config, trainingSequence, exitOnFail=exitOnFail)
         trainingSequence.saveToDisk(config)
 

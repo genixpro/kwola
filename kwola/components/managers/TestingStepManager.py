@@ -37,7 +37,6 @@ from kwola.components.plugins.core.LogSessionRewards import LogSessionRewards
 from kwola.components.plugins.core.PrecomputeSessionsForSampleCache import PrecomputeSessionsForSampleCache
 from kwola.components.plugins.core.RecordScreenshots import RecordScreenshots
 from kwola.errors import ProxyVerificationFailed
-from ..utils.file import loadKwolaFileData, saveKwolaFileData
 import atexit
 import billiard as multiprocessing
 import numpy
@@ -53,13 +52,12 @@ from pprint import pformat
 
 
 class TestingStepManager:
-    def __init__(self, configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None, browser=None, windowSize=None):
+    def __init__(self, config, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None, browser=None, windowSize=None):
         getLogger().info(f"Starting New Testing Sequence")
 
         self.generateDebugVideo = generateDebugVideo
         self.shouldBeRandom = shouldBeRandom
-        self.configDir = configDir
-        self.config = KwolaCoreConfiguration(configDir)
+        self.config = KwolaCoreConfiguration(config)
         self.browser = browser
         self.windowSize = windowSize
 
@@ -68,10 +66,6 @@ class TestingStepManager:
         self.stepsRemaining = int(self.config['testing_sequence_length'])
 
         self.testStep = TestingStep.loadFromDisk(testingStepId, self.config)
-        # Make sure applicationId is set in the config and save it
-        if 'applicationId' not in self.config:
-            self.config['applicationId'] = self.testStep.applicationId
-            self.config.saveConfig()
 
         self.executionSessions = []
         self.executionSessionTraces = []
@@ -123,7 +117,7 @@ class TestingStepManager:
     def createExecutionSessions(self):
         self.executionSessions = [
             ExecutionSession(
-                id=str(self.testStep.id) + "_session_" + str(sessionN),
+                id=str(self.testStep.id) + "-session-" + str(sessionN),
                 owner=self.testStep.owner,
                 status="running",
                 testingStepId=self.testStep.id,
@@ -153,7 +147,7 @@ class TestingStepManager:
             subProcessCommandQueue = multiprocessing.Queue()
             subProcessResultQueue = multiprocessing.Queue()
             preloadTraceFiles = [file for fileList in self.executionSessionTraceLocalPickleFiles for file in fileList]
-            subProcess = multiprocessing.Process(target=TestingStepManager.predictedActionSubProcess, args=(self.configDir, self.shouldBeRandom, subProcessCommandQueue, subProcessResultQueue, preloadTraceFiles))
+            subProcess = multiprocessing.Process(target=TestingStepManager.predictedActionSubProcess, args=(self.config.serialize(), self.shouldBeRandom, subProcessCommandQueue, subProcessResultQueue, preloadTraceFiles))
             subProcess.start()
             atexit.register(lambda: subProcess.terminate())
 
@@ -168,7 +162,7 @@ class TestingStepManager:
         subProcessCommandQueue = multiprocessing.Queue()
         subProcessResultQueue = multiprocessing.Queue()
         preloadTraceFiles = [file for fileList in self.executionSessionTraceLocalPickleFiles for file in fileList]
-        subProcess = multiprocessing.Process(target=TestingStepManager.predictedActionSubProcess, args=(self.configDir, self.shouldBeRandom, subProcessCommandQueue, subProcessResultQueue, preloadTraceFiles))
+        subProcess = multiprocessing.Process(target=TestingStepManager.predictedActionSubProcess, args=(self.config.serialize(), self.shouldBeRandom, subProcessCommandQueue, subProcessResultQueue, preloadTraceFiles))
         subProcess.start()
         atexit.register(lambda: subProcess.terminate())
 
@@ -230,7 +224,7 @@ class TestingStepManager:
             actions, times = self.agent.nextBestActions(self.step, images, envActionMaps, self.executionSessionTraces, shouldBeRandom=self.shouldBeRandom)
             actionDecisionTime = (datetime.now() - taskStartTime).total_seconds()
 
-            if actionDecisionTime > 15.0:
+            if actionDecisionTime > 10.0:
                 msg = f"Finished agent.nextBestActions after {actionDecisionTime} seconds. Subtimes:"
                 for key, time in times.items():
                     msg += f"\n    {key}: {time:.5f}"
@@ -257,12 +251,6 @@ class TestingStepManager:
 
             validTraces.append(trace)
             validTracePairedExecutionSessions.append(executionSession)
-
-            trace.executionSessionId = str(executionSession.id)
-            trace.testingStepId = str(self.testStep.id)
-            trace.applicationId = str(executionSession.applicationId)
-            trace.testingRunId = str(executionSession.testingRunId)
-            trace.owner = self.testStep.owner
 
             trace.timeForScreenshot = screenshotTime
             trace.timeForActionMapRetrieval = actionMapRetrievalTime
@@ -299,31 +287,16 @@ class TestingStepManager:
 
         del traces
 
-    @autoretry()
-    def savePlainVideoFiles(self):
-        getLogger().info(f"Creating movies for the execution sessions of this testing sequence.")
-
-        moviePlugin = [plugin for plugin in self.environment.plugins if isinstance(plugin, RecordScreenshots)][0]
-        localVideoPaths = [moviePlugin.movieFilePath(executionSession) for executionSession in self.executionSessions]
-
-        kwolaVideoDirectory = self.config.getKwolaUserDataDirectory("videos")
-
-        for executionSession, sessionN, localVideoPath in zip(self.executionSessions, range(len(localVideoPaths)), localVideoPaths):
-            with open(localVideoPath, 'rb') as origFile:
-                filePath = os.path.join(kwolaVideoDirectory, f'{str(executionSession.id)}.mp4')
-                saveKwolaFileData(filePath, origFile.read(), self.config)
-
-
     def shutdownEnvironment(self):
         self.environment.shutdown()
         del self.environment
 
 
     @staticmethod
-    def predictedActionSubProcess(configDir, shouldBeRandom, subProcessCommandQueue, subProcessResultQueue, preloadTraceFiles):
-        setupLocalLogging()
+    def predictedActionSubProcess(config, shouldBeRandom, subProcessCommandQueue, subProcessResultQueue, preloadTraceFiles):
+        setupLocalLogging(config)
 
-        config = KwolaCoreConfiguration(configDir)
+        config = KwolaCoreConfiguration(config)
 
         agent = DeepLearningAgent(config, whichGpu=None)
 
@@ -338,7 +311,7 @@ class TestingStepManager:
 
         def preloadFile(fileName):
             nonlocal loadedPastExecutionTraces
-            fileData = loadKwolaFileData(fileName, config)
+            fileData = config.loadKwolaFileData("execution_traces", fileName)
             loadedPastExecutionTraces[fileName] = pickle.loads(fileData)
 
         preloadStartTime = datetime.now()
@@ -368,7 +341,7 @@ class TestingStepManager:
                     if fileName in loadedPastExecutionTraces:
                         pastExecutionTraces[sessionN].append(loadedPastExecutionTraces[fileName])
                     else:
-                        fileData = loadKwolaFileData(fileName, config)
+                        fileData = config.loadKwolaFileData("execution_traces", fileName)
                         trace = pickle.loads(fileData)
                         pastExecutionTraces[sessionN].append(trace)
                         loadedPastExecutionTraces[fileName] = trace
@@ -462,8 +435,6 @@ class TestingStepManager:
             self.traceSaveExecutor.shutdown()
 
             self.environment.runSessionCompletedHooks()
-
-            self.savePlainVideoFiles()
 
             for session in self.executionSessions:
                 session.endTime = datetime.now()

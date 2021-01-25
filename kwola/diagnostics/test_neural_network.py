@@ -25,8 +25,8 @@ import torch.distributed
 import traceback
 import shutil
 import os
-import sys
 import tempfile
+import sys
 
 def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
     try:
@@ -75,7 +75,7 @@ def testNeuralNetworkAllGPUs(verbose=True):
                                                                     enableRightClickCommand=False
                                                                     )
     try:
-        config = KwolaCoreConfiguration(configDir)
+        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
 
         allSuccess = True
 

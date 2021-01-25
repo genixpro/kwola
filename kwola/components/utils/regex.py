@@ -19,7 +19,7 @@ sharedNonJavascriptCodeUrlRegex = re.compile(
 
 
 sharedHexUuidRegex = re.compile(
-    r'[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{12}',
+    r'[a-f0-9]{8}-?[a-f0-9]{4}-?[a-f0-9]{4}-?[a-f0-9]{4}(-?[a-f0-9]{12})?(-?[a-f0-9]{8})?',
     re.IGNORECASE)
 
 

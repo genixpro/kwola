@@ -24,12 +24,22 @@ from .test_ffmpeg import testFfmpeg
 from .test_neural_network import testNeuralNetworkAllGPUs
 from .test_javascript_rewriting import testJavascriptRewriting
 import multiprocessing
+import os
+import pickle
+import datetime
 
 def testInstallation(verbose=True):
     """
         This function is used to quickly test the Kwola installation prior to running
         a command.
     """
+
+    if os.path.exists(".test_installation_success"):
+        with open(".test_installation_success", "rb") as f:
+            testDate = pickle.load(f)
+
+            if abs((datetime.datetime.now() - testDate).total_seconds()) < 7200:
+                return True
 
     if verbose:
         print("Verifying your Kwola installation ... Please wait a moment")
@@ -57,6 +67,10 @@ def testInstallation(verbose=True):
     if chromedriverWorking and ffmpegWorking and neuralNetworkWorking and jsRewritingWorking:
         if verbose:
             print("Everything in your Kwola installation appears to be working! Excellent.")
+
+        with open(".test_installation_success", "wb") as f:
+            pickle.dump(datetime.datetime.now(), f)
+
         return True
     else:
         if verbose:

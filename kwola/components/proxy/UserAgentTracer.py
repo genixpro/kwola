@@ -22,17 +22,20 @@ import datetime
 from ...config.logger import getLogger
 import os
 import urllib.parse
+import traceback
 
 class UserAgentTracer:
     def __init__(self):
         self.lastUserAgent = ""
 
     def requestheaders(self, flow):
-        if 'User-Agent' in flow.request.headers:
-            self.lastUserAgent = flow.request.headers['User-Agent'].replace(" Kwola", "")
-        elif 'user-agent' in flow.request.headers:
-            self.lastUserAgent = flow.request.headers['user-agent'].replace(" Kwola", "")
-
+        try:
+            if 'User-Agent' in flow.request.headers:
+                self.lastUserAgent = flow.request.headers['User-Agent']
+            elif 'user-agent' in flow.request.headers:
+                self.lastUserAgent = flow.request.headers['user-agent']
+        except Exception as e:
+            getLogger().error(traceback.format_exc())
 
 addons = [
     UserAgentTracer()

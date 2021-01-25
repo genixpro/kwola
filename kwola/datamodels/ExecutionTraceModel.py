@@ -26,6 +26,7 @@ from .CustomIDField import CustomIDField
 from .DiskUtilities import saveObjectToDisk, loadObjectFromDisk
 from mongoengine import *
 import numpy
+import scipy.sparse
 
 class ExecutionTrace(Document):
     meta = {
@@ -120,33 +121,33 @@ class ExecutionTrace(Document):
     lastTrainingRewardLoss = FloatField(default=1.0)
 
     # This is a cache of the uncompressed branch trace
-    cachedUncompressedBranchTrace = DictField(ListField(), default=None)
+    cachedUncompressedBranchTrace = DictField(DynamicField(), default=None)
 
     # Cached cumulative branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedStartCumulativeBranchTrace = DictField(ListField(), default=None)
+    cachedStartCumulativeBranchTrace = DictField(DynamicField(), default=None)
 
     # Cached decaying branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedStartDecayingBranchTrace = DictField(ListField(), default=None)
+    cachedStartDecayingBranchTrace = DictField(DynamicField(), default=None)
 
     # Cached cumulative branch trace vector at the end of this trace, e.g. after the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedEndCumulativeBranchTrace = DictField(ListField(), default=None)
+    cachedEndCumulativeBranchTrace = DictField(DynamicField(), default=None)
 
     # Cached decaying branch trace vector at the end of this trace, e.g. after the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedEndDecayingBranchTrace = DictField(ListField(), default=None)
+    cachedEndDecayingBranchTrace = DictField(DynamicField(), default=None)
 
     # Cached decaying branch trace vector at the start of this trace, e.g. before the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
     # To be clear, this is a 'future' branch trace, so at the start of the trace,
     # the future includes the actions being performed in this frame.
-    cachedStartDecayingFutureBranchTrace = DictField(ListField(), default=None)
+    cachedStartDecayingFutureBranchTrace = DictField(DynamicField(), default=None)
 
     # Cached decaying branch trace vector at the end of this trace, e.g. after the action was ran.
     # This is only "cached" because it can actually be recomputed on the fly
-    cachedEndDecayingFutureBranchTrace = DictField(ListField(), default=None)
+    cachedEndDecayingFutureBranchTrace = DictField(DynamicField(), default=None)
 
     timeForScreenshot = FloatField()
     timeForActionMapRetrieval = FloatField()
@@ -175,7 +176,10 @@ class ExecutionTrace(Document):
             for fileName in value.keys()
         }
 
-        self.cachedUncompressedBranchTrace = {fileName: numpy.copy(data) for fileName, data in value.items()}
+        self.cachedUncompressedBranchTrace = {
+            fileName: self.decompressArray(self.branchTraceCompressed[fileName])
+            for fileName in self.branchTraceCompressed.keys()
+        }
 
     def compressArray(self, array):
         """
@@ -231,8 +235,9 @@ class ExecutionTrace(Document):
             else:
                 print(f"ExecutionTrace.decompressArray Error! Unexpected value of type {type(value)} while decompressing array.")
 
+        newArray = numpy.array(newArray)
 
-        return numpy.array(newArray)
+        return scipy.sparse.csc_matrix(numpy.reshape(newArray, newshape=[newArray.shape[0], 1]), shape=[newArray.shape[0], 1], dtype=numpy.float64)
 
     def saveToDisk(self, config):
         cachedUncompressedBranchTrace = self.cachedUncompressedBranchTrace

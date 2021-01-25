@@ -1,4 +1,3 @@
-from ..utils.file import loadKwolaFileData, saveKwolaFileData
 import copy
 import io
 import numpy
@@ -6,12 +5,21 @@ import os.path
 import pickle
 import pprint
 import torch
+import scipy.sparse
+from ...config.logger import getLogger
 import traceback
 import matplotlib.pyplot as plt
 
 class LineOfCodeSymbolMapping:
     def __init__(self, branchTrace, recentSymbolIndex, coverageSymbolIndex):
-        self.branchTrace = {fileName: numpy.copy(trace) for fileName, trace  in branchTrace.items()}
+        self.branchTrace = {
+            fileName: SymbolMapper.createSparseTraceArray(trace)
+            for fileName, trace in branchTrace.items()
+        }
+
+        for sparseArray in self.branchTrace.values():
+            sparseArray.eliminate_zeros()
+
         self.recentSymbolIndex = recentSymbolIndex
         self.coverageSymbolIndex = coverageSymbolIndex
         self.totalTracesWithSymbol = 0
@@ -39,8 +47,8 @@ class SymbolMapper:
 
         self.allSymbols = []
 
-        self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
-        self.symbolMapPath = os.path.join(config.getKwolaUserDataDirectory("models"), "symbol_mapper")
+        self.modelFileName = "deep_learning_model"
+        self.symbolMapFileName = "symbol_mapper"
 
         self.config = config
 
@@ -55,29 +63,23 @@ class SymbolMapper:
     def load(self):
         # We also need to load the symbol map - this is the mapping between symbol strings
         # and their index values within the embedding structure
-        symbolMapData = loadKwolaFileData(self.symbolMapPath, self.config, printErrorOnFailure=False)
+        symbolMapData = self.config.loadKwolaFileData("models", self.symbolMapFileName, printErrorOnFailure=False)
         if symbolMapData is not None:
             (self.symbolMap, self.knownFiles, self.nextSymbolIndex, self.allSymbols) = pickle.loads(symbolMapData)
 
     def save(self):
         fileData = pickle.dumps((self.symbolMap, self.knownFiles, self.nextSymbolIndex, self.allSymbols), protocol=pickle.HIGHEST_PROTOCOL)
-        saveKwolaFileData(self.symbolMapPath, fileData, self.config)
+        self.config.saveKwolaFileData("models", self.symbolMapFileName, fileData)
 
 
     def findNextLOCSymbolMapping(self, fileName, branchTrace):
-        positiveIndexes = numpy.flatnonzero(branchTrace > 0)
-
-        index = 0
-
-        branchIndex = positiveIndexes[index]
-        locSymbolMapping = self.symbolMap.get((fileName, branchIndex))
-        while locSymbolMapping is None:
-            index += 1
-            if index >= len(positiveIndexes):
-                break
-
-            branchIndex = positiveIndexes[index]
-            locSymbolMapping = self.symbolMap.get((fileName, branchIndex))
+        branchIndex = None
+        locSymbolMapping = None
+        for value, branchIndex in zip(branchTrace.data, branchTrace.indices):
+            if value >= 0:
+                locSymbolMapping = self.symbolMap.get((fileName, branchIndex))
+                if locSymbolMapping is not None:
+                    break
 
         if locSymbolMapping is None:
             return None, None
@@ -86,37 +88,45 @@ class SymbolMapper:
 
     def getAllLOCSymbolMappingsForBranchTrace(self, branchTrace):
         locSymbols = []
-        locBranchIndexes = []
+        locBranchValues = []
         locFileNames = []
         localBranchTraces = {}
+        localBranchTraceValues = {}
 
         for fileName in branchTrace:
-            local = numpy.array(branchTrace[fileName])
-            local = numpy.minimum(numpy.ones_like(local), local)
-
-            localBranchTraces[fileName] = local
+            local = SymbolMapper.createSparseTraceArray(branchTrace[fileName])
+            localBranchTraceValues[fileName] = dict(zip(local.indices, local.data))
+            local = local.minimum(1).maximum(0).astype(numpy.bool).astype(numpy.float64)
+            localBranchTraces[fileName] = set(local.indices)
 
         for fileName in localBranchTraces.keys():
-            while numpy.argwhere(localBranchTraces[fileName] > 0).size > 0:
-                locSymbolMapping, branchIndex = self.findNextLOCSymbolMapping(fileName, localBranchTraces[fileName])
+            while len(localBranchTraces[fileName]):
+                branchIndex = None
+                locSymbolMapping = None
+                while len(localBranchTraces[fileName]):
+                    branchIndex = localBranchTraces[fileName].pop()
+                    locSymbolMapping = self.symbolMap.get((fileName, branchIndex))
+                    if locSymbolMapping is not None:
+                        break
 
                 if locSymbolMapping is not None:
                     for locTraceFileName in locSymbolMapping.branchTrace:
                         if locTraceFileName in localBranchTraces:
-                            localBranchTraces[locTraceFileName] -= locSymbolMapping.branchTrace[locTraceFileName]
+                            localBranchTraces[locTraceFileName].difference_update(locSymbolMapping.branchTrace[locTraceFileName].indices)
+
                     locSymbols.append(locSymbolMapping)
-                    locBranchIndexes.append(branchIndex)
+                    locBranchValues.append(localBranchTraceValues[fileName][branchIndex])
                     locFileNames.append(fileName)
                 else:
                     break
 
-        return locSymbols, locBranchIndexes, locFileNames
+        return locSymbols, locBranchValues, locFileNames
 
     def computeCodePrevalenceScores(self, executionTraces):
         allTraceSymbolCounts = []
 
         for trace in executionTraces:
-            locSymbols, locBranchIndexes, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(trace.branchTrace)
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(trace.branchTrace)
 
             symbolCounts = [locSymbolMapping.totalTracesWithSymbol for locSymbolMapping in locSymbols]
 
@@ -131,13 +141,17 @@ class SymbolMapper:
             if symbolCount == -1:
                 trace.codePrevalenceScore = None
             else:
-                trace.codePrevalenceScore = sortedSymbolCounts.index(symbolCount) / len(sortedSymbolCounts)
+                trace.codePrevalenceScore = float(sortedSymbolCounts.index(symbolCount) / len(sortedSymbolCounts))
 
-    def computeCoverageSymbolsList(self, executionTrace):
+    def computeCoverageSymbolsList(self, executionTrace, beforeOrAfter):
         symbolIndexes = []
         weights = []
 
-        locSymbols, locBranchIndexes, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedStartCumulativeBranchTrace)
+        if beforeOrAfter == "before":
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedStartCumulativeBranchTrace)
+        elif beforeOrAfter == "after":
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedEndCumulativeBranchTrace)
+
         for locSymbolMapping in locSymbols:
             symbolIndexes.append(locSymbolMapping.coverageSymbolIndex)
             weights.append(1.0)
@@ -145,39 +159,51 @@ class SymbolMapper:
         return symbolIndexes, weights
 
 
-    def computeDecayingBranchTraceSymbolsList(self, executionTrace):
+    def computeDecayingBranchTraceSymbolsList(self, executionTrace, beforeOrAfter):
         symbolIndexes = []
         weights = []
 
-        locSymbols, locBranchIndexes, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedStartDecayingBranchTrace)
-        for locSymbolMapping, branchIndex, fileName in zip(locSymbols, locBranchIndexes, locFileNames):
+        locSymbols, locBranchValues, locFileNames = None, None, None
+
+        if beforeOrAfter == "before":
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedStartDecayingBranchTrace)
+        elif beforeOrAfter == "after":
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedEndDecayingBranchTrace)
+
+        for locSymbolMapping, branchValue, fileName in zip(locSymbols, locBranchValues, locFileNames):
             symbolIndexes.append(locSymbolMapping.recentSymbolIndex)
-            weights.append(executionTrace.cachedStartDecayingBranchTrace[fileName][branchIndex])
+            weights.append(float(branchValue))
 
         return symbolIndexes, weights
 
 
-    def computeDecayingFutureBranchTraceSymbolsList(self, executionTrace):
+    def computeDecayingFutureBranchTraceSymbolsList(self, executionTrace, beforeOrAfter):
         symbolIndexes = []
         weights = []
 
-        locSymbols, locBranchIndexes, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedEndDecayingFutureBranchTrace)
-        for locSymbolMapping, branchIndex, fileName in zip(locSymbols, locBranchIndexes, locFileNames):
+        locSymbols, locBranchValues, locFileNames = None, None, None
+
+        if beforeOrAfter == "before":
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedStartDecayingFutureBranchTrace)
+        elif beforeOrAfter == "after":
+            locSymbols, locBranchValues, locFileNames = self.getAllLOCSymbolMappingsForBranchTrace(executionTrace.cachedEndDecayingFutureBranchTrace)
+
+        for locSymbolMapping, branchValue, fileName in zip(locSymbols, locBranchValues, locFileNames):
             symbolIndexes.append(locSymbolMapping.recentSymbolIndex)
-            weights.append(executionTrace.cachedEndDecayingFutureBranchTrace[fileName][branchIndex])
+            weights.append(float(branchValue))
 
         return symbolIndexes, weights
 
 
-    def computeAllSymbolsForTrace(self, executionTrace):
+    def computeAllSymbolsForTrace(self, executionTrace, place):
         allSymbolList = []
         allWeightList = []
 
-        symbols, weights = self.computeCoverageSymbolsList(executionTrace)
+        symbols, weights = self.computeCoverageSymbolsList(executionTrace, place)
         allSymbolList.extend(symbols)
         allWeightList.extend(weights)
 
-        symbols, weights = self.computeDecayingBranchTraceSymbolsList(executionTrace)
+        symbols, weights = self.computeDecayingBranchTraceSymbolsList(executionTrace, place)
         allSymbolList.extend(symbols)
         allWeightList.extend(weights)
 
@@ -198,7 +224,9 @@ class SymbolMapper:
 
 
         """
-        fileData = loadKwolaFileData(self.modelPath, self.config, printErrorOnFailure=False)
+        getLogger().info(f"Assigning symbols for {len(executionTraces)} traces")
+
+        fileData = self.config.loadKwolaFileData("models", self.modelFileName, printErrorOnFailure=False)
         buffer = io.BytesIO(fileData)
 
         # Depending on whether GPU is turned on, we try load the state dict
@@ -218,24 +246,34 @@ class SymbolMapper:
         # If a given symbol is actually used in this set of traces, then the
         # value gets reset back to 0 below.
         for symbol in self.allSymbols:
+            if not hasattr(symbol, 'tracesSinceLastSeen'):
+                symbol.tracesSinceLastSeen = 0
+            if not hasattr(symbol, 'totalTracesWithSymbol'):
+                symbol.totalTracesWithSymbol = 0
+
             symbol.tracesSinceLastSeen += len(executionTraces)
 
         for trace in executionTraces:
-            localBranchTraces = {}
+            localBranchTraceIndexSets = {}
 
             for fileName in trace.branchTrace.keys():
-                branchTrace = numpy.array(trace.branchTrace[fileName])
-                branchTrace = numpy.minimum(numpy.ones_like(branchTrace), branchTrace)
-                localBranchTraces[fileName] = branchTrace
+                local = SymbolMapper.createSparseTraceArray(trace.branchTrace[fileName])
+                local = local.minimum(1).maximum(0).astype(numpy.bool).astype(numpy.float64)
+                localBranchTraceIndexSets[fileName] = set(local.indices)
 
             createNewLOCMap = False
 
             symbolMapFound = True
             while symbolMapFound:
                 symbolMapFound = False
-                for fileName in localBranchTraces.keys():
-                    if numpy.argwhere(localBranchTraces[fileName] > 0).size > 0:
-                        locSymbolMapping, branchIndex = self.findNextLOCSymbolMapping(fileName, localBranchTraces[fileName])
+                for fileName in localBranchTraceIndexSets.keys():
+                    if len(localBranchTraceIndexSets[fileName]) > 0:
+                        branchIndex = None
+                        locSymbolMapping = None
+                        for branchIndex in localBranchTraceIndexSets[fileName]:
+                            locSymbolMapping = self.symbolMap.get((fileName, branchIndex))
+                            if locSymbolMapping is not None:
+                                break
 
                         if locSymbolMapping is not None:
                             symbolMapFound = True
@@ -243,36 +281,43 @@ class SymbolMapper:
                             locSymbolMapping.totalTracesWithSymbol += 1
                             locSymbolMapping.tracesSinceLastSeen = 0
 
-                            negativeBranchTraces = {}
+                            negativeBranchTraceIndexSets = {}
                             for locSymbolMapFileName in locSymbolMapping.branchTrace.keys():
-                                if locSymbolMapFileName not in localBranchTraces:
-                                    localBranchTraces[locSymbolMapFileName] = numpy.zeros_like(locSymbolMapping.branchTrace[locSymbolMapFileName])
+                                if locSymbolMapFileName not in localBranchTraceIndexSets:
+                                    localBranchTraceIndexSets[locSymbolMapFileName] = set()
 
-                                localBranchTraces[locSymbolMapFileName] -= locSymbolMapping.branchTrace[locSymbolMapFileName]
+                                negatives = set(locSymbolMapping.branchTrace[locSymbolMapFileName].indices)
+                                negatives.difference_update(localBranchTraceIndexSets[locSymbolMapFileName])
 
-                                negatives = numpy.minimum(localBranchTraces[locSymbolMapFileName], numpy.zeros_like(localBranchTraces[locSymbolMapFileName]))
+                                localBranchTraceIndexSets[locSymbolMapFileName].difference_update(locSymbolMapping.branchTrace[locSymbolMapFileName].indices)
 
-                                if numpy.count_nonzero(negatives) > 0:
-                                    negativeBranchTraces[locSymbolMapFileName] = negatives
+                                if len(negatives) > 0:
+                                    negativeBranchTraceIndexSets[locSymbolMapFileName] = negatives
 
-                                localBranchTraces[locSymbolMapFileName] = numpy.maximum(localBranchTraces[locSymbolMapFileName], numpy.zeros_like(localBranchTraces[locSymbolMapFileName]))
-
-                            if len(negativeBranchTraces):
+                            if len(negativeBranchTraceIndexSets):
                                 splitSymbolsCount += 1
 
                                 # We have to split the previous line of code symbol mapping into two separate mappings, because those lines of code have been observed
                                 # to occur separately
-                                firstNewSymbolMap = LineOfCodeSymbolMapping({
-                                    locSymbolMapFileName: branchTrace for locSymbolMapFileName, branchTrace in locSymbolMapping.branchTrace.items()
-                                }, None, None)
+                                firstNewSymbolMapDict = {}
+                                for locSymbolMapFileName, branchTrace in locSymbolMapping.branchTrace.items():
+                                    indices = list(set(branchTrace.indices).difference(negativeBranchTraceIndexSets.get(locSymbolMapFileName, set())))
 
-                                for negativeFileName in negativeBranchTraces.keys():
-                                    firstNewSymbolMap.branchTrace[negativeFileName] += negativeBranchTraces[negativeFileName]
-                                    if numpy.count_nonzero(firstNewSymbolMap.branchTrace[negativeFileName]) == 0:
-                                        del firstNewSymbolMap.branchTrace[negativeFileName]
+                                    if len(indices) > 0:
+                                        firstNewSymbolMapDict[locSymbolMapFileName] = scipy.sparse.csc_matrix(
+                                            (numpy.ones(len(indices)),
+                                             (indices, numpy.zeros(len(indices), dtype=numpy.int32))),
+                                            shape=locSymbolMapping.branchTrace[locSymbolMapFileName].shape
+                                        )
+
+                                firstNewSymbolMap = LineOfCodeSymbolMapping(firstNewSymbolMapDict, None, None)
 
                                 secondNewSymbolMap = LineOfCodeSymbolMapping({
-                                    locSymbolMapFileName: numpy.absolute(branchTrace) for locSymbolMapFileName, branchTrace in negativeBranchTraces.items()
+                                    locSymbolMapFileName: scipy.sparse.csc_matrix(
+                                        ( numpy.ones(len(branchTrace)), (list(branchTrace), numpy.zeros(len(branchTrace), dtype=numpy.int32)) ),
+                                        shape=locSymbolMapping.branchTrace[locSymbolMapFileName].shape
+                                    )
+                                    for locSymbolMapFileName, branchTrace in negativeBranchTraceIndexSets.items()
                                 }, None, None)
 
                                 firstNewSymbolMap.totalTracesWithSymbol = locSymbolMapping.totalTracesWithSymbol
@@ -306,11 +351,12 @@ class SymbolMapper:
                 netNewSymbolsCount += 1
                 newSymbolBranchTrace = {}
 
-                for fileName in localBranchTraces.keys():
-                    branchTrace = numpy.maximum(numpy.zeros_like(localBranchTraces[fileName]), localBranchTraces[fileName])
-                    positiveIndexes = numpy.flatnonzero(branchTrace)
-
-                    if len(positiveIndexes) > 0:
+                for fileName in localBranchTraceIndexSets.keys():
+                    if len(localBranchTraceIndexSets[fileName]):
+                        branchTrace = scipy.sparse.csc_matrix(
+                            (numpy.ones(len(localBranchTraceIndexSets[fileName])), (list(localBranchTraceIndexSets[fileName]), numpy.zeros(len(localBranchTraceIndexSets[fileName]), dtype=numpy.int32)) ),
+                            shape=trace.branchTrace[fileName].shape
+                        )
                         newSymbolBranchTrace[fileName] = branchTrace
 
                 newSymbolMap = LineOfCodeSymbolMapping(newSymbolBranchTrace, None, None)
@@ -324,6 +370,9 @@ class SymbolMapper:
         for newLocSymbolMapping, oldLocSymbolMapping in zip(newSymbolMaps, newSymbolMapAssociatedOriginalSymbolMaps):
             nextSymbolIndex = self.nextSymbolIndex
             self.nextSymbolIndex += 1
+
+            if self.nextSymbolIndex >= self.config['symbol_dictionary_size']:
+                break
 
             if oldLocSymbolMapping is not None and oldLocSymbolMapping.recentSymbolIndex is not None:
                 # When splitting a symbol mapping, we base the new tensor on the original tensor, but add in 20% random noise
@@ -339,6 +388,9 @@ class SymbolMapper:
 
             nextSymbolIndex = self.nextSymbolIndex
             self.nextSymbolIndex += 1
+
+            if self.nextSymbolIndex >= self.config['symbol_dictionary_size']:
+                break
 
             if oldLocSymbolMapping is not None and oldLocSymbolMapping.coverageSymbolIndex is not None:
                 # When splitting a symbol mapping, we base the new tensor on the original tensor, but add in 20% random noise
@@ -365,9 +417,11 @@ class SymbolMapper:
 
         buffer = io.BytesIO()
         torch.save(stateDict, buffer)
-        saveKwolaFileData(self.modelPath, buffer.getvalue(), self.config)
+        self.config.saveKwolaFileData("models", self.modelFileName, buffer.getvalue())
 
         self.validateSymbolMaps()
+
+        getLogger().info(f"New: {netNewSymbolsCount}, split: {splitSymbolsCount}")
 
         return netNewSymbolsCount, splitSymbolsCount
 
@@ -396,12 +450,12 @@ class SymbolMapper:
             return
 
         executionTraces[0].cachedStartCumulativeBranchTrace = {
-            name: numpy.zeros_like(numpy.array(value))
+            name: SymbolMapper.createSparseTraceArray(scipy.sparse.csc_matrix(value.shape, dtype=numpy.float64))
             for name, value in executionTraces[0].branchTrace.items()
         }
 
         executionTraces[0].cachedEndCumulativeBranchTrace = {
-            name: numpy.array(value)
+            name: SymbolMapper.createSparseTraceArray(value)
             for name, value in executionTraces[0].branchTrace.items()
         }
 
@@ -414,8 +468,8 @@ class SymbolMapper:
 
                 for fileName in trace.branchTrace.keys():
                     if fileName in trace.cachedEndCumulativeBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedEndCumulativeBranchTrace[fileName]):
-                            trace.cachedEndCumulativeBranchTrace[fileName] += numpy.array(trace.branchTrace[fileName])
+                        if trace.branchTrace[fileName].shape[0] == trace.cachedEndCumulativeBranchTrace[fileName].shape[0]:
+                            trace.cachedEndCumulativeBranchTrace[fileName] += trace.branchTrace[fileName]
                     else:
                         trace.cachedEndCumulativeBranchTrace[fileName] = trace.branchTrace[fileName]
             lastTrace = trace
@@ -426,12 +480,12 @@ class SymbolMapper:
             return
 
         executionTraces[0].cachedStartDecayingBranchTrace = {
-            name: numpy.zeros_like(numpy.array(value))
+            name: SymbolMapper.createSparseTraceArray(scipy.sparse.csc_matrix(value.shape, dtype=numpy.float64))
             for name, value in executionTraces[0].branchTrace.items()
         }
 
         executionTraces[0].cachedEndDecayingBranchTrace = {
-            name: numpy.minimum(numpy.ones_like(value), numpy.array(value)) * self.config['decaying_branch_trace_scale']
+            name: SymbolMapper.createSparseTraceArray(value.minimum(1) * self.config['decaying_branch_trace_scale'])
             for name, value in executionTraces[0].branchTrace.items()
         }
 
@@ -446,11 +500,10 @@ class SymbolMapper:
                     trace.cachedEndDecayingBranchTrace[fileName] *= self.config['decaying_branch_trace_decay_rate']
 
                 for fileName in trace.branchTrace.keys():
-                    branchesExecuted = numpy.minimum(numpy.ones_like(trace.branchTrace[fileName]),
-                                                     numpy.array(trace.branchTrace[fileName]))*self.config['decaying_branch_trace_scale']
+                    branchesExecuted = SymbolMapper.createSparseTraceArray(trace.branchTrace[fileName].minimum(1) * self.config['decaying_branch_trace_scale'])
 
                     if fileName in trace.cachedEndDecayingBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedEndDecayingBranchTrace[fileName]):
+                        if trace.branchTrace[fileName].shape[0] == trace.cachedEndDecayingBranchTrace[fileName].shape[0]:
                             trace.cachedEndDecayingBranchTrace[fileName] += branchesExecuted
                     else:
                         trace.cachedEndDecayingBranchTrace[fileName] = branchesExecuted
@@ -477,12 +530,12 @@ class SymbolMapper:
         reversedExecutionTraces.reverse()
 
         reversedExecutionTraces[0].cachedEndDecayingFutureBranchTrace = {
-            name: numpy.zeros_like(value)
+            name: SymbolMapper.createSparseTraceArray(scipy.sparse.csc_matrix(value.shape, dtype=numpy.float64))
             for name, value in reversedExecutionTraces[0].branchTrace.items()
         }
 
         reversedExecutionTraces[0].cachedStartDecayingFutureBranchTrace = {
-            name: numpy.minimum(numpy.ones_like(value), numpy.array(value)) * self.config['decaying_future_branch_trace_scale']
+            name: SymbolMapper.createSparseTraceArray(value.minimum(1) * self.config['decaying_future_branch_trace_scale'])
             for name, value in reversedExecutionTraces[0].branchTrace.items()
         }
 
@@ -498,14 +551,18 @@ class SymbolMapper:
                     trace.cachedStartDecayingFutureBranchTrace[fileName] *= self.config['decaying_future_execution_trace_decay_rate']
 
                 for fileName in trace.branchTrace.keys():
-                    traceNumpyArray = numpy.array(trace.branchTrace[fileName])
+                    traceNumpyArray = trace.branchTrace[fileName]
 
-                    branchesExecuted = numpy.minimum(numpy.ones_like(traceNumpyArray), traceNumpyArray) * self.config['decaying_future_branch_trace_scale']
+                    branchesExecuted = SymbolMapper.createSparseTraceArray(traceNumpyArray.minimum(numpy.ones_like(traceNumpyArray, dtype=numpy.float64, shape=traceNumpyArray.shape)) * self.config['decaying_future_branch_trace_scale'])
 
                     if fileName in trace.cachedStartDecayingFutureBranchTrace:
-                        if len(trace.branchTrace[fileName]) == len(trace.cachedStartDecayingFutureBranchTrace[fileName]):
+                        if trace.branchTrace[fileName].shape[0] == trace.cachedStartDecayingFutureBranchTrace[fileName].shape[0]:
                             trace.cachedStartDecayingFutureBranchTrace[fileName] += branchesExecuted
                     else:
                         trace.cachedStartDecayingFutureBranchTrace[fileName] = branchesExecuted
 
             nextTrace = trace
+
+    @staticmethod
+    def createSparseTraceArray(a):
+        return scipy.sparse.csc_matrix(a.reshape([a.shape[0], 1]), shape=[a.shape[0], 1], dtype=numpy.float64)

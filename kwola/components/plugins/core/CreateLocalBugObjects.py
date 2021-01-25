@@ -2,14 +2,16 @@ from kwola.config.logger import getLogger
 from kwola.datamodels.BugModel import BugModel
 from kwola.datamodels.CustomIDField import CustomIDField
 from ...utils.debug_video import createDebugVideoSubProcess
-from ...utils.file import loadKwolaFileData, saveKwolaFileData
 from ..base.TestingStepPluginBase import TestingStepPluginBase
+from kwola.components.utils.retry import autoretry
 from datetime import datetime
 import atexit
 import concurrent.futures
 import billiard as multiprocessing
 import os
 import numpy
+import billiard.exceptions
+from kwola.components.utils.deunique import deuniqueString
 
 
 
@@ -61,8 +63,6 @@ class CreateLocalBugObjects(TestingStepPluginBase):
             self.executionSessionTraces[executionSession.id].append(trace)
 
     def testingStepFinished(self, testingStep, executionSessions):
-        kwolaVideoDirectory = self.config.getKwolaUserDataDirectory("videos")
-
         existingBugs = self.loadAllBugs(testingStep)
 
         bugObjects = []
@@ -108,6 +108,7 @@ class CreateLocalBugObjects(TestingStepPluginBase):
             bug.browser = executionSessionsById[executionSessionId].browser
             bug.userAgent = executionSessionsById[executionSessionId].userAgent
             bug.windowSize = executionSessionsById[executionSessionId].windowSize
+            bug.recomputeCanonicalPageUrl()
             tracesForScore = [
                 trace for trace in self.executionSessionTraces[executionSessionId][max(0, stepNumber-5):(stepNumber + 1)]
                 if trace.codePrevalenceScore is not None
@@ -130,22 +131,20 @@ class CreateLocalBugObjects(TestingStepPluginBase):
                 bug.saveToDisk(self.config, overrideSaveFormat="json", overrideCompression=0)
                 bug.saveToDisk(self.config)
 
-                bugTextFile = os.path.join(self.config.getKwolaUserDataDirectory("bugs"), bug.id + ".txt")
+                bugTextFile = bug.id + ".txt"
 
-                saveKwolaFileData(bugTextFile, bytes(bug.generateBugText(), "utf8"), self.config)
+                self.config.saveKwolaFileData("bugs", bugTextFile, bytes(bug.generateBugText(), "utf8"))
 
-                bugVideoFilePath = os.path.join(self.config.getKwolaUserDataDirectory("bugs"), bug.id + ".mp4")
-                origVideoFilePath = os.path.join(kwolaVideoDirectory, f'{str(executionSessionId)}.mp4')
-                origVideoFileData = loadKwolaFileData(origVideoFilePath, self.config)
+                bugVideoFileName = bug.id + ".mp4"
+                origVideoFileName = f'{str(executionSessionId)}.mp4'
+                origVideoFileData = self.config.loadKwolaFileData("videos", origVideoFileName)
 
-                saveKwolaFileData(bugVideoFilePath, origVideoFileData, self.config)
-
-                getLogger().info(f"\n\nBug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
+                self.config.saveKwolaFileData("bugs", bugVideoFileName, origVideoFileData)
 
                 existingBugs.append(bug)
                 bugObjects.append(bug)
 
-                getLogger().info(f"\n\nBug #{errorIndex + 1}:\n{bug.generateBugText()}\n")
+                getLogger().info(f"\n\nBug #{len(bugObjects)}:\n{bug.generateBugText()}\n")
 
         getLogger().info(f"Found {len(self.newErrorsThisTestingStep[testingStep.id])} new unique errors this session.")
 
@@ -194,17 +193,36 @@ class CreateLocalBugObjects(TestingStepPluginBase):
 
         return bugs
 
+    @autoretry(exponentialBackOffBase=3)
     def generateVideoFilesForBugs(self, testingStep, bugObjects):
         pool = multiprocessing.Pool(self.config['video_generation_processes'], maxtasksperchild=1)
         futures = []
         for bugIndex, bug in enumerate(bugObjects):
             future = pool.apply_async(func=createDebugVideoSubProcess, args=(
-                self.config.configurationDirectory, str(bug.executionSessionId), f"{bug.id}_bug", False, False, bug.stepNumber,
+                self.config.serialize(), str(bug.executionSessionId), f"{bug.id}_bug", False, False, bug.stepNumber,
                 bug.stepNumber + 3, "bugs"))
-            futures.append(future)
+            futures.append((bugIndex, bug, future))
 
-        for future in futures:
-            future.get()
+        for bugIndex, bug, future in futures:
+            localFuture = future
+            # for retry in range(5):
+            # try:
+            value = localFuture.get(timeout=self.config['debug_video_generation_timeout'])
+            if value:
+                getLogger().error(value)
+            # break
+            # except billiard.exceptions.WorkerLostError:
+            #     if retry == 4:
+            #         raise
+            #     localFuture = pool.apply_async(func=createDebugVideoSubProcess, args=(
+            #         self.config.serialize(), str(bug.executionSessionId), f"{bug.id}_bug", False, False, bug.stepNumber,
+            #         bug.stepNumber + 3, "bugs"))
+            # except BrokenPipeError:
+            #     if retry == 4:
+            #         raise
+            #     localFuture = pool.apply_async(func=createDebugVideoSubProcess, args=(
+            #         self.config.serialize(), str(bug.executionSessionId), f"{bug.id}_bug", False, False, bug.stepNumber,
+            #         bug.stepNumber + 3, "bugs"))
 
         pool.close()
         pool.join()

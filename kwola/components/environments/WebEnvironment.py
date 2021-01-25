@@ -44,8 +44,10 @@ from ..plugins.core.RecordCursorAtAction import RecordCursorAtAction
 from ..plugins.core.RecordExceptions import RecordExceptions
 from ..plugins.core.RecordLogEntriesAndLogErrors import RecordLogEntriesAndLogErrors
 from ..plugins.core.RecordNetworkErrors import RecordNetworkErrors
+from ..plugins.core.RecordDotNetRPCErrors import RecordDotNetRPCErrors
 from ..plugins.core.RecordPageURLs import RecordPageURLs
 from ..plugins.core.RecordScreenshots import RecordScreenshots
+from ..plugins.core.RecordPageHTML import RecordPageHTML
 
 
 class WebEnvironment:
@@ -59,20 +61,26 @@ class WebEnvironment:
 
         defaultPlugins = [
             RecordCursorAtAction(),
+            RecordPageURLs(),
             RecordExceptions(),
             RecordLogEntriesAndLogErrors(config),
             RecordNetworkErrors(),
-            RecordPageURLs(),
+            RecordDotNetRPCErrors(),
             RecordAllPaths(),
             RecordBranchTrace(),
-            RecordScreenshots()
+            RecordScreenshots(config)
         ]
+
+        if config['enable_record_page_html']:
+            defaultPlugins.append(RecordPageHTML(config))
 
         if plugins is None:
             # Put in the default set up plugins
             self.plugins = defaultPlugins
         else:
             self.plugins = defaultPlugins + plugins
+
+        self.windowSize = windowSize
 
         @autoretry()
         def createSession(sessionNumber):
@@ -83,29 +91,37 @@ class WebEnvironment:
             session.hasBrowserDied = True
             session.browserDeathReason = f"A fatal error occurred during session initialization: {traceback.format_exc()}"
 
-        @autoretry(ignoreFailure=True, onFinalFailure=onInitializeFailure, exponentialBackOffBase=2.5)
+        @autoretry(ignoreFailure=True, onFinalFailure=onInitializeFailure)
         def initializeSession(session):
             session.initialize()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=config['web_session_max_startup_workers']) as executor:
-            sessionCount = config['web_session_parallel_execution_sessions']
-            if sessionLimit is not None:
-                sessionCount = min(sessionLimit, sessionCount)
+        sessionCount = config['web_session_parallel_execution_sessions']
+        if sessionLimit is not None:
+            sessionCount = min(sessionLimit, sessionCount)
 
-            if executionSessions is None:
-                self.executionSessions = [None] * sessionCount
-            else:
-                self.executionSessions = executionSessions
+        if executionSessions is None:
+            self.executionSessions = [None] * sessionCount
+        else:
+            self.executionSessions = executionSessions
 
-            getLogger().info(f"Starting up {sessionCount} parallel browser sessions.")
+        getLogger().info(f"Starting up {sessionCount} parallel browser sessions.")
 
-            self.sessions = [
-                createSession(sessionNumber)
-                for sessionNumber in range(sessionCount)
-            ]
+        self.sessions = []
+        for sessionNumber in range(sessionCount):
+            self.sessions.append(createSession(sessionNumber))
 
-            for sessionNumber in range(sessionCount):
-                executor.submit(initializeSession, self.sessions[sessionNumber])
+        futures = []
+        for sessionNumber in range(sessionCount):
+            future = AsyncThreadFuture(initializeSession, [self.sessions[sessionNumber]], timeout=self.config['web_session_initialization_timeout'])
+            futures.append((future, self.sessions[sessionNumber]))
+
+        for future, session in futures:
+            try:
+                result = future.result()
+            except TimeoutError:
+                session.hasBrowserDied = True
+                session.browserDeathReason = f"A fatal error occurred during session initialization: {traceback.format_exc()}"
+
 
     def shutdown(self):
         for session in self.sessions:
@@ -127,7 +143,7 @@ class WebEnvironment:
                 result = future.result()
             except TimeoutError:
                 getLogger().warning("Warning: timeout exceeded in WebEnvironment.getImages")
-                result = numpy.zeros(shape=[self.config['web_session_height'], self.config['web_session_width'], 3])
+                result = numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
                 session.hasBrowserDied = True
                 session.browserDeathReason = f"The browser timed out while inside WebEnvironment.getImages"
             results.append(result)
@@ -170,12 +186,18 @@ class WebEnvironment:
 
         results = []
         for session, action in zip(self.sessions, actions):
-            future = AsyncThreadFuture(session.runAction, [action], timeout=self.config['testing_run_action_timeout'])
-            resultFutures.append(future)
+            if action is not None:
+                future = AsyncThreadFuture(session.runAction, [action], timeout=self.config['testing_run_action_timeout'])
+                resultFutures.append(future)
+            else:
+                resultFutures.append(None)
 
         for session, future in zip(self.sessions, resultFutures):
             try:
-                result = future.result()
+                if future is not None:
+                    result = future.result()
+                else:
+                    result = (None, {})
             except TimeoutError:
                 getLogger().warning("Warning: timeout exceeded in WebEnvironment.runActions")
                 result = (None, {})
@@ -211,8 +233,9 @@ class WebEnvironment:
 
             timeList = sorted(timeList, key=lambda x: x['max'], reverse=True)
             maxTimes = [(t['key'], t['max']) for t in timeList if t['max'] > 0.5]
+            stdTimes = [(t['key'], t['std']) for t in timeList if t['max'] > 0.5]
 
-            getLogger().warning(f"Time taken to execute the actions in the browser was unusually long: {timeTaken} seconds. Here are the subtimes: {pformat(maxTimes)}")
+            getLogger().warning(f"Time taken to execute the actions in the browser was unusually long: {timeTaken} seconds. Here are the subtimes: {pformat(maxTimes)} and standard deviations: {pformat(stdTimes)}")
 
         return traces
 

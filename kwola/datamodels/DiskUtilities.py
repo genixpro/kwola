@@ -20,7 +20,6 @@
 
 
 from ..config.logger import getLogger, setupLocalLogging
-from .LockedFile import LockedFile
 from datetime import datetime
 import gzip
 import json
@@ -31,7 +30,7 @@ from google.cloud import storage
 import google
 import google.cloud
 from ..components.utils.retry import autoretry
-from ..components.utils.file import getSharedGCSStorageClient
+from ..config.config import getSharedGCSStorageClient
 
 
 def getDataFormatAndCompressionForClass(modelClass, config, overrideSaveFormat=None, overrideCompression=None):
@@ -65,30 +64,22 @@ def getDataFormatAndCompressionForClass(modelClass, config, overrideSaveFormat=N
 def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, overrideCompression=None):
     dataFormat, compression = getDataFormatAndCompressionForClass(type(targetObject), config, overrideSaveFormat, overrideCompression)
 
-    openFileFunc = LockedFile
-    if not config.data_enable_local_file_locking:
-        openFileFunc = open
-
     if dataFormat == "pickle":
         if compression == 0:
-            fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".pickle")
-            with openFileFunc(fileName, 'wb') as f:
-                pickle.dump(targetObject, f, protocol=pickle.HIGHEST_PROTOCOL)
+            fileName = str(targetObject.id) + ".pickle"
+            config.saveKwolaFileData(folder, fileName, pickle.dumps(targetObject, protocol=pickle.HIGHEST_PROTOCOL))
         else:
-            fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".pickle.gz")
-            with openFileFunc(fileName, 'wb') as f:
-                data = pickle.dumps(targetObject, protocol=pickle.HIGHEST_PROTOCOL)
-                f.write(gzip.compress(data, compresslevel=compression))
+            fileName = str(targetObject.id) + ".pickle.gz"
+            data = pickle.dumps(targetObject, protocol=pickle.HIGHEST_PROTOCOL)
+            config.saveKwolaFileData(folder, fileName, gzip.compress(data, compresslevel=compression))
 
     elif dataFormat == "json":
         if compression == 0:
-            fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".json")
-            with openFileFunc(fileName, 'wt') as f:
-                f.write(targetObject.to_json(indent=4))
+            fileName = str(targetObject.id) + ".json"
+            config.saveKwolaFileData(folder, fileName, bytes(targetObject.to_json(indent=4), 'utf8'))
         else:
-            fileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(targetObject.id) + ".json.gz")
-            with openFileFunc(fileName, 'wb') as f:
-                f.write(gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression))
+            fileName = str(targetObject.id) + ".json.gz"
+            config.saveKwolaFileData(folder, fileName, gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression))
 
     elif dataFormat == "mongo":
         targetObject.save()
@@ -103,10 +94,6 @@ def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, over
 
 @autoretry()
 def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True, applicationId=None):
-    openFileFunc = LockedFile
-    if not config.data_enable_local_file_locking:
-        openFileFunc = open
-
     try:
         dataFormat, compression = getDataFormatAndCompressionForClass(modelClass, config)
 
@@ -125,39 +112,39 @@ def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True,
             return object
 
         object = None
-        pickleFileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(id) + ".pickle")
-        gzipPickleFileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(id) + ".pickle.gz")
-        jsonFileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(id) + ".json")
-        gzipJsonFileName = os.path.join(config.getKwolaUserDataDirectory(folder), str(id) + ".json.gz")
+        pickleFileName = str(id) + ".pickle"
+        gzipPickleFileName = str(id) + ".pickle.gz"
+        jsonFileName = str(id) + ".json"
+        gzipJsonFileName = str(id) + ".json.gz"
 
         # We try loading the data using multiple formats - this allows the format to be changed mid run and the data will still load.
         def tryPickle():
             nonlocal object
             if object is None:
-                if os.path.exists(pickleFileName):
-                    with openFileFunc(pickleFileName, 'rb') as f:
-                        object = pickle.load(f)
+                object = config.loadKwolaFileData(folder, pickleFileName, printErrorOnFailure=printErrorOnFailure)
+                if object is not None:
+                    object = pickle.loads(object)
 
         def tryPickleGzip():
             nonlocal object
             if object is None:
-                if os.path.exists(gzipPickleFileName):
-                    with openFileFunc(gzipPickleFileName, 'rb') as f:
-                        object = pickle.loads(gzip.decompress(f.read()))
+                object = config.loadKwolaFileData(folder, gzipPickleFileName, printErrorOnFailure=printErrorOnFailure)
+                if object is not None:
+                    object = pickle.loads(gzip.decompress(object))
 
         def tryJson():
             nonlocal object
             if object is None:
-                if os.path.exists(jsonFileName):
-                    with openFileFunc(jsonFileName, 'rt') as f:
-                        object = modelClass.from_json(f.read())
+                object = config.loadKwolaFileData(folder, jsonFileName, printErrorOnFailure=printErrorOnFailure)
+                if object is not None:
+                    object = modelClass.from_json(object)
 
         def tryJsonGzip():
             nonlocal object
             if object is None:
-                if os.path.exists(gzipJsonFileName):
-                    with openFileFunc(gzipJsonFileName, 'rb') as f:
-                        object = modelClass.from_json(str(gzip.decompress(f.read()), "utf8"))
+                object = config.loadKwolaFileData(folder, gzipJsonFileName, printErrorOnFailure=printErrorOnFailure)
+                if object is not None:
+                    object = modelClass.from_json(str(gzip.decompress(object), "utf8"))
 
         if dataFormat == 'pickle':
             if compression > 0:

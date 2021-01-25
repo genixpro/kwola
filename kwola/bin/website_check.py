@@ -40,7 +40,7 @@ def main():
 
     configDir = getConfigurationDirFromCommandLineArgs()
 
-    config = KwolaCoreConfiguration(configDir)
+    config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
 
     config['web_session_headless'] = False
 

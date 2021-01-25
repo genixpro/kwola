@@ -23,8 +23,8 @@ from ..tasks.TaskProcess import TaskProcess
 from ..components.managers.TestingStepManager import TestingStepManager
 
 
-def runTestingStep(configDir, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None, browser=None, windowSize=None):
-    manager = TestingStepManager(configDir, testingStepId, shouldBeRandom, generateDebugVideo, plugins, browser=browser, windowSize=windowSize)
+def runTestingStep(config, testingStepId, shouldBeRandom=False, generateDebugVideo=False, plugins=None, browser=None, windowSize=None):
+    manager = TestingStepManager(config, testingStepId, shouldBeRandom, generateDebugVideo, plugins, browser=browser, windowSize=windowSize)
     return manager.runTesting()
 
 

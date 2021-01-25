@@ -28,7 +28,7 @@ from ...datamodels.actions.TypeAction import TypeAction
 from ...datamodels.actions.ScrollingAction import ScrollingAction
 from ...datamodels.ExecutionSessionModel import ExecutionSession
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
-from ..utils.file import loadKwolaFileData, saveKwolaFileData
+from ...datamodels.TypingActionConfiguration import TypingActionConfiguration
 from .TraceNet import TraceNet
 from ..utils.video import chooseBestFfmpegVideoCodec
 from pprint import pprint
@@ -44,6 +44,7 @@ import numpy
 import os
 import os.path
 import os.path
+import pkg_resources
 import scipy.signal
 import scipy.special
 import shutil
@@ -63,6 +64,7 @@ import torch.nn as nn
 import torch.optim as optim
 import traceback
 import pickle
+import shutil
 import billiard as multiprocessing
 import copy
 from ..utils.retry import autoretry
@@ -94,8 +96,7 @@ class DeepLearningAgent:
             self.variableWrapperFunc = lambda t, x: t(x).cuda(device=f"cuda:{self.whichGpu}")
 
         # Fetch the folder that we will store the model parameters in
-        self.modelPath = os.path.join(config.getKwolaUserDataDirectory("models"), "deep_learning_model")
-        self.symbolMapPath = os.path.join(config.getKwolaUserDataDirectory("models"), "symbol_map")
+        self.modelFileName = "deep_learning_model"
 
         self.fakeStringGenerator = Faker()
 
@@ -199,11 +200,34 @@ class DeepLearningAgent:
             self.actionProbabilityBoostKeywords.append(["pass"])
             hasTypingAction = True
 
+        # We use this function because it is required to correctly bind the action name and action config to the lambda.
+        # If we just embed the lambda code in the loop below, then all the typing actions will take on the values of the
+        # of the final loop.
+        def generateOldCustomTypingActionLambda(actionName, text):
+            return lambda x, y: TypeAction(type=actionName, x=x, y=y, label=actionName, text=text)
+
+        # Old style custom typing actions, now deprecated
         for customTypingActionIndex, customTypingActionString in enumerate(config['custom_typing_action_strings']):
             actionName = f'typeCustom{customTypingActionIndex}'
-            self.actions[actionName] = lambda x, y: TypeAction(type=actionName, x=x, y=y, label=actionName, text=customTypingActionString)
+            self.actions[actionName] = generateOldCustomTypingActionLambda(actionName, customTypingActionString)
             self.actionBaseWeights.append(config['random_weight_custom_type_action'])
             self.actionProbabilityBoostKeywords.append([])
+            hasTypingAction = True
+
+        # We use this function because it is required to correctly bind the action name and action config to the lambda.
+        # If we just embed the lambda code in the loop below, then all the typing actions will take on the values of the
+        # of the final loop.
+        def generateTypingActionLambda(actionName, actionConfig):
+            return lambda x, y: TypeAction(type=actionName, x=x, y=y, label=actionName, text=actionConfig.generateText())
+
+        # New style custom typing actions
+        for typingActionIndex, typingActionData in enumerate(config['typing_actions']):
+            actionName = f'typeAction{typingActionIndex}'
+            actionConfig = TypingActionConfiguration(**typingActionData)
+
+            self.actions[actionName] = generateTypingActionLambda(actionName, actionConfig)
+            self.actionBaseWeights.append(config['random_weight_custom_type_action'])
+            self.actionProbabilityBoostKeywords.append(actionConfig.biasKeywords.split())
             hasTypingAction = True
 
         # Only add in the random number action if the user configured it
@@ -341,7 +365,9 @@ class DeepLearningAgent:
             "span": config['random_html_element_span_weight'],
             "div": config['random_html_element_div_weight'],
             "canvas": config['random_html_element_canvas_weight'],
-            "other": config['random_html_element_other_weight']
+            "other": config['random_html_element_other_weight'],
+            "html": config['random_html_element_html_weight'],
+            "body": config['random_html_element_body_weight']
         }
 
         # Create the sorted list of action names. This sorted list is used to
@@ -377,8 +403,9 @@ class DeepLearningAgent:
         """
         self.loadSymbolMap()
 
-        fileData = loadKwolaFileData(self.modelPath, self.config, printErrorOnFailure=False)
+        fileData = self.config.loadKwolaFileData("models", self.modelFileName, printErrorOnFailure=False)
         if fileData is None:
+            getLogger().warning("I was unable to load the model from disk. Initializing a fresh model!")
             # Initialize a fresh model if we are unable to load a model from disk.
             self.model.initialize()
         else:
@@ -399,6 +426,8 @@ class DeepLearningAgent:
             if self.targetNetwork is not None:
                 self.targetNetwork.load_state_dict(stateDict)
 
+            getLogger().info("I have successfully loaded the model from disk. ")
+
     @autoretry()
     def save(self, saveName=""):
         """
@@ -415,18 +444,12 @@ class DeepLearningAgent:
         buffer = io.BytesIO()
         torch.save(self.model.state_dict(), buffer)
 
-        saveKwolaFileData(self.modelPath + saveName, buffer.getvalue(), self.config)
-
-        self.saveSymbolMap()
+        self.config.saveKwolaFileData("models", self.modelFileName + saveName, buffer.getvalue())
 
     def loadSymbolMap(self):
         # We also need to load the symbol map - this is the mapping between symbol strings
         # and their index values within the embedding structure
         self.symbolMapper.load()
-
-    @autoretry()
-    def saveSymbolMap(self):
-        self.symbolMapper.save()
 
     def getTorchDevices(self):
         """
@@ -524,7 +547,7 @@ class DeepLearningAgent:
         convertedImageFutures = []
 
         # We try to do each of the images in parallel by using a thread pool executor. In practice only the C++ code
-        # within scikit-image will actually multithread due to Python's stupid global interpreter lock flaw.
+        # within scikit-image will actually multi thread due to Python's stupid global interpreter lock flaw.
         # But that still gives us some gains here.
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for image in images:
@@ -536,8 +559,14 @@ class DeepLearningAgent:
             convertedImageFuture.result() for convertedImageFuture in convertedImageFutures
         ]
 
-        # Merge all the images into a single numpy array.
-        return numpy.array(convertedProcessedImages)
+        try:
+            # Merge all the images into a single numpy array.
+            result = numpy.array(convertedProcessedImages, ndmin=3)
+
+            return result
+        except Exception as e:
+            getLogger().error(f"{str([a.shape for a in convertedProcessedImages])}, {str([a.shape for a in images])}")
+            raise
 
     def createPixelActionMap(self, actionMaps, height, width):
         """
@@ -557,34 +586,7 @@ class DeepLearningAgent:
 
         # Iterate through each of the action maps
         for element in actionMaps:
-            actionTypes = []
-
-            # If the element is clickable, add in the relevant actions (single and double click)
-            if element['canClick']:
-                if "click" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("click"))
-                if "doubleClick" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("doubleClick"))
-
-            # Only a handful of elements have right click enabled, so this is treated seperately
-            # from the regular left click
-            if element['canRightClick']:
-                if "rightClick" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("rightClick"))
-
-            # If the element is an input box, then we have to enable all of the typing actions
-            if element['canType']:
-                for actionName in self.actionsSorted:
-                    if actionName.startswith("type"):
-                        actionTypes.append(self.actionsSorted.index(actionName))
-
-                if "clear" in self.actionsSorted:
-                    actionTypes.append(self.actionsSorted.index("clear"))
-
-            if element['canScroll']:
-                for actionName in self.actionsSorted:
-                    if actionName.startswith("scroll"):
-                        actionTypes.append(self.actionsSorted.index(actionName))
+            actionTypes = self.allowedActionsForActionMap(element)
 
             # Here is the essential part. For each of the actions that are supported by this action
             # element, we paint a rectangle of 1's on the pixel action map. Effectively, the pixel
@@ -605,7 +607,7 @@ class DeepLearningAgent:
     def getActionMapsIntersectingWithAction(self, action, actionMaps):
         """
             This method will filter a list of action maps you provide it, returning only the ones that appear
-            to intersect with the given action.
+            to intersect with the given action and are also capable of responding to that action.
 
             :param action: This should be a kwola.datamodels.actions.BaseAction instance, or one of its derived classes.
             :param actionMaps: This must be a list of kwola.datamodels.ActionMapModel instances.
@@ -614,7 +616,8 @@ class DeepLearningAgent:
         selected = []
         for actionMap in actionMaps:
             if actionMap.left <= action.x <= actionMap.right and actionMap.top <= action.y <= actionMap.bottom:
-                selected.append(actionMap)
+                if actionMap.canRunAction(action):
+                    selected.append(actionMap)
 
         return selected
 
@@ -754,7 +757,7 @@ class DeepLearningAgent:
         symbolWeights = []
         for pastExecutionTraceList in pastExecutionTraces:
             if len(pastExecutionTraceList) > 0:
-                symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(pastExecutionTraceList[-1])
+                symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(pastExecutionTraceList[-1], "after")
             else:
                 symbols = [0]
                 weights = [1]
@@ -783,7 +786,8 @@ class DeepLearningAgent:
         pixelActionMapsBatch = []
         epsilonsPerSample = []
         recentActionsBatch = []
-        actionMapsBatch = []
+        originalActionMapsBatch = []
+        filteredActionMapsBatch = []
         recentActionsCountsBatch = []
 
         modelDownscale = self.config['model_image_downscale_ratio']
@@ -810,10 +814,10 @@ class DeepLearningAgent:
             weightedRandomActionProbability = (float(sampleIndex + 1) / float(len(processedImages))) * 0.25 * (1 + (stepNumber / self.config['testing_sequence_length']))
 
             # Filter the action maps to reduce instances where the algorithm is repeating itself over and over again.
-            sampleActionMaps, sampleActionRecentActionCounts = self.filterActionMapsToPreventRepeatActions(sampleActionMaps, sampleRecentActions, width, height)
+            filteredSampleActionMaps, sampleActionRecentActionCounts = self.filterActionMapsToPreventRepeatActions(sampleActionMaps, sampleRecentActions, width, height)
 
             # Create the pixel action map, which is basically a pixel by pixel representation of what actions are available to the algorithm.
-            pixelActionMap = self.createPixelActionMap(sampleActionMaps, height, width)
+            pixelActionMap = self.createPixelActionMap(filteredSampleActionMaps, height, width)
 
             # Here is where the algorithm decides whether it will use a random action here
             # or make use of the predictions of the neural network
@@ -825,14 +829,15 @@ class DeepLearningAgent:
                 symbolListOffsets.append(len(symbolListBatch))
                 symbolListBatch.extend(sampleSymbolList)
                 symbolWeightBatch.extend(sampleSymbolWeights)
-                actionMapsBatch.append(sampleActionMaps)
+                originalActionMapsBatch.append(sampleActionMaps)
+                filteredActionMapsBatch.append(filteredSampleActionMaps)
                 pixelActionMapsBatch.append(pixelActionMap)
                 recentActionsBatch.append(sampleRecentActions)
                 epsilonsPerSample.append(weightedRandomActionProbability)
                 recentActionsCountsBatch.append(sampleActionRecentActionCounts)
             else:
                 # We will generate a pure random action for this sample. In that case, we just do it, generating the random action
-                actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap)
+                actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, filteredSampleActionMaps, pixelActionMap)
 
                 # Here we make use of the lambda functions that were prepared in the constructor,
                 # which map the action string to a function which creates the action object.
@@ -840,7 +845,7 @@ class DeepLearningAgent:
                 action.source = "random"
                 action.predictedReward = None
                 action.wasRepeatOverride = False
-                action.intersectingActionMaps = self.getActionMapsIntersectingWithAction(action, sampleActionMaps)
+                action.intersectingActionMaps = self.getActionMapsIntersectingWithAction(action, filteredSampleActionMaps)
 
                 # Its probably important to recognize what is happening here. Since we are processing the samples bound for the neural network
                 # separately from the samples that we generate random actions for, we will need some way of reassembling all of the results
@@ -928,10 +933,10 @@ class DeepLearningAgent:
 
             # Now we iterate over all of the data and results for each of the sub environments
             for sampleIndex, sampleEpsilon, sampleActionProbs, sampleAdvantageValues,\
-                sampleRecentActions, sampleActionMaps, sampleActionRecentActionCounts,\
+                sampleRecentActions, filteredSampleActionMaps, originalSampleActionMaps, sampleActionRecentActionCounts,\
                 samplePixelActionMap in zip(batchSampleIndexes, epsilonsPerSample, actionProbabilities, advantageValues,
-                                                                  recentActionsBatch, actionMapsBatch, recentActionsCountsBatch,
-                                                                  pixelActionMapsBatch):
+                                                                  recentActionsBatch, filteredActionMapsBatch, originalActionMapsBatch,
+                                                                  recentActionsCountsBatch, pixelActionMapsBatch):
                 startTime = datetime.now()
 
                 # Here is where we determine whether the algorithm will use the predicted best action from the neural network,
@@ -965,7 +970,7 @@ class DeepLearningAgent:
                     # Here we create an action object using the lambdas. We aren't creating the final action object,
                     # since we do one last check below to ensure this isn't an exact repeat action.
                     potentialAction = self.actions[self.actionsSorted[actionType]](actionX, actionY)
-                    potentialActionMaps = self.getActionMapsIntersectingWithAction(potentialAction, sampleActionMaps)
+                    potentialActionMaps = self.getActionMapsIntersectingWithAction(potentialAction, filteredSampleActionMaps)
 
                     # If the network is predicting the same action as it did within the recent turns list, down to the exact pixels
                     # of the action maps, that usually implies its stuck and its action had no effect on the environment. Switch
@@ -1061,7 +1066,7 @@ class DeepLearningAgent:
                         # This usually occurs when all the probabilities do not add up to 1, generally this only happens when the neural network
                         # isn't trained yet
                         # So instead we just pick an action randomly.
-                        actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, sampleActionMaps, samplePixelActionMap)
+                        actionX, actionY, actionType = self.getRandomAction(sampleActionRecentActionCounts, filteredSampleActionMaps, samplePixelActionMap)
                         source = "random"
                         override = True
 
@@ -1073,7 +1078,7 @@ class DeepLearningAgent:
                 action = self.actions[self.actionsSorted[actionType]](actionX, actionY)
                 action.source = source
                 action.predictedReward = samplePredictedReward
-                action.intersectingActionMaps = self.getActionMapsIntersectingWithAction(action, sampleActionMaps)
+                action.intersectingActionMaps = self.getActionMapsIntersectingWithAction(action, originalSampleActionMaps)
                 action.wasRepeatOverride = override
                 # Here we append both the action and the original sample index. The original sample index
                 # is later used to recover the original ordering of the actions list
@@ -1106,6 +1111,45 @@ class DeepLearningAgent:
         # We return a list composed of just the action objects, one for each sub environment.
         return [action[1] for action in sortedActions], times
 
+    def allowedActionsForActionMap(self, actionMap):
+        actionTypes = []
+
+        # If the element is clickable, add in the relevant actions (single and double click)
+        if actionMap['canClick']:
+            if "click" in self.actionsSorted:
+                actionTypes.append(self.actionsSorted.index("click"))
+            if "doubleClick" in self.actionsSorted:
+                actionTypes.append(self.actionsSorted.index("doubleClick"))
+
+        # Only a handful of elements have right click enabled, so this is treated seperately
+        # from the regular left click
+        if actionMap['canRightClick']:
+            if "rightClick" in self.actionsSorted:
+                actionTypes.append(self.actionsSorted.index("rightClick"))
+
+        # If the element is an input box, then we have to enable all of the typing actions
+        if actionMap['canType']:
+            if not actionMap['inputValue']:
+                if actionMap['attributes']['type'] == 'password':
+                    if 'typePassword' in self.actionsSorted:
+                        actionTypes.append(self.actionsSorted.index('typePassword'))
+                else:
+                    for actionName in self.actionsSorted:
+                        if actionName.startswith("type"):
+                            actionTypes.append(self.actionsSorted.index(actionName))
+            else:
+                if "clear" in self.actionsSorted:
+                    actionTypes.append(self.actionsSorted.index("clear"))
+
+        if actionMap['canScroll']:
+            if actionMap['canScrollUp'] and 'scrollUp' in self.actionsSorted:
+                actionTypes.append(self.actionsSorted.index('scrollUp'))
+
+            if actionMap['canScrollDown'] and 'scrollDown' in self.actionsSorted:
+                actionTypes.append(self.actionsSorted.index('scrollDown'))
+
+        return actionTypes
+
     def getRandomAction(self, sampleActionRecentActionCounts, sampleActionMaps, pixelActionMap):
         """
         This function is used to decide on a totally random action. It uses a somewhat fancy mechanism that involves weighting
@@ -1114,7 +1158,7 @@ class DeepLearningAgent:
         just done using heuristics.
 
         :param sampleActionRecentActionCounts: This is a list of integers, the same size as sampleActionMaps, that contains the count
-                                               of the number of times that action map has been clicked on the recent actions list.
+                                               of the number of times that action map has been clicked in the recent actions list.
                                                Technically speaking, the recent actions list only contains actions since the last
                                                time the neural network discovered new functionality.
         :param sampleActionMaps: This is the list of action maps that are currently available for this environment.
@@ -1127,11 +1171,14 @@ class DeepLearningAgent:
         width = pixelActionMap.shape[2]
         height = pixelActionMap.shape[1]
 
+        nonShrunkWidth = int(width / self.config['model_image_downscale_ratio'])
+        nonShrunkHeight = int(height / self.config['model_image_downscale_ratio'])
+
         # Here we have an extra check just in case there were no action maps to choose our random action from.
         if len(sampleActionMaps) == 0:
             # We just choose x,y coordinates and the action from anywhere on the screen.
-            actionX = random.randint(0, int(width / self.config['model_image_downscale_ratio']))
-            actionY = random.randint(0, int(height / self.config['model_image_downscale_ratio']))
+            actionX = random.randint(0, nonShrunkWidth - 1)
+            actionY = random.randint(0, nonShrunkHeight - 1)
             actionType = random.choice(range(len(self.actionsSorted)))
 
             # We give the user a warning since this situation should be pretty rare. If its coming up a lot,
@@ -1148,6 +1195,9 @@ class DeepLearningAgent:
         # The weights for the action maps are based on what type of HTML element that action map is representing.
         actionMapWeights = numpy.array([self.elementBaseWeights.get(map.elementType, self.elementBaseWeights['other']) for map in sampleActionMaps], dtype=numpy.float64) / (numpy.array(sampleActionRecentActionCounts) + 1)
 
+        # pprint([(map.elementType, map.keywords.replace("null", "").strip()[:30], map.left, map.right, map.top, map.bottom, weight) for map, weight in zip(sampleActionMaps, actionMapWeights)])
+        # print(len(sampleActionMaps), flush=True)
+
         # Scale all the weights so that they add up to 1, becoming probabilities. Then use those probabilities to
         # choose a random action map from the list.
         actionMapProbabilities = actionMapWeights / numpy.sum(actionMapWeights)
@@ -1157,24 +1207,23 @@ class DeepLearningAgent:
         # Here we choose a random x,y coordinate from within the bounds of the action map.
         # We also have to compensate for the image downscaling here, since we need to lookup
         # the possible actions on the downscaled pixel action map
-        actionLeftLimit = max(0, int(min(width - 1, chosenActionMap.left * self.config['model_image_downscale_ratio'])))
-        actionRightLimit = max(0, int(min(width - 1, chosenActionMap.right * self.config['model_image_downscale_ratio'] - 1)))
+        actionLeftLimit = max(0, int(min(nonShrunkWidth - 1, chosenActionMap.left)))
+        actionRightLimit = max(0, int(min(nonShrunkWidth - 1, chosenActionMap.right - 1)))
         if actionRightLimit < actionLeftLimit:
             actionRightLimit = actionLeftLimit
 
-        actionTopLimit = max(0, int(min(height - 1, chosenActionMap.top * self.config['model_image_downscale_ratio'])))
-        actionBottomLimit = max(0, int(min(height - 1, chosenActionMap.bottom * self.config['model_image_downscale_ratio'] - 1)))
+        actionTopLimit = max(0, int(min(nonShrunkHeight - 1, chosenActionMap.top)))
+        actionBottomLimit = max(0, int(min(nonShrunkHeight - 1, chosenActionMap.bottom - 1)))
         if actionBottomLimit < actionTopLimit:
             actionBottomLimit = actionTopLimit
 
         actionX = random.randint(actionLeftLimit, actionRightLimit)
         actionY = random.randint(actionTopLimit, actionBottomLimit)
 
-        # Get the list of actions that are allowed at the chosen coordinates
-        possibleActionsAtPixel = pixelActionMap[:, actionY, actionX]
-        possibleActionIndexes = [actionIndex for actionIndex in range(len(self.actionsSorted)) if possibleActionsAtPixel[actionIndex]]
+        # Get the list of actions that are allowed for this action map
+        possibleActionIndexes = self.allowedActionsForActionMap(chosenActionMap)
         # Create a list containing a weight for each of the possible actions.
-        # The base weights are set in the configuration file and help bias the algroithm towards clicking and away
+        # The base weights are set in the configuration file and help bias the algorithm towards clicking and away
         # from typing, since there are significantly more typing actions then clicking ones
         possibleActionWeights = [self.actionBaseWeights[actionIndex] for actionIndex in possibleActionIndexes]
 
@@ -1339,15 +1388,19 @@ class DeepLearningAgent:
         return discountedFutureRewards
 
     @staticmethod
-    def readVideoFrames(videoFilePath, config):
+    def readVideoFrames(videoFileName, config):
         """
         This method reads a given video file into a numpy array of images that can then be further manipulated
 
-        :param videoFilePath: This is a path to the video file on the local hard drive.
+        :param videoFileName: This is the name of the video file
         :return: A list containing numpy arrays, a single numpy array for each frame in the video.
         """
 
-        data = loadKwolaFileData(videoFilePath, config)
+        data = config.loadKwolaFileData("videos_lossless", videoFileName)
+        if data is None:
+            # This is just here for backwards compatibility for when we didn't have a separate videos_lossless folder
+            data = config.loadKwolaFileData("videos", videoFileName)
+
         localTempDescriptor, localTemp = tempfile.mkstemp()
         with open(localTempDescriptor, 'wb') as f:
             f.write(data)
@@ -1364,6 +1417,7 @@ class DeepLearningAgent:
             if ret:
                 # OpenCV reads everything in BGR format for some reason so flip to RGB
                 rawImage = numpy.flip(rawImage, axis=2)
+                rawImage = numpy.array(rawImage, dtype=numpy.float32) / 255.0
                 rawImages.append(rawImage)
             else:
                 break
@@ -1411,9 +1465,7 @@ class DeepLearningAgent:
             :param cutoffStepNumber: This will cut the video short at the given step number.
             :return: Nothing is returned from this function.
         """
-        videoPath = self.config.getKwolaUserDataDirectory("videos")
-
-        rawImages = DeepLearningAgent.readVideoFrames(os.path.join(videoPath, f"{str(executionSession.id)}.mp4"), self.config)
+        rawImages = DeepLearningAgent.readVideoFrames(f"{str(executionSession.id)}.mp4", self.config)
 
         executionTraces = [ExecutionTrace.loadFromDisk(traceId, self.config, applicationId=executionSession.applicationId) for traceId in executionSession.executionTraces]
 
@@ -1447,8 +1499,6 @@ class DeepLearningAgent:
         discountedFutureRewards = DeepLearningAgent.computeDiscountedFutureRewards(executionTracesFiltered, self.config)
 
         tempScreenshotDirectory = tempfile.mkdtemp()
-
-        lastRawImage = rawImagesFiltered.pop(0)
 
         mpl.use('Agg')
         mpl.rcParams['figure.max_open_warning'] = 1000
@@ -1583,8 +1633,11 @@ class DeepLearningAgent:
         }
 
         sharedMultiprocessingContext = multiprocessing.get_context('spawn')
-        processingPool = sharedMultiprocessingContext.Pool(processes=self.config['debug_video_workers'], initializer=setupLocalLogging)
+        processingPool = sharedMultiprocessingContext.Pool(processes=self.config['debug_video_workers'], initializer=setupLocalLogging, maxtasksperchild=self.config['debug_video_max_frames_per_worker'])
+        
+        outputIdenticalFramesPerTrace = 4
 
+        lastRawImage = rawImagesFiltered.pop(0)
         imageGenerationFutures = []
         for trace, traceIndex, rawImage, networkOutput in zip(executionTracesFiltered, range(len(executionTracesFiltered)), rawImagesFiltered, networkOutputs):
             if trace is not None:
@@ -1595,12 +1648,12 @@ class DeepLearningAgent:
                     hilight = 1 / ((dist/3)+1)
 
                 future = processingPool.apply_async(DeepLearningAgent.createDebugImagesForExecutionTraceStatic,
-                                         args=[self.config.configurationDirectory,
+                                         args=[self.config,
                                                  str(executionSession.id), traceIndex, pickle.dumps(trace, protocol=pickle.HIGHEST_PROTOCOL),
                                                  rawImage, lastRawImage, networkOutput,
                                                  presentRewards, discountedFutureRewards, tempScreenshotDirectory,
                                                  includeNeuralNetworkCharts, includeNetPresentRewardChart, hilight,
-                                                 rewardBounds, uniqueActionColors
+                                                 rewardBounds, uniqueActionColors, outputIdenticalFramesPerTrace
                                                ])
                 imageGenerationFutures.append(future)
 
@@ -1613,7 +1666,7 @@ class DeepLearningAgent:
 
         @autoretry()
         def generateMovie():
-            result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "2", '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '25', '-preset', 'veryslow', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", str(2 * outputIdenticalFramesPerTrace), '-i', 'kwola-screenshot-%05d.png', '-vcodec', chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '25', '-preset', 'veryslow', "debug.mp4"], cwd=tempScreenshotDirectory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0 or not os.path.exists(moviePath):
                 errorMsg = f"Error! Attempted to create a movie using ffmpeg and the process exited with exit-code {result.returncode}. The following output was observed:\n"
                 errorMsg += str(result.stdout, 'utf8') + "\n"
@@ -1640,7 +1693,11 @@ class DeepLearningAgent:
 
         uniqueActions = set([tuple(data) for data in numpy.reshape(numpy.transpose(pixelActionMap), newshape=[-1, len(self.actionsSorted)])])
 
-        symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(trace)
+        if trace.traceNumber > 0:
+            symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(trace, "before")
+        else:
+            symbols = [0]
+            weights = [1]
 
         symbolListBatch = symbols
         symbolWeightBatch = weights
@@ -1675,9 +1732,7 @@ class DeepLearningAgent:
         return outputs
 
     @staticmethod
-    def createDebugImagesForExecutionTraceStatic(configDir, *args, **kwargs):
-        config = KwolaCoreConfiguration(configDir)
-
+    def createDebugImagesForExecutionTraceStatic(config, *args, **kwargs):
         agent = DeepLearningAgent(config, whichGpu=None)
         agent.loadSymbolMap()
         return agent.createDebugImagesForExecutionTrace(*args, **kwargs)
@@ -1687,7 +1742,7 @@ class DeepLearningAgent:
                                            rawImage, lastRawImage, networkOutput,
                                            presentRewards, discountedFutureRewards, tempScreenshotDirectory,
                                            includeNeuralNetworkCharts=True, includeNetPresentRewardChart=True, hilight=0,
-                                           rewardBounds=None, uniqueActionColors=None):
+                                           rewardBounds=None, uniqueActionColors=None, outputIdenticalFramesPerTrace=None):
         """
             This method is used to generate a single debug image for a single execution trace. Technically this method actually
             generates two debug images. The first shows what action is being performed, and the second shows what happened after
@@ -1714,10 +1769,15 @@ class DeepLearningAgent:
                             hilight and 1 being full hilight. Hilighting a frame will change the background color
             :param rewardBounds: A tuple containing the bounds to be used for generating images
             :param uniqueActionColors: A dictionary mapping pixel action map values to various colors
+            :param outputIdenticalFramesPerTrace: The number of video frames that kwola should generate for each trace
 
             :return: None
         """
-        # setupLocalLogging()
+        from ..utils.debug_video import addDebugActionCursorToImage
+        
+        setupLocalLogging(self.config)
+
+        mpl.use('Agg')
 
         try:
             trace = pickle.loads(trace)
@@ -1748,28 +1808,6 @@ class DeepLearningAgent:
 
             presentReward = presentRewards[traceIndex]
             discountedFutureReward = discountedFutureRewards[traceIndex]
-
-            def addDebugCircleToImage(image, trace):
-                targetCircleCoords1 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                           int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_1_radius,
-                                                                           shape=[int(imageWidth + extraWidth),
-                                                                                  int(imageHeight + extraHeight)])
-                targetCircleCoords2 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                           int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_2_radius,
-                                                                           shape=[int(imageWidth + extraWidth),
-                                                                                  int(imageHeight + extraHeight)])
-                targetCircleCoords3 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                           int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_3_radius,
-                                                                           shape=[int(imageWidth + extraWidth),
-                                                                                  int(imageHeight + extraHeight)])
-                targetCircleCoords4 = skimage.draw.circle_perimeter(int(topSize + trace.actionPerformed.y),
-                                                                          int(leftSize + trace.actionPerformed.x), self.config.debug_video_target_circle_4_radius,
-                                                                          shape=[int(imageWidth + extraWidth),
-                                                                                 int(imageHeight + extraHeight)])
-                image[targetCircleCoords1] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
-                image[targetCircleCoords2] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
-                image[targetCircleCoords3] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
-                image[targetCircleCoords4] = [self.config.debug_video_target_circle_color_r, self.config.debug_video_target_circle_color_g, self.config.debug_video_target_circle_color_b]
 
             def addCropViewToImage(image, trace):
                 imageCropWidth = imageWidth * self.config['model_image_downscale_ratio']
@@ -2016,27 +2054,30 @@ class DeepLearningAgent:
                 stamp = networkOutput['stamp']
 
                 for actionIndex, action in enumerate(self.actionsSorted):
-                    actionY = actionProbabilities[0][actionIndex].max(axis=1).argmax(axis=0)
-                    actionX = actionProbabilities[0][actionIndex, actionY].argmax(axis=0)
+                    predictionsNoImpossible = actionProbabilities[0][actionIndex][actionProbabilities[0][actionIndex] > self.config['reward_impossible_action_threshold']]
 
-                    actionX = int(actionX / self.config["model_image_downscale_ratio"])
-                    actionY = int(actionY / self.config["model_image_downscale_ratio"])
+                    if len(predictionsNoImpossible) > 0:
+                        actionY = actionProbabilities[0][actionIndex].max(axis=1).argmax(axis=0)
+                        actionX = actionProbabilities[0][actionIndex, actionY].argmax(axis=0)
 
-                    targetCircleCoords1 = skimage.draw.circle_perimeter(int(topSize + actionY),
-                                                                               int(leftSize + actionX), self.config.debug_video_action_prediction_circle_1_radius,
-                                                                               shape=[int(imageWidth + extraWidth),
-                                                                                      int(imageHeight + extraHeight)])
+                        actionX = int(actionX / self.config["model_image_downscale_ratio"])
+                        actionY = int(actionY / self.config["model_image_downscale_ratio"])
 
-                    targetCircleCoords2 = skimage.draw.circle_perimeter(int(topSize + actionY),
-                                                                              int(leftSize + actionX), self.config.debug_video_action_prediction_circle_2_radius,
-                                                                              shape=[int(imageWidth + extraWidth),
-                                                                                     int(imageHeight + extraHeight)])
-                    plotImage[targetCircleCoords1] = [self.config.debug_video_action_prediction_circle_color_r,
-                                                             self.config.debug_video_action_prediction_circle_color_g,
-                                                             self.config.debug_video_action_prediction_circle_color_b]
-                    plotImage[targetCircleCoords2] = [self.config.debug_video_action_prediction_circle_color_r,
-                                                             self.config.debug_video_action_prediction_circle_color_g,
-                                                             self.config.debug_video_action_prediction_circle_color_b]
+                        targetCircleCoords1 = skimage.draw.circle_perimeter(int(topSize + actionY),
+                                                                                   int(leftSize + actionX), self.config.debug_video_action_prediction_circle_1_radius,
+                                                                                   shape=[int(imageWidth + extraWidth),
+                                                                                          int(imageHeight + extraHeight)])
+
+                        targetCircleCoords2 = skimage.draw.circle_perimeter(int(topSize + actionY),
+                                                                                  int(leftSize + actionX), self.config.debug_video_action_prediction_circle_2_radius,
+                                                                                  shape=[int(imageWidth + extraWidth),
+                                                                                         int(imageHeight + extraHeight)])
+                        plotImage[targetCircleCoords1] = [self.config.debug_video_action_prediction_circle_color_r,
+                                                                 self.config.debug_video_action_prediction_circle_color_g,
+                                                                 self.config.debug_video_action_prediction_circle_color_b]
+                        plotImage[targetCircleCoords2] = [self.config.debug_video_action_prediction_circle_color_r,
+                                                                 self.config.debug_video_action_prediction_circle_color_g,
+                                                                 self.config.debug_video_action_prediction_circle_color_b]
 
                 for actionIndex, action in enumerate(self.actionsSorted):
                     predictionsNoImpossible = presentRewardPredictions[0][actionIndex][presentRewardPredictions[0][actionIndex] > self.config['reward_impossible_action_threshold']]
@@ -2159,46 +2200,51 @@ class DeepLearningAgent:
             extraWidth = leftSize + rightSize
             extraHeight = topSize + bottomSize
 
-            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
+            firstImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
             if hilight > 0:
                 hilightColor = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
-                newImage[:] *= (1.0 - hilight)
-                newImage[:, :] += hilightColor * hilight
+                firstImage[:] *= (1.0 - hilight)
+                firstImage[:, :] += hilightColor * hilight
 
-            newImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage
-            addDebugTextToImage(newImage, trace)
-            addDebugCircleToImage(newImage, trace)
-            addCropViewToImage(newImage, trace)
+            addDebugTextToImage(firstImage, trace)
+            firstImage[topSize:-bottomSize, leftSize:-rightSize] = lastRawImage * 255
+
             if includeNetPresentRewardChart:
-                addBottomRewardChartToImage(newImage, trace)
+                addBottomRewardChartToImage(firstImage, trace)
             if includeNeuralNetworkCharts:
-                addRightSideDebugCharts(newImage, lastRawImage, trace)
+                addRightSideDebugCharts(firstImage, lastRawImage, trace)
 
-            fileName = f"kwola-screenshot-{traceIndex*2:05d}.png"
-            filePath = os.path.join(tempScreenshotDirectory, fileName)
-            skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
+            secondImage = numpy.copy(firstImage)
 
-            newImage = numpy.ones([imageHeight + extraHeight, imageWidth + extraWidth, debugVideoImageChannels]) * 255
-            if hilight > 0:
-                hilightColor = numpy.array([self.config.debug_video_hilight_background_color_r, self.config.debug_video_hilight_background_color_g, self.config.debug_video_hilight_background_color_b])
-                newImage[:] *= (1.0 - hilight)
-                newImage[:, :] += hilightColor * hilight
+            addDebugActionCursorToImage(firstImage, [topSize + trace.actionPerformed.y, leftSize + trace.actionPerformed.x], trace.actionPerformed.type)
+            addCropViewToImage(firstImage, trace)
 
-            addDebugTextToImage(newImage, trace)
+            secondImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage * 255
 
-            newImage[topSize:-bottomSize, leftSize:-rightSize] = rawImage
-            if includeNetPresentRewardChart:
-                addBottomRewardChartToImage(newImage, trace)
+            firstImagePath = None
+            for outputFrame in range(outputIdenticalFramesPerTrace):
+                fileName = f"kwola-screenshot-{traceIndex*2*outputIdenticalFramesPerTrace + outputFrame:05d}.png"
+                filePath = os.path.join(tempScreenshotDirectory, fileName)
+                if firstImagePath is None:
+                    firstImagePath = filePath
+                    skimage.io.imsave(filePath, numpy.array(firstImage, dtype=numpy.uint8))
+                else:
+                    shutil.copy(firstImagePath, filePath)
+
+            firstImagePath = None
+            for outputFrame in range(outputIdenticalFramesPerTrace):
+                fileName = f"kwola-screenshot-{traceIndex*2*outputIdenticalFramesPerTrace + outputFrame + outputIdenticalFramesPerTrace:05d}.png"
+                filePath = os.path.join(tempScreenshotDirectory, fileName)
+                if firstImagePath is None:
+                    firstImagePath = filePath
+                    skimage.io.imsave(filePath, numpy.array(secondImage, dtype=numpy.uint8))
+                else:
+                    shutil.copy(firstImagePath, filePath)
+            
             if includeNeuralNetworkCharts:
-                addRightSideDebugCharts(newImage, lastRawImage, trace)
-
-            fileName = f"kwola-screenshot-{traceIndex*2 + 1:05d}.png"
-            filePath = os.path.join(tempScreenshotDirectory, fileName)
-            skimage.io.imsave(filePath, numpy.array(newImage, dtype=numpy.uint8))
-            if includeNeuralNetworkCharts:
-                getLogger().info(f"Completed debug image {fileName}")
+                getLogger().info(f"Completed debug image for trace {traceIndex}")
         except Exception:
-            getLogger().error(f"Failed to create debug image!\n{traceback.format_exc()}")
+            getLogger().error(f"Failed to create debug image for trace {traceIndex}!\n{traceback.format_exc()}")
 
     def createRewardPixelMask(self, processedImage, action):
         """
@@ -2318,13 +2364,10 @@ class DeepLearningAgent:
             :return: A new numpy array, with the same shape as the input processedImage, but now with data augmentations
                      applied.
         """
-        # Add random noise
-        augmentedImage = processedImage + numpy.random.normal(loc=0, scale=self.config['training_image_gaussian_noise_scale'], size=processedImage.shape)
+        # Currently no augmentations are applied, as all of the augmentations we have tested so far turn out to make
+        # the results worse.
 
-        # Clip the bounds to between 0 and 1
-        augmentedImage = numpy.maximum(numpy.zeros_like(augmentedImage), numpy.minimum(numpy.ones_like(augmentedImage), augmentedImage))
-
-        return augmentedImage
+        return processedImage
 
 
     def prepareBatchesForExecutionSession(self, executionSession):
@@ -2343,8 +2386,8 @@ class DeepLearningAgent:
 
         # In this section, we load the video and all of the execution traces from the disk
         # at the same time.
-        videoPath = os.path.join(self.config.getKwolaUserDataDirectory("videos"), f'{str(executionSession.id)}.mp4')
-        for rawImage, traceId in zip(DeepLearningAgent.readVideoFrames(videoPath, self.config), executionSession.executionTraces):
+        videoFileName = f'{str(executionSession.id)}.mp4'
+        for rawImage, traceId in zip(DeepLearningAgent.readVideoFrames(videoFileName, self.config), executionSession.executionTraces):
             trace = ExecutionTrace.loadFromDisk(traceId, self.config, applicationId=executionSession.applicationId)
             # Occasionally if your doing a lot of R&D and killing the code a lot,
             # the software will save a broken file to disk. When this happens, you
@@ -2373,14 +2416,18 @@ class DeepLearningAgent:
             width = processedImage.shape[2]
             height = processedImage.shape[1]
 
-            # Compute the symbols and weights for the current trace
-            symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(trace)
+            # Compute the symbols and weights based on the prior trace.
+            if trace.traceNumber > 0:
+                symbols, weights = self.symbolMapper.computeAllSymbolsForTrace(trace, "before")
+            else:
+                symbols = [0]
+                weights = [1]
 
             # Compute the decaying future symbols and decaying future weights for the current trace
-            decayingFutureSymbolIndexes, decayingFutureSymbolWeights = self.symbolMapper.computeDecayingFutureBranchTraceSymbolsList(trace)
+            decayingFutureSymbolIndexes, decayingFutureSymbolWeights = self.symbolMapper.computeDecayingFutureBranchTraceSymbolsList(trace, "before")
 
-            # We do the same for the next trace
-            nextSymbols, nextWeights = self.symbolMapper.computeAllSymbolsForTrace(nextTrace)
+            # We do the same for the next trace.
+            nextSymbols, nextWeights = self.symbolMapper.computeAllSymbolsForTrace(nextTrace, "before")
 
             # Create the pixel action maps for both of the traces
             pixelActionMap = self.createPixelActionMap(trace.actionMaps, height, width)
@@ -2589,6 +2636,10 @@ class DeepLearningAgent:
                 cursorsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['cursors']))
             else:
                 cursorsTensor = None
+
+            self.model.train()
+            self.modelParallel.train()
+            self.targetNetwork.eval()
 
             # Run the current images & states through the neural network and get
             # all of the various predictions

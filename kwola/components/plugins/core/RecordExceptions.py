@@ -70,7 +70,7 @@ class RecordExceptions(WebEnvironmentPluginBase):
 
                 getLogger().error(logMsgString)
             else:
-                error = ExceptionError(type="exception", page=executionTrace.startURL, stacktrace=stack, message=msg,
+                error = ExceptionError(type="exception", page=executionTrace.finishURL, stacktrace=stack, message=msg,
                                        source=source, lineNumber=lineno, columnNumber=colno)
                 executionTrace.errorsDetected.append(error)
                 errorHash = error.computeHash()

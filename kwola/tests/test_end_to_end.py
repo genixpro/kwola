@@ -25,8 +25,11 @@ class TestEndToEnd(unittest.TestCase):
                                                                         enableDoubleClickCommand=False,
                                                                         enableRightClickCommand=False
                                                                         )
+
+        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+
         try:
-            TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
+            TrainAgentLoop.trainAgent(config, exitOnFail=True)
             getLogger().info(f"Click-only test for URL {url} has completed successfully")
         except Exception:
             getLogger().error(f"Click-only test for URL {url} has failed. {traceback.format_exc()}")

@@ -19,7 +19,7 @@ class RecordNetworkErrors(WebEnvironmentPluginBase):
 
     def afterActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionExecuted):
         for networkError in proxy.getNetworkErrors():
-            networkError.page = executionTrace.startURL
+            networkError.page = executionTrace.finishURL
             executionTrace.errorsDetected.append(networkError)
             errorHash = networkError.computeHash()
 

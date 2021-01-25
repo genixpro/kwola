@@ -45,7 +45,7 @@ class TaskProcess:
         getLogger().info(f"TaskProcess: Waiting for input from stdin")
         dataStr = sys.stdin.readline()
         data = json.loads(dataStr)
-        getLogger().info(f"Running process with following data:\n{json.dumps(data, indent=4)}")
+        getLogger().info(f"Running process with following data:\n{json.dumps({k:v for k,v in data.items() if k != 'config'}, indent=4)}")
         result = self.targetFunc(**data)
         print(TaskProcess.resultStartString + json.dumps(result) + TaskProcess.resultFinishString, flush=True)
         exit(0)

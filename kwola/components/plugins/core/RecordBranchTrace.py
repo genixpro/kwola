@@ -35,7 +35,7 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
             if fileName in self.cumulativeBranchTrace[executionSession.id]:
                 cumulativeTraceVector = self.cumulativeBranchTrace[executionSession.id][fileName]
 
-                if len(traceVector) == len(cumulativeTraceVector):
+                if traceVector.shape[0] == cumulativeTraceVector.shape[0]:
                     newBranchCount = numpy.sum(traceVector[cumulativeTraceVector == 0])
                     if newBranchCount > 0:
                         newBranches = True
@@ -54,7 +54,7 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
         total = 0
         executedAtleastOnce = 0
         for fileName in self.cumulativeBranchTrace[executionSession.id]:
-            total += len(self.cumulativeBranchTrace[executionSession.id][fileName])
+            total += self.cumulativeBranchTrace[executionSession.id][fileName].shape[0]
             executedAtleastOnce += numpy.count_nonzero(self.cumulativeBranchTrace[executionSession.id][fileName])
 
         # Just an extra check here to cover our ass in case of division by zero
@@ -65,7 +65,7 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
 
         for fileName in filteredBranchTrace.keys():
             if fileName in self.cumulativeBranchTrace[executionSession.id]:
-                if len(branchTrace[fileName]) == len(self.cumulativeBranchTrace[executionSession.id][fileName]):
+                if branchTrace[fileName].shape[0] == self.cumulativeBranchTrace[executionSession.id][fileName].shape[0]:
                     self.cumulativeBranchTrace[executionSession.id][fileName] += branchTrace[fileName]
                 else:
                     getLogger().warning(

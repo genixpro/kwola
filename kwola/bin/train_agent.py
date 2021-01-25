@@ -23,6 +23,7 @@ from ..tasks import TrainAgentLoop
 from .main import getConfigurationDirFromCommandLineArgs
 from ..diagnostics.test_installation import testInstallation
 from ..config.logger import getLogger, setupLocalLogging
+from ..config.config import KwolaCoreConfiguration
 import logging
 
 def main():
@@ -38,4 +39,5 @@ def main():
         exit(1)
 
     configDir = getConfigurationDirFromCommandLineArgs()
-    TrainAgentLoop.trainAgent(configDir)
+    config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+    TrainAgentLoop.trainAgent(config)

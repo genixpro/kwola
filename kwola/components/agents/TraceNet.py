@@ -93,8 +93,7 @@ class TraceNet(torch.nn.Module):
 
         self.stateValueLinear = torch.nn.Sequential(
             torch.nn.Linear(
-                in_features=int(self.config['pixel_features'] * self.config['training_crop_width'] * self.config['training_crop_height'] / 64) \
-                            + self.config['additional_features_stamp_depth_size'] * self.config['additional_features_stamp_edge_size'] * self.config['additional_features_stamp_edge_size'],
+                in_features=int(self.config['additional_features_stamp_depth_size'] * self.config['additional_features_stamp_edge_size'] * self.config['additional_features_stamp_edge_size']),
                 out_features=self.config['layer_5_num_kernels']
             ),
             torch.nn.ELU(),
@@ -309,18 +308,7 @@ class TraceNet(torch.nn.Module):
             outputDict["actionProbabilities"] = actorActionProbs.type_as(mergedPixelFeatureMap)
 
         if data['computeStateValues']:
-            shrunkTrainingWidth = int(self.config['training_crop_width'] / 8)
-            shrunkTrainingHeight = int(self.config['training_crop_width'] / 8)
-
-            centerCropLeft = torch.floor_divide((torch.floor_divide(width, 8) - shrunkTrainingWidth), 2)
-            centerCropTop = torch.floor_divide((torch.floor_divide(height, 8) - shrunkTrainingHeight), 2)
-
-            centerCropRight = torch.add(centerCropLeft, shrunkTrainingWidth)
-            centerCropBottom = torch.add(centerCropTop, shrunkTrainingHeight)
-
-            croppedPixelFeatureMap = pixelFeatureMap[:, :, centerCropTop:centerCropBottom, centerCropLeft:centerCropRight]
-
-            flatFeatureMap = torch.cat([additionalFeaturesWithStep.reshape(shape=[batchSize, -1]), croppedPixelFeatureMap.reshape(shape=[batchSize, -1])], dim=1)
+            flatFeatureMap = additionalFeaturesWithStep.reshape(shape=[batchSize, -1])
 
             stateValuePredictions = self.stateValueLinear(flatFeatureMap)
 

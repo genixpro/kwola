@@ -29,6 +29,7 @@ from ...datamodels.actions.WaitAction import WaitAction
 from ...datamodels.actions.ScrollingAction import ScrollingAction
 from ...datamodels.errors.ExceptionError import ExceptionError
 from ...datamodels.errors.LogError import LogError
+from ...datamodels.errors.DotNetRPCError import DotNetRPCError
 from ...datamodels.ExecutionTraceModel import ExecutionTrace
 from ..plugins.base.ProxyPluginBase import ProxyPluginBase
 from ..plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
@@ -48,7 +49,11 @@ from ..utils.video import chooseBestFfmpegVideoCodec
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 from ..proxy.ProxyProcess import ProxyProcess
 from ..utils.retry import autoretry
+from bs4 import BeautifulSoup
+import urllib.parse
 import cv2
+import base64
+import requests
 import hashlib
 import traceback
 import numpy
@@ -168,8 +173,8 @@ class WebEnvironmentSession:
                 chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
                 chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
 
-            chrome_options.add_argument(f"--disable-gpu")
-            chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
+            # chrome_options.add_argument(f"--disable-gpu")
+            # chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
             chrome_options.add_argument(f"--no-sandbox")
             chrome_options.add_argument(f"--temp-profile")
             chrome_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
@@ -216,14 +221,17 @@ class WebEnvironmentSession:
         else:
             raise ValueError(f"Unsupported value for browser '{self.browser}'. Valid values are 'firefox', 'chrome' or 'edge'.")
 
+        self.updateWindowSize()
+        self.driver.set_script_timeout(self.config['web_session_script_execution_timeout'])
+        self.driver.set_page_load_timeout(self.config['web_session_page_load_timeout'])
+
+    def updateWindowSize(self):
         window_size = self.driver.execute_script("""
             return [window.outerWidth - window.innerWidth + arguments[0],
               window.outerHeight - window.innerHeight + arguments[1]];
             """, self.config['web_session_width'][self.windowSize], self.config['web_session_height'][self.windowSize])
 
         self.driver.set_window_size(*window_size)
-        self.driver.set_script_timeout(30)
-        self.driver.set_page_load_timeout(30)
 
     def fetchTargetWebpage(self):
         try:
@@ -250,7 +258,11 @@ class WebEnvironmentSession:
 
 
     def getHostRoot(self, url):
-        host = str(urllib.parse.urlparse(url).hostname)
+        try:
+            host = str(urllib.parse.urlparse(url).hostname)
+        except ValueError:
+            getLogger().warning(f"Error parsing url {url} to obtain the host domain. Received exception: {traceback.format_exc()}. Return no host domain.")
+            return ""
 
         hostParts = host.split(".")
 
@@ -340,21 +352,21 @@ class WebEnvironmentSession:
         for map in actionMaps:
             found = False
             for matchKeyword in emailKeywords:
-                if matchKeyword in map.keywords and map.elementType == "input":
+                if matchKeyword in map.keywords and map.elementType == "input" and map.canType:
                     emailInputs.append(map)
                     found = True
                     break
             if found:
                 continue
             for matchKeyword in passwordKeywords:
-                if matchKeyword in map.keywords and map.elementType == "input":
+                if matchKeyword in map.keywords and map.elementType == "input" and map.canType:
                     passwordInputs.append(map)
                     found = True
                     break
             if found:
                 continue
             for matchKeyword in loginKeywords:
-                if matchKeyword in map.keywords and map.elementType in ['input', 'button', 'div']:
+                if matchKeyword in map.keywords and map.canClick:
                     loginButtons.append(map)
                     found = True
                     break
@@ -569,149 +581,268 @@ class WebEnvironmentSession:
             if self.hasBrowserDied:
                 return []
 
-            elementActionMaps = self.driver.execute_script("""
+            result = self.driver.execute_script("""
                 function isFunction(functionToCheck) {
                  return functionToCheck && {}.toString.call(functionToCheck) === '[object Function]';
                 }
+                
+                function uniques(a)
+                {
+                    var seen = {};
+                    return a.filter(function(item) {
+                        return seen.hasOwnProperty(item) ? false : (seen[item] = true);
+                    });
+                }
             
                 const actionMaps = [];
-                const domElements = document.querySelectorAll("*");
-                
-                for(let element of domElements)
+                try
                 {
-                    const bounds = element.getBoundingClientRect();
-                   
-                    if (bounds.bottom < 0 || bounds.right < 0)
-                        continue;
-                        
-                    if (bounds.top > window.innerHeight || bounds.left > window.innerWidth)
-                        continue;
+                    const domElements = document.querySelectorAll("*");
                     
-                    const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
-                    const paddingRight = Number(window.getComputedStyle(element, null).getPropertyValue('padding-right').replace("px", ""));
-                    const paddingTop = Number(window.getComputedStyle(element, null).getPropertyValue('padding-top').replace("px", ""));
-                    const paddingBottom = Number(window.getComputedStyle(element, null).getPropertyValue('padding-bottom').replace("px", ""));
-                    
-                    const data = {
-                        canClick: false,
-                        canRightClick: false,
-                        canType: false,
-                        canScroll: false,
-                        left: bounds.left + paddingLeft + 3,
-                        right: bounds.right - paddingRight - 3,
-                        top: bounds.top + paddingTop + 3,
-                        bottom: bounds.bottom - paddingBottom - 3,
-                        width: bounds.width - paddingLeft - paddingRight - 6,
-                        height: bounds.height - paddingTop - paddingBottom - 6,
-                        elementType: element.tagName.toLowerCase(),
-                        keywords: ( element.textContent + " " + element.getAttribute("class") + " " +
-                                    element.getAttribute("name") + " " + element.getAttribute("id") + " " + 
-                                    element.getAttribute("type") + " " + element.getAttribute("placeholder") + " " + 
-                                    element.getAttribute("title") + " " + element.getAttribute("aria-label") + " " + 
-                                    element.getAttribute("aria-placeholder") + " " + element.getAttribute("aria-roledescription")
-                                  ).toLowerCase().replace(/\\s+/g, " ")
-                    };
-                    
-                    if (element.tagName === "A"
-                            || element.tagName === "BUTTON"
-                            || element.tagName === "AREA"
-                            || element.tagName === "AUDIO"
-                            || element.tagName === "VIDEO"
-                            || element.tagName === "OPTION"
-                            || element.tagName === "SELECT")
-                        data.canClick = true;
-                    
-                    if (element.tagName === "INPUT" && !(element.getAttribute("type") === "text" 
-                                                         || element.getAttribute("type") === "" 
-                                                         || element.getAttribute("type") === "password"
-                                                         || element.getAttribute("type") === "email"
-                                                         || element.getAttribute("type") === null 
-                                                         || element.getAttribute("type") === undefined 
-                                                         || !element.getAttribute("type")
-                                                      ))
-                        data.canClick = true;
-                    
-                    const elemStyle = window.getComputedStyle(element);
-                    if (elemStyle.getPropertyValue("cursor") === "pointer")
-                        data.canClick = true;
-                    
-                    if ((elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto" ||
-                        (elemStyle.getPropertyValue("overflow-y") === "visible" && (element.tagName.toLowerCase() === "html" || element.tagName.toLowerCase() === "body") )
-                       )
-                         && element.scrollHeight > element.clientHeight)
-                        data.canScroll = true;
-                    
-                    if (element.tagName === "INPUT" || element.tagName === "TEXTAREA")
-                        data.canType = true;
-                    
-                    if (isFunction(element.onclick) 
-                        || isFunction(element.onauxclick) 
-                        || isFunction(element.onmousedown)
-                        || isFunction(element.onmouseup)
-                        || isFunction(element.ontouchend)
-                        || isFunction(element.ontouchstart))
-                        data.canClick = true;
-                    
-                    if (isFunction(element.oncontextmenu))
-                        data.canRightClick = true;
-                    
-                    if (isFunction(element.onkeydown) 
-                        || isFunction(element.onkeypress) 
-                        || isFunction(element.onkeyup))
-                        data.canType = true;
-                        
-                    if (window.kwolaEvents && window.kwolaEvents.has(element))
+                    for(let element of domElements)
                     {
-                        const knownEvents = window.kwolaEvents.get(element);
-                        if (knownEvents.indexOf("click") != -1)
+                        const bounds = element.getBoundingClientRect();
+                       
+                        if (bounds.bottom < 0 || bounds.right < 0)
+                            continue;
+                            
+                        if (bounds.top > window.innerHeight || bounds.left > window.innerWidth)
+                            continue;
+                        
+                        const paddingLeft = Number(window.getComputedStyle(element, null).getPropertyValue('padding-left').replace("px", ""));
+                        const paddingRight = Number(window.getComputedStyle(element, null).getPropertyValue('padding-right').replace("px", ""));
+                        const paddingTop = Number(window.getComputedStyle(element, null).getPropertyValue('padding-top').replace("px", ""));
+                        const paddingBottom = Number(window.getComputedStyle(element, null).getPropertyValue('padding-bottom').replace("px", ""));
+                        
+                        const data = {
+                            canClick: false,
+                            canRightClick: false,
+                            canType: false,
+                            canScroll: false,
+                            canScrollUp: false,
+                            canScrollDown: false,
+                            left: bounds.left + paddingLeft + 3,
+                            right: bounds.right - paddingRight - 3,
+                            top: bounds.top + paddingTop + 3,
+                            bottom: bounds.bottom - paddingBottom - 3,
+                            width: bounds.width - paddingLeft - paddingRight - 6,
+                            height: bounds.height - paddingTop - paddingBottom - 6,
+                            elementType: element.tagName.toLowerCase(),
+                            keywords: ( element.innerText + " " + element.getAttribute("class") + " " +
+                                        element.getAttribute("name") + " " + element.getAttribute("id") + " " + 
+                                        element.getAttribute("type") + " " + element.getAttribute("placeholder") + " " + 
+                                        element.getAttribute("title") + " " + element.getAttribute("aria-label") + " " + 
+                                        element.getAttribute("aria-placeholder") + " " + element.getAttribute("aria-roledescription")
+                                      ).toLowerCase().replace(/\\s+/g, " ").replace(/null/g, "").replace(/undefined/g, "").trim(),
+                            inputValue: String(element.value).replace(/undefined/g, "").replace("null", ""),
+                            attributes: {
+                                "href": String(element.getAttribute("href")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "src": String(element.getAttribute("src")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "class": String(element.getAttribute("class")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "name": String(element.getAttribute("name")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "id": String(element.getAttribute("id")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "type": String(element.getAttribute("type")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "placeholder": String(element.getAttribute("placeholder")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "title": String(element.getAttribute("title")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "aria-label": String(element.getAttribute("aria-label")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "aria-placeholder": String(element.getAttribute("aria-placeholder")).replace(/null/g, "").replace(/undefined/g, ""),
+                                "aria-roledescription": String(element.getAttribute("aria-roledescription")).replace(/null/g, "").replace(/undefined/g, "")
+                            },
+                            eventHandlers: []
+                        };
+                        
+                        const elementAtPosition = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+                        if (elementAtPosition === null || element.contains(elementAtPosition) || elementAtPosition.contains(element))
                         {
-                            data.canClick = true;
+                            data.isOnTop = true;
                         }
-                        if (knownEvents.indexOf("contextmenu") != -1)
+                        else
                         {
-                            data.canRightClick = true;
+                            data.isOnTop = false;
                         }
-                        if (knownEvents.indexOf("dblclick") != -1)
+    
+                        if (window.kwolaEvents && window.kwolaEvents.has(element))
                         {
-                            data.canClick = true;
+                            data.eventHandlers = uniques(window.kwolaEvents.get(element));
                         }
                         
-                        if (knownEvents.indexOf("mousedown") != -1)
-                        {
+                        if ( element.tagName === "BUTTON"
+                                || element.tagName === "A"
+                                || element.tagName === "AREA"
+                                || element.tagName === "AUDIO"
+                                || element.tagName === "VIDEO"
+                                || element.tagName === "OPTION"
+                                || element.tagName === "SELECT")
                             data.canClick = true;
-                            data.canRightClick = true;
+                            
+                        if (element.tagName === "INPUT" && !(element.getAttribute("type") === "text" 
+                                                             || element.getAttribute("type") === "" 
+                                                             || element.getAttribute("type") === "password"
+                                                             || element.getAttribute("type") === "email"
+                                                             || element.getAttribute("type") === null 
+                                                             || element.getAttribute("type") === undefined 
+                                                             || !element.getAttribute("type")
+                                                          ))
+                            data.canClick = true;
+                        
+                        const elemStyle = window.getComputedStyle(element);
+                        if ((elemStyle.getPropertyValue("overflow-y") === "scroll" || elemStyle.getPropertyValue("overflow-y") === "auto" ||
+                            (elemStyle.getPropertyValue("overflow-y") === "visible" && (element.tagName.toLowerCase() === "html" || element.tagName.toLowerCase() === "body") )
+                           )
+                             && element.scrollHeight > element.clientHeight)
+                            data.canScroll = true;
+
+                            if(element.scrollHeight - element.scrollTop - element.clientHeight >= 5)
+                            {
+                                data.canScrollDown = true;
+                            }
+
+                            if(element.scrollTop > 5)
+                            {
+                                data.canScrollUp = true;
+                            }
+                        
+                        if (element.tagName === "TEXTAREA")
+                            data.canType = true;
+                            
+                        if (element.tagName === "INPUT" && (element.getAttribute("type") === "text" 
+                                                             || element.getAttribute("type") === "" 
+                                                             || element.getAttribute("type") === "password"
+                                                             || element.getAttribute("type") === "email"
+                                                             || element.getAttribute("type") === null 
+                                                             || element.getAttribute("type") === undefined 
+                                                             || !element.getAttribute("type")
+                                                          ))
+                            data.canType = true;
+                            
+                        if (element.contentEditable === 'true' || element.contentEditable === true)
+                            data.canType = true;
+                        
+                        // Determine whether this element is full screen
+                        var fullScreen = false;
+                        if (data.width > (window.innerWidth * 0.80) && data.height > (window.innerHeight * 0.80))
+                        {
+                            fullScreen = true;
                         }
-                        if (knownEvents.indexOf("mouseup") != -1)
+                            
+                        if (element.tagName !== "HTML" && element.tagName !== "BODY" && !fullScreen)
                         {
-                            data.canClick = true;
-                            data.canRightClick = true;
+                            if (isFunction(element.onclick) 
+                                || isFunction(element.onmousedown)
+                                || isFunction(element.onmouseup)
+                                || isFunction(element.onpointerdown)
+                                || isFunction(element.onpointerup)
+                                || isFunction(element.ontouchend)
+                                || isFunction(element.ontouchstart))
+                                data.canClick = true;
+                            
+                            if (isFunction(element.oncontextmenu)
+                                || isFunction(element.onauxclick))
+                                data.canRightClick = true;
+                            
+                            if (isFunction(element.onkeydown) 
+                                || isFunction(element.onkeypress) 
+                                || isFunction(element.onkeyup))
+                                data.canType = true;
+                            
+                            if (data.eventHandlers.indexOf("click") != -1)
+                            {
+                                data.canClick = true;
+                            }
+                            if (data.eventHandlers.indexOf("contextmenu") != -1)
+                            {
+                                data.canRightClick = true;
+                            }
+                            if (data.eventHandlers.indexOf("dblclick") != -1)
+                            {
+                                data.canClick = true;
+                            }
+                            
+                            if (data.eventHandlers.indexOf("mousedown") != -1)
+                            {
+                                data.canClick = true;
+                                data.canRightClick = true;
+                            }
+                            if (data.eventHandlers.indexOf("mouseup") != -1)
+                            {
+                                data.canClick = true;
+                                data.canRightClick = true;
+                            }
+                            
+                            if (data.eventHandlers.indexOf("pointerdown") != -1)
+                            {
+                                data.canClick = true;
+                                data.canRightClick = true;
+                            }
+                            if (data.eventHandlers.indexOf("pointerup") != -1)
+                            {
+                                data.canClick = true;
+                                data.canRightClick = true;
+                            }
+                            
+                            if (data.eventHandlers.indexOf("touchend") != -1)
+                            {
+                                data.canClick = true;
+                            }
+                            if (data.eventHandlers.indexOf("touchstart") != -1)
+                            {
+                                data.canClick = true;
+                            }
+                            
+                            if (data.eventHandlers.indexOf("auxclick") != -1)
+                            {
+                                data.canRightClick = true;
+                            }
+                            
+                            if (data.eventHandlers.indexOf("keydown") != -1)
+                            {
+                                data.canType = true;
+                            }
+                            if (data.eventHandlers.indexOf("keypress") != -1)
+                            {
+                                data.canType = true;
+                            }
+                            if (data.eventHandlers.indexOf("keyup") != -1)
+                            {
+                                data.canType = true;
+                            }
                         }
                         
-                        if (knownEvents.indexOf("keydown") != -1)
-                        {
-                            data.canType = true;
-                        }
-                        if (knownEvents.indexOf("keypress") != -1)
-                        {
-                            data.canType = true;
-                        }
-                        if (knownEvents.indexOf("keyup") != -1)
-                        {
-                            data.canType = true;
-                        }
+                        if (data.width >= 1 && data.height >= 1)
+                            actionMaps.push(data);
                     }
-                    
-                    if (data.width >= 1 && data.height >= 1)
-                        actionMaps.push(data);
-                }
                 
-                return actionMaps;
+                    return [actionMaps, ""];
+                }
+                catch(err)
+                {
+                    return [actionMaps, err.toString()];
+                }
             """)
+
+            if result is None:
+                self.hasBrowserDied = True
+                self.browserDeathReason = f"Got no result when trying to fetch the action maps from the web browser."
+                return []
+
+            elementActionMaps, error = result
+
+            if error:
+                raise RuntimeError(f"Error in the javascript within WebEnvironmentSession.getActionMaps: {error}")
 
             actionMaps = []
 
+            current_page_url = self.driver.current_url
+
             for actionMapData in elementActionMaps:
                 actionMap = ActionMap(**actionMapData)
+
+                if self.config['prevent_offsite_links']:
+                    if actionMap.elementType == 'a':
+                        if actionMap.attributes['href'] and self.isURLOffsite(actionMap.attributes['href'], current_page_url):
+                            # Skip this element because it links to an offsite page.
+                            continue
+
                 # Cut the keywords off at 1024 characters to prevent too much memory / storage usage
                 actionMap.keywords = actionMap.keywords[:self.config['web_session_action_map_max_keyword_size']]
 
@@ -729,16 +860,26 @@ class WebEnvironmentSession:
                         overlapMap.elementType = actionMap.elementType
 
                     overlapMap.canScroll = overlapMap.canScroll or actionMap.canScroll
+                    overlapMap.canScrollUp = overlapMap.canScrollUp or actionMap.canScrollUp
+                    overlapMap.canScrollDown = overlapMap.canScrollDown or actionMap.canScrollDown
                     overlapMap.canClick = overlapMap.canClick or actionMap.canClick
                     overlapMap.canType = overlapMap.canType or actionMap.canType
                     overlapMap.canRightClick = overlapMap.canRightClick or actionMap.canRightClick
                     overlapMap.keywords = overlapMap.keywords + " " + actionMap.keywords
+                    overlapMap.inputValue = overlapMap.inputValue + " " + actionMap.inputValue
+                    overlapMap.isOnTop = overlapMap.isOnTop or actionMap.isOnTop
+
+                    attributeKeys = set(overlapMap.attributes.keys()).union(set(actionMap.attributes.keys()))
+                    for key in attributeKeys:
+                        overlapMap.attributes[key] = (overlapMap.attributes.get(key, "") + " " + actionMap.attributes.get(key, "")).strip()
+
+                    overlapMap.eventHandlers = list(set(overlapMap.eventHandlers + actionMap.eventHandlers))
                 else:
                     actionMaps.append(actionMap)
 
             filteredActionMaps = []
             for actionMap in actionMaps:
-                if actionMap.canType or actionMap.canClick or actionMap.canRightClick or actionMap.canScroll:
+                if ((actionMap.canType or actionMap.canClick or actionMap.canRightClick) and actionMap.isOnTop) or actionMap.canScroll:
                     filteredActionMaps.append(actionMap)
 
             return filteredActionMaps
@@ -768,12 +909,12 @@ class WebEnvironmentSession:
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 if action.times == 1:
                     if self.config['web_session_print_every_action']:
-                        getLogger().info(f"Clicking {action.x} {action.y} from {action.source}")
+                        getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
                     actionChain.click(on_element=element)
                     actionChain.pause(self.config.web_session_perform_action_wait_time)
                 elif action.times == 2:
                     if self.config['web_session_print_every_action']:
-                        getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source}")
+                        getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source} as {action.type}")
                     actionChain.double_click(on_element=element)
                     actionChain.pause(self.config.web_session_perform_action_wait_time)
 
@@ -781,7 +922,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"Right Clicking {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Right Clicking {action.x} {action.y} from {action.source} as {action.type}")
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.context_click(on_element=element)
@@ -790,7 +931,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"Typing {action.text} at {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Typing {action.text} at {action.x} {action.y} from {action.source} as {action.type}")
                 actionChain = webdriver.common.action_chains.ActionChains(self.driver)
                 actionChain.move_to_element_with_offset(element, 0, 0)
                 actionChain.click(on_element=element)
@@ -801,7 +942,7 @@ class WebEnvironmentSession:
 
             if isinstance(action, ScrollingAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"Scrolling {action.direction} at {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Scrolling {action.direction} at {action.x} {action.y} from {action.source} as {action.type}")
 
                 if action.direction == "down":
                     self.driver.execute_script("window.scrollTo(0, window.scrollY + 400)")
@@ -811,11 +952,11 @@ class WebEnvironmentSession:
 
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
-                    getLogger().info(f"Clearing field at {action.x} {action.y} from {action.source}")
+                    getLogger().info(f"Clearing field at {action.x} {action.y} from {action.source} as {action.type}")
                 element.clear()
 
             if isinstance(action, WaitAction):
-                getLogger().info(f"Waiting for {action.time} at {action.x} {action.y} from {action.source}")
+                getLogger().info(f"Waiting for {action.time} at {action.x} {action.y} from {action.source} as {action.type}")
                 time.sleep(action.time)
 
         except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
@@ -863,6 +1004,41 @@ class WebEnvironmentSession:
 
         return success, networkWaitTime
 
+    def normalizeLinkURL(self, url, currentPageURL):
+        try:
+            parsed = urllib.parse.urlparse(url)
+
+            if not parsed.scheme or not parsed.netloc or not parsed.path:
+                url = urllib.parse.urljoin(currentPageURL, url)
+
+            return url
+        except ValueError as e:
+            getLogger().warning(f"Error normalizing link url {url}. Received exception: {traceback.format_exc()}. Returning link unnormalized.")
+            return url
+
+    def isURLOffsite(self, url, currentPageURL=None):
+        if currentPageURL is None:
+            currentPageURL = url
+
+        url = self.normalizeLinkURL(url, currentPageURL)
+
+        offsite = False
+        if url != "data:," and self.getHostRoot(url) != self.targetHostRoot:
+            offsite = True
+
+        whitelistMatched = False
+        if len(self.urlWhitelistRegexes) == 0:
+            whitelistMatched = True
+
+        for regex in self.urlWhitelistRegexes:
+            if regex.search(url) is not None:
+                whitelistMatched = True
+
+        if not whitelistMatched:
+            offsite = True
+
+        return offsite
+
     def checkOffsite(self, priorURL):
         try:
             # If the browser went off site and off site links are disabled, then we send it back to the url it started from
@@ -871,20 +1047,7 @@ class WebEnvironmentSession:
 
                 current_url = self.driver.current_url
 
-                offsite = False
-                if current_url != "data:," and self.getHostRoot(current_url) != self.targetHostRoot:
-                    offsite = True
-
-                whitelistMatched = False
-                if len(self.urlWhitelistRegexes) == 0:
-                    whitelistMatched = True
-
-                for regex in self.urlWhitelistRegexes:
-                    if regex.search(current_url) is not None:
-                        whitelistMatched = True
-
-                if not whitelistMatched:
-                    offsite = True
+                offsite = self.isURLOffsite(current_url)
 
                 if offsite:
                     getLogger().info(f"The browser session went offsite (to {current_url}) and going offsite is disabled. The browser is being reset back to the URL it was at prior to this action: {priorURL}")
@@ -906,7 +1069,7 @@ class WebEnvironmentSession:
                 loadFailure = True
 
             if loadFailure:
-                getLogger().warning(f"The browser session needed to be reset back to the origin url {self.targetURL}")
+                getLogger().warning(f"The browser session needed to be reset back to the prior url {priorURL} from the current url {self.driver.current_url}")
                 self.driver.get(priorURL)
                 self.waitUntilNoNetworkActivity()
         except selenium.common.exceptions.TimeoutException:
@@ -923,7 +1086,7 @@ class WebEnvironmentSession:
             actionExecutionTimes['checkOffsite-first-networkWaitTime'] = networkWaitTime
             actionExecutionTimes['checkOffsite-first-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
 
-            executionTrace = ExecutionTrace(id=str(self.executionSession.id) + "_trace_" + str(self.traceNumber))
+            executionTrace = ExecutionTrace(id=str(self.executionSession.id) + "-trace-" + str(self.traceNumber))
             executionTrace.actionExecutionTimes = actionExecutionTimes
             executionTrace.time = datetime.now()
             executionTrace.actionPerformed = action
@@ -942,6 +1105,11 @@ class WebEnvironmentSession:
             executionTrace.browser = self.browser
             executionTrace.userAgent = self.proxy.getUserAgent()
             executionTrace.windowSize = self.windowSize
+            executionTrace.executionSessionId = str(self.executionSession.id)
+            executionTrace.testingStepId = str(self.executionSession.testingStepId)
+            executionTrace.applicationId = str(self.executionSession.applicationId)
+            executionTrace.testingRunId = str(self.executionSession.testingRunId)
+            executionTrace.owner = self.executionSession.owner
 
             # Set the execution trace id in the proxy. The proxy will add on headers
             # to all http requests sent by the browser with information identifying
@@ -970,6 +1138,8 @@ class WebEnvironmentSession:
             self.checkLoadFailure(priorURL=executionTrace.startURL)
             actionExecutionTimes['checkLoadFailure'] = (datetime.now() - startTime).total_seconds()
 
+            self.hideInputCaret()
+
             for plugin in self.plugins:
                 startTime = datetime.now()
                 plugin.afterActionRuns(self.driver, self.proxy, self.executionSession, executionTrace, action)
@@ -997,14 +1167,38 @@ class WebEnvironmentSession:
         rect = self.driver.get_window_rect()
         return rect
 
+    def hideInputCaret(self):
+        """
+        This method is used to hide the blinking caret that is usually on text input elements when they are active.
+
+        This is to help ensure that screenshots stay consistent rather then being affected by whether the blinking caret is showing
+        on a particular frame or not.
+        """
+
+        # We remove the blinking caret because it results in inconsistent screenshots depending on whether you took the screenshot
+        # while the caret is visible v.s. invisible.
+        self.driver.execute_script("""
+            if (document.activeElement)
+            {
+                document.activeElement.style.caretColor = "transparent";
+            }
+        """)
+
     def getImage(self):
         try:
+            image = numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
+
             if self.hasBrowserDied:
-                return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
+                return image
 
-            image = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
+            self.hideInputCaret()
 
-            image = numpy.flip(image[:, :, :3], axis=2)  # OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
+            decoded = cv2.imdecode(numpy.frombuffer(self.driver.get_screenshot_as_png(), numpy.uint8), -1)
+            decoded = numpy.flip(decoded[:, :, :3], axis=2)  # OpenCV always reads things in BGR for some reason, so we have to flip into RGB ordering
+
+            image[0:decoded.shape[0], 0:decoded.shape[1], :] = decoded
+
+            image /= 255.0 # Rescale the image so that it falls between 0 and 255
 
             return image
         except urllib3.exceptions.MaxRetryError:
@@ -1031,3 +1225,47 @@ class WebEnvironmentSession:
         for plugin in self.plugins:
             plugin.browserSessionFinished(self.driver, self.proxy, self.executionSession)
 
+
+    def createReproductionActionFromOriginal(self, action):
+        actionMaps = self.getActionMaps()
+
+        closestOriginal = None
+        closestCurrent = None
+        closestKeywordSimilarity = None
+        closestCornerDist = None
+        for currentActionMap in actionMaps:
+            if not currentActionMap.canRunAction(action):
+                continue
+
+            keywords = set(currentActionMap.keywords.split())
+            for originalActionMap in action.intersectingActionMaps:
+                if not originalActionMap.canRunAction(action):
+                    continue
+
+                originalKeywords = set(originalActionMap.keywords.split())
+                similarity = len(keywords.intersection(originalKeywords)) / max(1, len(keywords.union(originalKeywords)))
+                cornerDist = abs(currentActionMap.left - originalActionMap.left) + \
+                             abs(currentActionMap.right - originalActionMap.right) + \
+                             abs(currentActionMap.top - originalActionMap.top) + \
+                             abs(currentActionMap.bottom - originalActionMap.bottom)
+
+                if closestCurrent is None or similarity > closestKeywordSimilarity:
+                    closestKeywordSimilarity = similarity
+                    closestCornerDist = cornerDist
+                    closestCurrent = currentActionMap
+                    closestOriginal = originalActionMap
+                elif similarity == closestKeywordSimilarity and cornerDist < closestCornerDist:
+                    closestKeywordSimilarity = similarity
+                    closestCornerDist = cornerDist
+                    closestCurrent = currentActionMap
+                    closestOriginal = originalActionMap
+
+        if closestOriginal is not None:
+            # print("FOUND!", closestOriginal.to_json(), closestCurrent.to_json(), closestKeywordSimilarity, closestCornerDist)
+            action = copy.deepcopy(action)
+            action.x += closestCurrent.left - closestOriginal.left
+            action.y += closestCurrent.top - closestOriginal.top
+        # else:
+        #     print(action.to_json())
+
+        return action

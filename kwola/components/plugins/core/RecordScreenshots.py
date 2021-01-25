@@ -8,7 +8,8 @@ from ...utils.video import chooseBestFfmpegVideoCodec
 from ...utils.retry import autoretry
 
 class RecordScreenshots(WebEnvironmentPluginBase):
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self.lastScreenshotHash = {}
         self.frameNumber = {}
         self.screenshotDirectory = {}
@@ -50,9 +51,20 @@ class RecordScreenshots(WebEnvironmentPluginBase):
 
         self.frameNumber[executionSession.id] += 1
 
+    @autoretry()
     def browserSessionFinished(self, webDriver, proxy, executionSession):
-        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "3", '-i', 'kwola-screenshot-%05d.png', '-vcodec',
-                                 chooseBestFfmpegVideoCodec(), '-pix_fmt', 'yuv420p', '-crf', '15', '-preset',
+        getLogger().info(f"Creating movie file for the execution session {executionSession.id}")
+        self.encodeAndSaveVideo(executionSession, "videos", False)
+        self.encodeAndSaveVideo(executionSession, "videos_lossless", True)
+
+
+    def encodeAndSaveVideo(self, executionSession, folder, lossless):
+        codec = chooseBestFfmpegVideoCodec(losslessPreferred=lossless)
+        crfRating = 25
+        if lossless:
+            crfRating = 0
+        result = subprocess.run(['ffmpeg', '-f', 'image2', "-r", "1", '-i', 'kwola-screenshot-%05d.png', '-vcodec',
+                                 codec, '-crf', str(crfRating), '-preset',
                                  'veryslow', self.movieFileName(executionSession)],
                                 cwd=self.screenshotDirectory[executionSession.id], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -61,6 +73,17 @@ class RecordScreenshots(WebEnvironmentPluginBase):
             errorMsg += str(result.stdout, 'utf8') + "\n"
             errorMsg += str(result.stderr, 'utf8') + "\n"
             getLogger().error(errorMsg)
+            raise RuntimeError(errorMsg)
+        else:
+            localVideoPath = self.movieFilePath(executionSession)
+
+            with open(localVideoPath, 'rb') as f:
+                videoData = f.read()
+
+            fileName = f'{str(executionSession.id)}.mp4'
+            self.config.saveKwolaFileData(folder, fileName, videoData)
+
+            os.unlink(localVideoPath)
 
     @autoretry()
     def addScreenshot(self, webDriver, executionSession):

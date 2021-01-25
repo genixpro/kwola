@@ -24,8 +24,11 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         custom_typing_action_strings=[],
                                                                         enableScrolling=True
                                                                         )
+
+        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+
         try:
-            TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
+            TrainAgentLoop.trainAgent(config, exitOnFail=True)
         finally:
             shutil.rmtree(configDir)
 
@@ -50,7 +53,10 @@ class TestTrainingLoop(unittest.TestCase):
                                                                             'b_action'
                                                                         ]
                                                                         )
+
+        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+
         try:
-            TrainAgentLoop.trainAgent(configDir, exitOnFail=True)
+            TrainAgentLoop.trainAgent(config, exitOnFail=True)
         finally:
             shutil.rmtree(configDir)
