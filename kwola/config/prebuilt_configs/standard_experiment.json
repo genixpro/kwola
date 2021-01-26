@@ -15,7 +15,7 @@
   "chart_generate_cumulative_coverage_frequency": 25,
   "chart_generation_dataload_workers": 16,
   "chart_generation_frequency": 5,
-  "chart_generation_workers": 4,
+  "chart_generation_workers": 1,
   "custom_typing_action_strings": [],
   "data_compress_level": {
     "default": 0

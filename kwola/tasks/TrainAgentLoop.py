@@ -69,6 +69,9 @@ def getAvailableBrowsers(config):
 
                 if not os.path.exists(chromeCmd):
                     chromeCmd = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            if sys.platform == "darwin":
+                chromeCmd = "open /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome -F -n -g --args"
+
             result3 = subprocess.run([chromeCmd, '--headless', '--version'], stdout=subprocess.PIPE)
         except FileNotFoundError:
             result3 = None
