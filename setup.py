@@ -54,7 +54,7 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.1.51',
+    version='0.1.52',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
@@ -87,6 +87,7 @@ setup(
             'kwola_run_train_step = kwola.bin.run_train_step:main',
             'kwola_run_test_step = kwola.bin.run_test_step:main',
             'kwola_rapid_local_test_suite = kwola.bin.rapid_local_test_suite:main',
+            'kwola_reset = kwola.bin.reset:main',
             'kwola_full_internal_test_suite = kwola.bin.full_internal_test_suite:main',
             'kwola_test_chromedriver = kwola.bin.test_chromedriver:main',
             'kwola_test_javascript_rewriting = kwola.bin.test_javascript_rewriting:main',
@@ -94,7 +95,11 @@ setup(
             'kwola_test_neural_network = kwola.bin.test_neural_network:main',
             'kwola_test_installation = kwola.bin.test_installation:main',
             'kwola_install_proxy_cert = kwola.bin.install_proxy_cert:main',
-            'kwola_website_check = kwola.bin.website_check:main'
+            'kwola_website_check = kwola.bin.website_check:main',
+            'kwola_regenerate_charts = kwola.bin.regenerate_charts:main',
+            'kwola_run_multiple = kwola.bin.run_multiple:main',
+            'kwola_create_kros3_experiment = kwola.bin.create_kros3_experiment:main',
+            'kwola_benchmark_neural_network = kwola.bin.benchmark_neural_network:main'
         ]
     }
 )
