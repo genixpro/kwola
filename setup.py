@@ -48,12 +48,13 @@ requirements = [
     "google-cloud-storage",
     "Faker",
     "giturlparse",
-    "edlib"
+    "edlib",
+    "python-snappy"
 ]
 
 setup(
     name='kwola',
-    version='0.1.49',
+    version='0.1.50',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
