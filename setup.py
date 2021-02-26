@@ -54,7 +54,7 @@ requirements = [
 
 setup(
     name='kwola',
-    version='0.1.50',
+    version='0.1.51',
     description='Kwola makes an AI powered tool for finding bugs in software',
     long_description=open("README.md", "rt").read(),
     classifiers=[
@@ -72,7 +72,9 @@ setup(
     },
     package_data={
         'kwola': [
-            'config/prebuilt_configs/*.json'
+            'config/prebuilt_configs/*.json',
+            'images/*.svg',
+            'images/*.png'
         ]
     },
     python_requires='>=3.6',
