@@ -112,6 +112,8 @@ class ExecutionTrace(Document):
 
     codePrevalenceScore = FloatField()
 
+    codePrevalenceLogNormalizedZScore = FloatField()
+
     # This field is stores the execution trace for this round.
     # The dictionary maps file names to lists which then contain the line execution counts for that file
     # It is transparently compressed and decompressed on the fly
@@ -149,6 +151,14 @@ class ExecutionTrace(Document):
     # This is only "cached" because it can actually be recomputed on the fly
     cachedEndDecayingFutureBranchTrace = DictField(DynamicField(), default=None)
 
+    # The cached recent actions image is an image that shows exactly where specific actions were performed
+    # on the screen
+    cachedStartingRecentActionsImage = DynamicField(default=None)
+
+    # The cached recent actions image is an image that shows exactly where specific actions were performed
+    # on the screen
+    cachedEndingRecentActionsImage = DynamicField(default=None)
+
     timeForScreenshot = FloatField()
     timeForActionMapRetrieval = FloatField()
     timeForActionDecision = FloatField()
@@ -156,6 +166,17 @@ class ExecutionTrace(Document):
     timeForMiscellaneous = FloatField()
 
     actionExecutionTimes = DictField(FloatField())
+
+    # This records the application provided cumulative fitness value, indicating how well the model is doing on
+    # on this particular execution trace. This is often used in Kwola's internal experiments, which have their own
+    # internal measurements of the how good kwola's result was. This value is recorded prior to the action for this
+    # executions trace
+    startApplicationProvidedCumulativeFitness = FloatField()
+
+    # This records the application provided cumulative fitness value, indicating how well the model is doing on
+    # on this particular execution trace. This is often used in Kwola's internal experiments, which have their own
+    # internal measurements of the how good kwola's result was. This value is recorded after this execution trace.
+    endApplicationProvidedCumulativeFitness = FloatField()
 
     # We use Python getter / setter methods to transparently compress and decompress
     # these fields as they go into and out of the database model.
@@ -247,6 +268,8 @@ class ExecutionTrace(Document):
         cachedEndDecayingBranchTrace = self.cachedEndDecayingBranchTrace
         cachedStartDecayingFutureBranchTrace = self.cachedStartDecayingFutureBranchTrace
         cachedEndDecayingFutureBranchTrace = self.cachedEndDecayingFutureBranchTrace
+        cachedStartingRecentActionsImage = self.cachedStartingRecentActionsImage
+        cachedEndingRecentActionsImage = self.cachedEndingRecentActionsImage
 
         self.cachedUncompressedBranchTrace = None
         self.cachedStartCumulativeBranchTrace = None
@@ -255,6 +278,8 @@ class ExecutionTrace(Document):
         self.cachedEndDecayingBranchTrace = None
         self.cachedStartDecayingFutureBranchTrace = None
         self.cachedEndDecayingFutureBranchTrace = None
+        self.cachedStartingRecentActionsImage = None
+        self.cachedEndingRecentActionsImage = None
         saveObjectToDisk(self, "execution_traces", config)
         self.cachedUncompressedBranchTrace = cachedUncompressedBranchTrace
         self.cachedStartCumulativeBranchTrace = cachedStartCumulativeBranchTrace
@@ -263,6 +288,8 @@ class ExecutionTrace(Document):
         self.cachedEndDecayingBranchTrace = cachedEndDecayingBranchTrace
         self.cachedStartDecayingFutureBranchTrace = cachedStartDecayingFutureBranchTrace
         self.cachedEndDecayingFutureBranchTrace = cachedEndDecayingFutureBranchTrace
+        self.cachedStartingRecentActionsImage = cachedStartingRecentActionsImage
+        self.cachedEndingRecentActionsImage = cachedEndingRecentActionsImage
 
 
     @staticmethod

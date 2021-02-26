@@ -26,7 +26,7 @@ class GenerateAnnotatedVideos(TestingStepPluginBase):
 
     @autoretry(exponentialBackOffBase=3)
     def testingStepFinished(self, testingStep, executionSessions):
-        pool = multiprocessing.Pool(self.config['video_generation_processes'], maxtasksperchild=1)
+        pool = multiprocessing.Pool(self.config['testing_video_generation_processes'], maxtasksperchild=1)
 
         futures = []
         for session in executionSessions:

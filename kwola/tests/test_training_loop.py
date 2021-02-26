@@ -10,7 +10,7 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         url="http://kros1.kwola.io/",
                                                                         email="test1@test.com",
                                                                         password="test1",
-                                                                        autologin=True,
+                                                                        web_session_autologin=True,
                                                                         name="",
                                                                         paragraph="",
                                                                         enableTypeEmail=True,
@@ -21,7 +21,7 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         enableRandomOtherSymbolCommand=False,
                                                                         enableDoubleClickCommand=False,
                                                                         enableRightClickCommand=False,
-                                                                        custom_typing_action_strings=[],
+                                                                        actions_custom_typing_action_strings=[],
                                                                         enableScrolling=True
                                                                         )
 
@@ -37,7 +37,7 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         url="http://kros1.kwola.io/",
                                                                         email="test1@test.com",
                                                                         password="test1",
-                                                                        autologin=True,
+                                                                        web_session_autologin=True,
                                                                         name="Kwola",
                                                                         paragraph="Kwola is the shit. You should try it out now.",
                                                                         enableTypeEmail=True,
@@ -48,10 +48,41 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         enableRandomOtherSymbolCommand=True,
                                                                         enableDoubleClickCommand=True,
                                                                         enableRightClickCommand=True,
-                                                                        custom_typing_action_strings=[
+                                                                        actions_custom_typing_action_strings=[
                                                                             'action_a',
                                                                             'b_action'
                                                                         ]
+                                                                        )
+
+        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+
+        try:
+            TrainAgentLoop.trainAgent(config, exitOnFail=True)
+        finally:
+            shutil.rmtree(configDir)
+
+    def test_kros3_all_actions(self):
+        configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
+                                                                        url="http://kros3.kwola.io/",
+                                                                        email=None,
+                                                                        password=None,
+                                                                        web_session_autologin=False,
+                                                                        name=None,
+                                                                        paragraph=None,
+                                                                        enableRandomEmailCommand=True,
+                                                                        enableScrolling=True,
+                                                                        enableTypeEmail=False,
+                                                                        enableTypePassword=False,
+                                                                        enableRandomNumberCommand=False,
+                                                                        enableRandomBracketCommand=False,
+                                                                        enableRandomMathCommand=False,
+                                                                        enableRandomOtherSymbolCommand=False,
+                                                                        enableDoubleClickCommand=False,
+                                                                        enableRightClickCommand=False,
+                                                                        actions_custom_typing_action_strings=["test1", "test2", "test3", "test4"],
+                                                                        web_session_no_network_activity_wait_time=0.0,
+                                                                        web_session_perform_action_wait_time=0.1,
+                                                                        web_session_initial_fetch_sleep_time=1
                                                                         )
 
         config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)

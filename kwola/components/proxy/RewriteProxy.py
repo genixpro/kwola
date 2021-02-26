@@ -280,7 +280,8 @@ class RewriteProxy:
                     rewritePluginName=None,
                     rewriteMode=None,
                     rewriteMessage=None,
-                    versionSaveMode="all"
+                    versionSaveMode="all",
+                    methods=[flow.request.method]
                 )
 
                 if (contentType and "application/json" in contentType) \
@@ -316,10 +317,14 @@ class RewriteProxy:
                 rewriteMode=None,
                 rewriteMessage=None,
                 originalLength=len(unzippedFileContents),
-                rewrittenLength=None
+                rewrittenLength=None,
+                methods=[flow.request.method]
             )
 
             self.seenResourceVersionsByURL[flow.request.url] = versionId
+
+            if flow.request.method not in resource.methods:
+                resource.methods.append(flow.request.method)
 
             if len(unzippedFileContents) == 0:
                 self.memoryCache[versionId] = unzippedFileContents

@@ -33,6 +33,10 @@ class DotNetRPCError(BaseError):
 
     responseData = StringField()
 
+    requestHeaders = DictField(StringField())
+
+    responseHeaders = DictField(StringField())
+
 
     def computeHash(self):
         hasher = hashlib.sha256()

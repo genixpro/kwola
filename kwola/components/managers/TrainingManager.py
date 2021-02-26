@@ -47,6 +47,7 @@ import sys
 import tempfile
 import time
 import torch
+import snappy
 import torch.distributed
 import traceback
 from pprint import pformat
@@ -77,7 +78,7 @@ class TrainingManager:
 
         self.trainingStep = None
 
-        self.totalBatchesNeeded = self.config['iterations_per_training_step'] * self.config['batches_per_iteration'] + int(self.config['training_surplus_batches'])
+        self.totalBatchesNeeded = self.config['training_iterations_per_training_step'] * self.config['neural_network_batches_per_iteration'] + int(self.config['training_surplus_batches'])
         self.batchesPrepared = 0
         self.batchFutures = []
         self.recentCacheHits = []
@@ -121,6 +122,8 @@ class TrainingManager:
         self.trainingStep = trainingStep
 
     def initializeGPU(self):
+        torch.backends.cudnn.benchmark = True
+
         if self.gpu is not None:
             for subprocessIndex in range(10):
                 try:
@@ -169,7 +172,9 @@ class TrainingManager:
                 getLogger().info(f"==== Training Step Completed ====")
                 return {"success": False, "exception": errorMessage}
 
-            self.agent = DeepLearningAgent(config=self.config, whichGpu=self.gpu)
+            TrainingManager.clearOldPreparedSamples(self.config, self.applicationId)
+
+            self.agent = DeepLearningAgent(config=self.config, whichGpu=self.gpu, gpuWorldSize=self.gpuWorldSize)
             self.agent.initialize()
             try:
                 self.agent.load()
@@ -194,7 +199,7 @@ class TrainingManager:
 
             self.queueBatchesForPrecomputation()
 
-            while self.trainingStep.numberOfIterationsCompleted < self.config['iterations_per_training_step']:
+            while self.trainingStep.numberOfIterationsCompleted < self.config['training_iterations_per_training_step']:
                 loopStart = datetime.now()
 
                 self.updateBatchPrepStarvedState()
@@ -210,14 +215,14 @@ class TrainingManager:
 
                 self.trainingStep.numberOfIterationsCompleted += 1
 
-                if self.trainingStep.numberOfIterationsCompleted % self.config['print_loss_iterations'] == (self.config['print_loss_iterations'] - 1):
+                if self.trainingStep.numberOfIterationsCompleted % self.config['training_print_loss_iterations'] == (self.config['training_print_loss_iterations'] - 1):
                     if self.gpu is None or self.gpu == 0:
                         getLogger().info(f"Completed {self.trainingStep.numberOfIterationsCompleted + 1} batches. Overall average time per batch: {numpy.average(self.loopTimes[-25:]):.3f}. Core learning time: {numpy.average(self.coreLearningTimes[-25:]):.3f}")
                         self.printMovingAverageLosses()
-                        if self.config['print_cache_hit_rate']:
-                            getLogger().info(f"Batch cache hit rate {100 * numpy.mean(self.recentCacheHits[-self.config['print_cache_hit_rate_moving_average_length']:]):.0f}%")
+                        if self.config['training_print_cache_hit_rate']:
+                            getLogger().info(f"Batch cache hit rate {100 * numpy.mean(self.recentCacheHits[-self.config['training_print_cache_hit_rate_moving_average_length']:]):.0f}%")
 
-                if self.trainingStep.numberOfIterationsCompleted % self.config['iterations_between_db_saves'] == (self.config['iterations_between_db_saves'] - 1):
+                if self.trainingStep.numberOfIterationsCompleted % self.config['training_iterations_between_db_saves'] == (self.config['training_iterations_between_db_saves'] - 1):
                     if self.gpu is None or self.gpu == 0:
                         self.trainingStep.saveToDisk(self.config)
 
@@ -229,7 +234,7 @@ class TrainingManager:
 
             getLogger().info(f"Finished the core training loop. Saving the training step {self.trainingStep.id}")
             self.trainingStep.endTime = datetime.now()
-            self.trainingStep.averageTimePerIteration = (self.trainingStep.endTime - self.trainingStep.startTime).total_seconds() / self.trainingStep.numberOfIterationsCompleted
+            self.trainingStep.averageTimePerIteration = (self.trainingStep.endTime - self.trainingStep.startTime).total_seconds() / max(1, self.trainingStep.numberOfIterationsCompleted)
             self.trainingStep.averageLoss = float(numpy.mean(self.trainingStep.totalLosses))
             self.trainingStep.status = "completed"
 
@@ -265,7 +270,7 @@ class TrainingManager:
 
     def learnFromBatches(self, batches):
         learningIterationStartTime = datetime.now()
-        results = self.agent.learnFromBatches(batches)
+        results = self.agent.learnFromBatches(batches, self.trainingStepIndex)
         learningIterationFinishTime = datetime.now()
         self.coreLearningTimes.append((learningIterationFinishTime - learningIterationStartTime).total_seconds())
 
@@ -366,7 +371,7 @@ class TrainingManager:
     def fetchBatchesForIteration(self):
         batches = []
 
-        for batchIndex in range(self.config['batches_per_iteration']):
+        for batchIndex in range(self.config['neural_network_batches_per_iteration']):
             chosenBatchIndex = 0
             found = False
             for futureIndex, future in enumerate(self.batchFutures):
@@ -436,10 +441,10 @@ class TrainingManager:
     def writeSingleExecutionTracePreparedSampleData(traceBatch, config):
         traceId = traceBatch['traceIds'][0]
 
-        cacheFile = traceId + "-sample.pickle.gz"
+        cacheFile = traceId + "-sample.pickle.snappy"
 
         pickleBytes = pickle.dumps(traceBatch, protocol=pickle.HIGHEST_PROTOCOL)
-        compressedPickleBytes = gzip.compress(pickleBytes)
+        compressedPickleBytes = snappy.compress(pickleBytes)
 
         config.saveKwolaFileData("prepared_samples", cacheFile, compressedPickleBytes)
 
@@ -479,10 +484,10 @@ class TrainingManager:
             in the event of an error."""
         config = KwolaCoreConfiguration(config)
 
-        cacheFile = executionTraceId + "-sample.pickle.gz"
+        cacheFile = executionTraceId + "-sample.pickle.snappy"
 
         # Just for compatibility with the old naming scheme
-        oldCacheFileName = executionTraceId + ".pickle.gz"
+        oldCacheFileName = executionTraceId + ".pickle.snappy"
 
         config.deleteKwolaFileData("prepared_samples", cacheFile)
         config.deleteKwolaFileData("prepared_samples", oldCacheFileName)
@@ -492,9 +497,7 @@ class TrainingManager:
         try:
             config = KwolaCoreConfiguration(config)
 
-            agent = DeepLearningAgent(config, whichGpu=None)
-
-            cacheFile = executionTraceId + "-sample.pickle.gz"
+            cacheFile = executionTraceId + "-sample.pickle.snappy"
 
             fileData = config.loadKwolaFileData("prepared_samples", cacheFile)
             if fileData is None:
@@ -502,9 +505,9 @@ class TrainingManager:
                 cacheHit = False
 
                 fileData = config.loadKwolaFileData("prepared_samples", cacheFile)
-                sampleBatch = pickle.loads(gzip.decompress(fileData))
+                sampleBatch = pickle.loads(snappy.decompress(fileData))
             else:
-                sampleBatch = pickle.loads(gzip.decompress(fileData))
+                sampleBatch = pickle.loads(snappy.decompress(fileData))
                 cacheHit = True
 
             imageWidth = sampleBatch['processedImages'].shape[3]
@@ -515,7 +518,7 @@ class TrainingManager:
                 randomXDisplacement = random.randint(-config['training_crop_center_random_x_displacement'], config['training_crop_center_random_x_displacement'])
                 randomYDisplacement = random.randint(-config['training_crop_center_random_y_displacement'], config['training_crop_center_random_y_displacement'])
 
-                cropLeft, cropTop, cropRight, cropBottom = agent.calculateTrainingCropPosition(sampleBatch['actionXs'][0] + randomXDisplacement, sampleBatch['actionYs'][0] + randomYDisplacement, imageWidth, imageHeight)
+                cropLeft, cropTop, cropRight, cropBottom = DeepLearningAgent.calculateTrainingCropPosition(config, sampleBatch['actionXs'][0] + randomXDisplacement, sampleBatch['actionYs'][0] + randomYDisplacement, imageWidth, imageHeight)
             else:
                 cropLeft = 0
                 cropRight = imageWidth
@@ -527,7 +530,7 @@ class TrainingManager:
                 nextStateCropCenterX = random.randint(10, imageWidth - 10)
                 nextStateCropCenterY = random.randint(10, imageHeight - 10)
 
-                nextStateCropLeft, nextStateCropTop, nextStateCropRight, nextStateCropBottom = agent.calculateTrainingCropPosition(nextStateCropCenterX, nextStateCropCenterY, imageWidth, imageHeight, nextStepCrop=True)
+                nextStateCropLeft, nextStateCropTop, nextStateCropRight, nextStateCropBottom = DeepLearningAgent.calculateTrainingCropPosition(config, nextStateCropCenterX, nextStateCropCenterY, imageWidth, imageHeight, nextStepCrop=True)
             else:
                 nextStateCropLeft = 0
                 nextStateCropRight = imageWidth
@@ -552,7 +555,7 @@ class TrainingManager:
             # Instead, we want the pure version in the cache and create a
             # new augmentation every time we load it.
             processedImage = sampleBatch['processedImages'][0]
-            augmentedImage = agent.augmentProcessedImageForTraining(processedImage)
+            augmentedImage = DeepLearningAgent.augmentProcessedImageForTraining(processedImage)
             sampleBatch['processedImages'][0] = augmentedImage
 
             fileDescriptor, fileName = tempfile.mkstemp(".bin", dir=batchDirectory)
@@ -589,10 +592,12 @@ class TrainingManager:
                 # a single training step.
                 traceWeights = traceWeights + numpy.arange(0, config['training_trace_selection_cache_not_full_state_one_side_bias'], len(traceWeights))
 
+            traceWeights = numpy.square(traceWeights)
+
             traceProbabilities = numpy.array(traceWeights) / numpy.sum(traceWeights)
             traceIds = [weight[1] for weight in tracesWithWeightObjects]
 
-            chosenExecutionTraceIds = numpy.random.choice(traceIds, [config['batch_size']], p=traceProbabilities)
+            chosenExecutionTraceIds = numpy.random.choice(traceIds, [config['neural_network_batch_size']], p=traceProbabilities)
 
         except Exception:
             getLogger().error(f"prepareAndLoadSingleBatchForSubprocess failed! Putting a retry into the queue.\n{traceback.format_exc()}")
@@ -623,7 +628,11 @@ class TrainingManager:
             for key in samples[0].keys():
                 # We have to do something special here since they are not concatenated the normal way
                 if key == "symbolIndexes" or key == 'symbolWeights' \
+                        or key == 'coverageSymbolIndexes' or key == 'coverageSymbolWeights' \
+                        or key == 'recentSymbolIndexes' or key == 'recentSymbolWeights' \
                         or key == "nextSymbolIndexes" or key == 'nextSymbolWeights' \
+                        or key == "nextCoverageSymbolIndexes" or key == 'nextCoverageSymbolWeights' \
+                        or key == "nextRecentSymbolIndexes" or key == 'nextRecentSymbolWeights' \
                         or key == "decayingFutureSymbolIndexes" or key == 'decayingFutureSymbolWeights':
                     batch[key] = numpy.concatenate([sample[key][0] for sample in samples], axis=0)
 
@@ -633,10 +642,18 @@ class TrainingManager:
                         offsets.append(currentOffset)
                         currentOffset += len(sample[key][0])
 
-                    if 'next' in key:
+                    if 'nextCoverage' in key:
+                        batch['nextCoverageSymbolOffsets'] = numpy.array(offsets)
+                    elif 'nextRecent' in key:
+                        batch['nextRecentSymbolOffsets'] = numpy.array(offsets)
+                    elif 'next' in key:
                         batch['nextSymbolOffsets'] = numpy.array(offsets)
                     elif 'decaying' in key:
                         batch['decayingFutureSymbolOffsets'] = numpy.array(offsets)
+                    elif 'coverageSymbol' in key:
+                        batch['coverageSymbolOffsets'] = numpy.array(offsets)
+                    elif 'recentSymbol' in key:
+                        batch['recentSymbolOffsets'] = numpy.array(offsets)
                     else:
                         batch['symbolOffsets'] = numpy.array(offsets)
                 else:
@@ -644,6 +661,14 @@ class TrainingManager:
                         batch[key] = numpy.concatenate([sample[key] for sample in samples], axis=0)
                     else:
                         batch[key] = [sample[key][0] for sample in samples]
+
+            symbolSet, keyMask = DeepLearningAgent.computeCoverageSymbolsMergedList(batch['coverageSymbolIndexes'], batch['coverageSymbolOffsets'])
+            batch['coverageSymbolsSet'] = symbolSet
+            batch['coverageSymbolsKeyMask'] = keyMask
+
+            symbolSet, keyMask = DeepLearningAgent.computeCoverageSymbolsMergedList(batch['nextCoverageSymbolIndexes'], batch['nextCoverageSymbolOffsets'])
+            batch['nextCoverageSymbolsSet'] = symbolSet
+            batch['nextCoverageSymbolsKeyMask'] = keyMask
 
             cacheHitRate = numpy.mean(cacheHits)
 
@@ -657,7 +682,7 @@ class TrainingManager:
         except Exception as e:
             # Both KeyboardInterrupt and FileNotFoundError can occur when you Ctrl-C a process from the terminal.
             # We don't want to force recreating the sample cache just because of that.
-            if not isinstance(e, KeyboardInterrupt) and not isinstance(e, FileNotFoundError):
+            if not isinstance(e, KeyboardInterrupt) and not isinstance(e, FileNotFoundError) and not isinstance(e, multiprocessing.context.TimeoutError):
                 getLogger().error(f"prepareAndLoadSingleBatchForSubprocess failed! Error: {type(e)}. Destroying the batch cache for the traces and then putting a retry into the queue.\n{traceback.format_exc()}")
 
                 # As a precautionary measure, we destroy whatever data is in the
@@ -683,7 +708,9 @@ class TrainingManager:
                     stepId = fileName
                     stepId = stepId.replace(".json", "")
                     stepId = stepId.replace(".gz", "")
+                    stepId = stepId.replace(".snappy", "")
                     stepId = stepId.replace(".pickle", "")
+                    stepId = stepId.replace(".enc", "")
 
                     testingSteps.append(TestingStep.loadFromDisk(stepId, config))
 
@@ -697,6 +724,31 @@ class TrainingManager:
         trace.saveToDisk(config)
 
     @staticmethod
+    def clearOldPreparedSamples(config, applicationId):
+        existingPreparedSampleFiles = set(config.listAllFilesInFolder("prepared_samples"))
+
+        testingSteps = TrainingManager.loadTestingStepsForTraining(config, applicationId)
+        for testStepIndex, testStep in enumerate(testingSteps):
+            for sessionId in testStep.executionSessions:
+                session = ExecutionSession.loadFromDisk(sessionId, config)
+                for traceId in session.executionTraces:
+                    cacheFile = traceId + "-sample.pickle.snappy"
+                    if cacheFile in existingPreparedSampleFiles:
+                        existingPreparedSampleFiles.remove(cacheFile)
+
+        # Delete all the remaining files
+        for remainingFile in existingPreparedSampleFiles:
+            config.deleteKwolaFileData("prepared_samples", remainingFile)
+
+        getLogger().info(f"Removed {len(existingPreparedSampleFiles)} old prepared sample files that are no longer needed.")
+
+    @staticmethod
+    def loadTestingStepsForTraining(config, applicationId):
+        testingSteps = sorted([step for step in TrainingManager.loadAllTestingSteps(config, applicationId) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
+        testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
+        return testingSteps
+
+    @staticmethod
     def prepareAndLoadBatchesSubprocess(config, batchDirectory, subProcessCommandQueue, subProcessBatchResultQueue, subprocessIndex=0, applicationId=None):
         try:
             setupLocalLogging(config)
@@ -705,8 +757,7 @@ class TrainingManager:
 
             getLogger().info(f"Starting initialization for batch preparation sub process.")
 
-            testingSteps = sorted([step for step in TrainingManager.loadAllTestingSteps(config, applicationId) if step.status == "completed"], key=lambda step: step.startTime, reverse=True)
-            testingSteps = list(testingSteps)[:int(config['training_number_of_recent_testing_sequences_to_use'])]
+            testingSteps = TrainingManager.loadTestingStepsForTraining(config, applicationId)
 
             if len(testingSteps) == 0:
                 getLogger().warning(f"Error, no test sequences to train on for training step.")
@@ -901,40 +952,51 @@ class TrainingManager:
         return batch, cacheHit
 
     def printMovingAverageLosses(self):
-        movingAverageLength = int(self.config['print_loss_moving_average_length'])
+        movingAverageLength = int(self.config['training_print_loss_moving_average_length'])
 
         averageStart = max(0, min(len(self.trainingStep.totalRewardLosses) - 1, movingAverageLength))
 
         averageTotalRewardLoss = numpy.mean(self.trainingStep.totalRewardLosses[-averageStart:])
+        stdTotalRewardLoss = numpy.std(self.trainingStep.totalRewardLosses[-averageStart:])
         averagePresentRewardLoss = numpy.mean(self.trainingStep.presentRewardLosses[-averageStart:])
+        stdPresentRewardLoss = numpy.std(self.trainingStep.presentRewardLosses[-averageStart:])
         averageDiscountedFutureRewardLoss = numpy.mean(self.trainingStep.discountedFutureRewardLosses[-averageStart:])
+        stdDiscountedFutureRewardLoss = numpy.std(self.trainingStep.discountedFutureRewardLosses[-averageStart:])
 
         averageStateValueLoss = numpy.mean(self.trainingStep.stateValueLosses[-averageStart:])
+        stdStateValueLoss = numpy.std(self.trainingStep.stateValueLosses[-averageStart:])
         averageAdvantageLoss = numpy.mean(self.trainingStep.advantageLosses[-averageStart:])
+        stdAdvantageLoss = numpy.std(self.trainingStep.advantageLosses[-averageStart:])
         averageActionProbabilityLoss = numpy.mean(self.trainingStep.actionProbabilityLosses[-averageStart:])
+        stdActionProbabilityLoss = numpy.std(self.trainingStep.actionProbabilityLosses[-averageStart:])
 
         averageTracePredictionLoss = numpy.mean(self.trainingStep.tracePredictionLosses[-averageStart:])
+        stdTracePredictionLoss = numpy.std(self.trainingStep.tracePredictionLosses[-averageStart:])
         averageExecutionFeatureLoss = numpy.mean(self.trainingStep.executionFeaturesLosses[-averageStart:])
+        stdExecutionFeatureLoss = numpy.std(self.trainingStep.executionFeaturesLosses[-averageStart:])
         averagePredictedCursorLoss = numpy.mean(self.trainingStep.predictedCursorLosses[-averageStart:])
+        stdPredictedCursorLoss = numpy.std(self.trainingStep.predictedCursorLosses[-averageStart:])
         averageTotalLoss = numpy.mean(self.trainingStep.totalLosses[-averageStart:])
+        stdTotalLoss = numpy.std(self.trainingStep.totalLosses[-averageStart:])
+
         averageTotalRebalancedLoss = numpy.mean(self.trainingStep.totalRebalancedLosses[-averageStart:])
 
         message = f"Losses:\n"
 
-        message += f"    Moving Average Total Reward Loss: {averageTotalRewardLoss:.6f}\n"
-        message += f"    Moving Average Present Reward Loss: {averagePresentRewardLoss:.6f}\n"
-        message += f"    Moving Average Discounted Future Reward Loss: {averageDiscountedFutureRewardLoss:.6f}\n"
-        message += f"    Moving Average State Value Loss: {averageStateValueLoss:.6f}\n"
-        message += f"    Moving Average Advantage Loss: {averageAdvantageLoss:.6f}\n"
-        message += f"    Moving Average Action Probability Loss: {averageActionProbabilityLoss:.6f}\n"
+        message += f"    Moving Average Total Reward Loss:              {averageTotalRewardLoss:.6f} +- std {stdTotalRewardLoss:.4f}\n"
+        message += f"    Moving Average Present Reward Loss:            {averagePresentRewardLoss:.6f} +- std {stdPresentRewardLoss:.4f}\n"
+        message += f"    Moving Average Discounted Future Reward Loss:  {averageDiscountedFutureRewardLoss:.6f} +- std {stdDiscountedFutureRewardLoss:.4f}\n"
+        message += f"    Moving Average State Value Loss:               {averageStateValueLoss:.6f} +- std {stdStateValueLoss:.4f}\n"
+        message += f"    Moving Average Advantage Loss:                 {averageAdvantageLoss:.6f} +- std {stdAdvantageLoss:.4f}\n"
+        message += f"    Moving Average Action Probability Loss:        {averageActionProbabilityLoss:.6f} +- std {stdActionProbabilityLoss:.4f}\n"
         if self.config['enable_trace_prediction_loss']:
-            message += f"    Moving Average Trace Prediction Loss: {averageTracePredictionLoss:.6f}\n"
+            message += f"    Moving Average Trace Prediction Loss:          {averageTracePredictionLoss:.6f} +- std {stdTracePredictionLoss:.4f}\n"
         if self.config['enable_execution_feature_prediction_loss']:
-            message += f"    Moving Average Execution Feature Loss: {averageExecutionFeatureLoss:.6f}\n"
+            message += f"    Moving Average Execution Feature Loss:         {averageExecutionFeatureLoss:.6f} +- std {stdExecutionFeatureLoss:.4f}\n"
         if self.config['enable_cursor_prediction_loss']:
-            message += f"    Moving Average Predicted Cursor Loss: {averagePredictedCursorLoss:.6f}\n"
+            message += f"    Moving Average Predicted Cursor Loss:          {averagePredictedCursorLoss:.6f} +- std {stdPredictedCursorLoss:.4f}\n"
 
-        message += f"    Moving Average Total Loss: {averageTotalLoss:.6f}"
+        message += f"    Moving Average Total Loss:                     {averageTotalLoss:.6f} +- std {stdTotalLoss:.4f}"
         getLogger().info(message)
 
     @staticmethod

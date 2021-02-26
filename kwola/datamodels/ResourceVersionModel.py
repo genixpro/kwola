@@ -23,6 +23,8 @@ from .errors.BaseError import BaseError
 from .actions.BaseAction import BaseAction
 from .CustomIDField import CustomIDField
 from .DiskUtilities import saveObjectToDisk, loadObjectFromDisk
+from .EncryptedStringField import EncryptedStringField
+import json
 from mongoengine import *
 
 class ResourceVersion(Document):
@@ -46,13 +48,13 @@ class ResourceVersion(Document):
 
     canonicalFileHash = StringField()
 
-    creationDate = DateField()
+    creationDate = DateTimeField()
 
-    url = StringField()
+    url = EncryptedStringField()
 
-    canonicalUrl = StringField()
+    canonicalUrl = EncryptedStringField()
 
-    contentType = StringField()
+    contentType = EncryptedStringField()
 
     didRewriteResource = BooleanField()
 
@@ -65,6 +67,8 @@ class ResourceVersion(Document):
     originalLength = IntField()
 
     rewrittenLength = IntField()
+
+    methods = ListField(StringField())
 
     def saveToDisk(self, config, overrideSaveFormat=None, overrideCompression=None):
         saveObjectToDisk(self, "resource_versions", config, overrideSaveFormat=overrideSaveFormat, overrideCompression=overrideCompression)
@@ -85,3 +89,9 @@ class ResourceVersion(Document):
     def saveTranslatedResourceContents(self, config, data):
         return config.saveKwolaFileData("resource_translated_contents", self.id, data, useCacheBucket=True)
 
+    def unencryptedJSON(self):
+        data = json.loads(self.to_json())
+        for key, fieldType in ResourceVersion.__dict__.items():
+            if isinstance(fieldType, EncryptedStringField) and key in data:
+                data[key] = EncryptedStringField.decrypt(data[key])
+        return data

@@ -30,14 +30,14 @@ class PrecomputeSessionsForSampleCache(TestingStepPluginBase):
 
     @autoretry()
     def testingStepFinished(self, testingStep, executionSessions):
-        if self.config['precompute_sample_cache_single_threaded'] or self.config['precompute_sample_cache_num_workers'] == 1:
+        if self.config['testing_precompute_sample_cache_single_threaded'] or self.config['testing_precompute_sample_cache_num_workers'] == 1:
             for session in executionSessions:
                 getLogger().info(f"Preparing samples for {session.id} and adding them to the sample cache.")
                 TrainingManager.addExecutionSessionToSampleCache(session.id, self.config)
         else:
             # For some reason, we are getting frequent errors with the multi-process
             # based version of this code shown below in our cloud environment.
-            with concurrent.futures.ProcessPoolExecutor(max_workers=self.config['precompute_sample_cache_num_workers']) as executor:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=self.config['testing_precompute_sample_cache_num_workers']) as executor:
                 futures = []
                 for session in executionSessions:
                     getLogger().info(f"Preparing samples for {session.id} and adding them to the sample cache.")

@@ -18,7 +18,7 @@ class TestHTMLSaver(unittest.TestCase):
                                                                         url="http://kros1.kwola.io/",
                                                                         email="test1@test.com",
                                                                         password="test1",
-                                                                        autologin=True,
+                                                                        web_session_autologin=True,
                                                                         name="",
                                                                         paragraph="",
                                                                         enableTypeEmail=True,
@@ -29,7 +29,7 @@ class TestHTMLSaver(unittest.TestCase):
                                                                         enableRandomOtherSymbolCommand=False,
                                                                         enableDoubleClickCommand=False,
                                                                         enableRightClickCommand=False,
-                                                                        custom_typing_action_strings=[],
+                                                                        actions_custom_typing_action_strings=[],
                                                                         enableScrolling=True
                                                                         )
 

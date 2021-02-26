@@ -13,6 +13,7 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
 
     def browserSessionStarted(self, webDriver, proxy, executionSession):
         self.cumulativeBranchTrace[executionSession.id] = self.extractBranchTrace(webDriver)
+        executionSession.countTracesWithNewBranches = 0
 
 
     def beforeActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionToExecute):
@@ -50,6 +51,9 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
 
         executionTrace.didCodeExecute = bool(len(filteredBranchTrace) > 0)
         executionTrace.didNewBranchesExecute = bool(newBranches)
+
+        if newBranches:
+            executionSession.countTracesWithNewBranches += 1
 
         total = 0
         executedAtleastOnce = 0

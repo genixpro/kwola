@@ -48,6 +48,22 @@ import random
 import subprocess
 import sys
 import tempfile
+import psutil
+
+def checkIfProcessRunning(processName):
+    """
+    Check if there is any running process that contains the given name processName.
+    """
+    #Iterate over the all the running process
+    for proc in psutil.process_iter():
+        try:
+            # Check if process name contains the given name string.
+            if processName.lower() in proc.name().lower() and proc.pid != os.getpid():
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
+
 
 def getAvailableBrowsers(config):
     browsers = []
@@ -147,7 +163,7 @@ def runRandomInitializationSubprocess(config, trainingSequence, testStepIndex):
         chosenBrowser = browsers[int(choiceIndex / len(windowSizes))]
         chosenWindowSize = windowSizes[choiceIndex % len(windowSizes)]
 
-        testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)), browser=chosenBrowser, windowSize=chosenWindowSize)
+        testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)), browser=chosenBrowser, windowSize=chosenWindowSize, testStepIndexWithinRun=testStepIndex)
         testingStep.saveToDisk(config)
 
         process = ManagedTaskSubprocess([sys.executable, "-m", "kwola.tasks.RunTestingStep"], {
@@ -229,7 +245,7 @@ def runTrainingSubprocess(config, trainingSequence, trainingStepIndex, gpuNumber
         raise
 
 
-def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugVideo=False):
+def runTestingSubprocess(config, trainingSequence, testStepIndex, trainingLoopsCompleted, generateDebugVideo=False):
     try:
         browsers = getAvailableBrowsers(config)
         windowSizes = getAvailableWindowSizes(config)
@@ -238,13 +254,17 @@ def runTestingSubprocess(config, trainingSequence, testStepIndex, generateDebugV
         chosenBrowser = browsers[int(choiceIndex / len(windowSizes))]
         chosenWindowSize = windowSizes[choiceIndex % len(windowSizes)]
 
-        testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)), browser=chosenBrowser, windowSize=chosenWindowSize)
+        testingStep = TestingStep(id=str(trainingSequence.id + "_testing_step_" + str(testStepIndex)), browser=chosenBrowser, windowSize=chosenWindowSize, testStepIndexWithinRun=testStepIndex)
         testingStep.saveToDisk(config)
+
+        # The actor does not start getting trained until after the first 5 training loops are completed
+        actorTrainingStartLoop = 5
+        shouldBeRandom = (trainingLoopsCompleted < actorTrainingStartLoop + 1) and (config['train_agent_loop_loops_needed'] > actorTrainingStartLoop)
 
         process = ManagedTaskSubprocess([sys.executable, "-m", "kwola.tasks.RunTestingStep"], {
             "config": config.serialize(),
             "testingStepId": str(testingStep.id),
-            "shouldBeRandom": False,
+            "shouldBeRandom": shouldBeRandom,
             "generateDebugVideo": generateDebugVideo and config['enable_debug_videos'],
             "browser": chosenBrowser,
             "windowSize": chosenWindowSize
@@ -304,7 +324,9 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
 
     chartGenerationFuture = None
 
-    while trainingSequence.trainingLoopsCompleted < config['training_loops_needed']:
+    loopsCompleted = 0
+
+    while trainingSequence.trainingLoopsCompleted < config['train_agent_loop_loops_needed']:
         getLogger().info(f"Starting a single training loop. Loops completed: {trainingSequence.trainingLoopsCompleted}")
 
         with ThreadPoolExecutor(max_workers=(config['testing_sequences_in_parallel_per_training_loop'] + numberOfTrainingStepsInParallel)) as executor:
@@ -318,6 +340,9 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
             trainStepFutures = []
 
             enableDebugVideosThisLoop = bool(trainingSequence.trainingLoopsCompleted % config['debug_video_generation_frequency'] == 0)
+            # Also generate a debug video on the very last iteration of the sequence.
+            if trainingSequence.trainingLoopsCompleted == (config['train_agent_loop_loops_needed'] - 1):
+                enableDebugVideosThisLoop = True
 
             if torch.cuda.device_count() > 0:
                 for gpu in range(numberOfTrainingStepsInParallel):
@@ -336,7 +361,7 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                 generateDebugVideo = False
                 if testingStepNumber == 0 and enableDebugVideosThisLoop:
                     generateDebugVideo = True
-                future = executor.submit(runTestingSubprocess, config, trainingSequence, testStepIndex, generateDebugVideo=generateDebugVideo)
+                future = executor.submit(runTestingSubprocess, config, trainingSequence, testStepIndex, trainingSequence.trainingLoopsCompleted, generateDebugVideo=generateDebugVideo)
                 allFutures.append(future)
                 testStepFutures.append(future)
                 time.sleep(3)
@@ -377,9 +402,9 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                         lastTrainFinish = future.result()['finishTime']
 
                 if lastTestFinish > lastTrainFinish:
-                    config['iterations_per_training_step'] += config['iterations_per_training_step_adjustment_size_per_loop']
+                    config['training_iterations_per_training_step'] += config['training_iterations_per_training_step_adjustment_size_per_loop']
                 else:
-                    config['iterations_per_training_step'] = max(5, config['iterations_per_training_step'] - config['iterations_per_training_step_adjustment_size_per_loop'])
+                    config['training_iterations_per_training_step'] = max(5, config['training_iterations_per_training_step'] - config['training_iterations_per_training_step_adjustment_size_per_loop'])
                 config.saveConfig()
 
             time.sleep(3)
@@ -390,12 +415,13 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
         if (trainingSequence.trainingLoopsCompleted % config['chart_generation_frequency']) == 0:
             enableCumulativeCoverage = bool(trainingSequence.trainingLoopsCompleted % config['chart_generate_cumulative_coverage_frequency'] == 0)
             chartGenerationFuture = AsyncThreadFuture(generateAllCharts, args=[config, None, enableCumulativeCoverage])
+        loopsCompleted += 1
         getLogger().info(f"Completed one parallel training & testing step! Hooray!")
 
     if chartGenerationFuture is not None:
         chartGenerationFuture.wait()
 
-    generateAllCharts(config, applicationId=None, enableCumulativeCoverage=True)
+    return loopsCompleted
 
 def trainAgent(config, exitOnFail=False):
     try:
@@ -404,6 +430,12 @@ def trainAgent(config, exitOnFail=False):
         pass
 
     config = KwolaCoreConfiguration(config)
+
+    if config['train_agent_loop_wait_for_other_kwola_processes_to_exit']:
+        if checkIfProcessRunning("kwola"):
+            getLogger().info("Waiting for the other Kwola process to finish running. If you want to run multiple Kwola processes at once, please change the train_agent_loop_wait_for_other_kwola_processes_to_exit configuration variable.")
+            while checkIfProcessRunning("kwola"):
+                time.sleep(1)
 
     # Load and save the agent to make sure all training subprocesses are synced
     agent = DeepLearningAgent(config=config, whichGpu=None)
@@ -428,6 +460,7 @@ def trainAgent(config, exitOnFail=False):
         sequenceId = sequenceId.replace(".pickle", "")
         sequenceId = sequenceId.replace(".json", "")
         sequenceId = sequenceId.replace(".gz", "")
+        sequenceId = sequenceId.replace(".enc", "")
 
         trainingSequence = TrainingSequence.loadFromDisk(sequenceId, config)
 
@@ -447,13 +480,17 @@ def trainAgent(config, exitOnFail=False):
         runRandomInitialization(config, trainingSequence, exitOnFail=exitOnFail)
         trainingSequence.saveToDisk(config)
 
-    runMainTrainingLoop(config, trainingSequence, exitOnFail=exitOnFail)
+    loopsCompleted = runMainTrainingLoop(config, trainingSequence, exitOnFail=exitOnFail)
 
-    generateAllCharts(config, enableCumulativeCoverage=True)
+    generateAllCharts(config, applicationId=None, enableCumulativeCoverage=True)
 
     trainingSequence.status = "completed"
     trainingSequence.endTime = datetime.now()
     trainingSequence.saveToDisk(config)
+
+    if config['train_agent_loop_email_results'] and loopsCompleted > 0:
+        from ..components.utils.email import sendExperimentResults
+        sendExperimentResults(config)
 
     for folder in config['train_agent_loop_delete_folders_on_finish']:
         fullPath = config.getKwolaUserDataDirectory(folder)

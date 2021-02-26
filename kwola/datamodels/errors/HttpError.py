@@ -36,6 +36,14 @@ class HttpError(BaseError):
 
     url = StringField()
 
+    requestData = StringField()
+
+    requestHeaders = DictField(StringField())
+
+    responseHeaders = DictField(StringField())
+
+    responseData = StringField()
+
     def computeHash(self):
         hasher = hashlib.sha256()
         hasher.update(bytes(self.path, "utf8"))

@@ -204,7 +204,7 @@ class TestingStepManager:
             fileDescriptor, inferenceBatchFileName = tempfile.mkstemp()
 
             with open(fileDescriptor, 'wb') as file:
-                pickle.dump((self.step, images, envActionMaps, self.executionSessionTraceLocalPickleFiles), file, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump((self.step, images, envActionMaps, self.executionSessionTraceLocalPickleFiles, self.testStep.testStepIndexWithinRun), file, protocol=pickle.HIGHEST_PROTOCOL)
 
             del images, envActionMaps
             subProcessCommandQueue, subProcessResultQueue, subProcess = self.subProcesses[0]
@@ -221,7 +221,7 @@ class TestingStepManager:
             # We have to make sure all trace saves are finished before nextBestActions because there is a multithreading
             # problem in ExecutionTrace.saveToDisk due to the way it handles the cached branch trace objects.
             self.finishAllTraceSaves()
-            actions, times = self.agent.nextBestActions(self.step, images, envActionMaps, self.executionSessionTraces, shouldBeRandom=self.shouldBeRandom)
+            actions, times = self.agent.nextBestActions(self.step, images, envActionMaps, self.executionSessionTraces, testStepIndexWithinRun=self.testStep.testStepIndexWithinRun, shouldBeRandom=self.shouldBeRandom)
             actionDecisionTime = (datetime.now() - taskStartTime).total_seconds()
 
             if actionDecisionTime > 10.0:
@@ -333,7 +333,7 @@ class TestingStepManager:
             traceLoadStartTime = datetime.now()
 
             with open(inferenceBatchFileName, 'rb') as file:
-                step, images, envActionMaps, pastExecutionTraceLocalTempFiles = pickle.load(file)
+                step, images, envActionMaps, pastExecutionTraceLocalTempFiles, testStepIndexWithinRun = pickle.load(file)
 
             pastExecutionTraces = [[] for n in range(len(pastExecutionTraceLocalTempFiles))]
             for sessionN, traceFileNameList in enumerate(pastExecutionTraceLocalTempFiles):
@@ -354,7 +354,7 @@ class TestingStepManager:
                 getLogger().info(f"Finished trace load after {traceLoadTime} seconds")
 
             nextBestActionsStartTime = datetime.now()
-            actions, times = agent.nextBestActions(step, images, envActionMaps, pastExecutionTraces, shouldBeRandom=shouldBeRandom)
+            actions, times = agent.nextBestActions(step, images, envActionMaps, pastExecutionTraces, testStepIndexWithinRun=testStepIndexWithinRun, shouldBeRandom=shouldBeRandom)
 
             nextBestActionsTime = (datetime.now() - nextBestActionsStartTime).total_seconds()
             if nextBestActionsTime > 5:

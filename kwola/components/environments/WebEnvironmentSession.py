@@ -136,7 +136,7 @@ class WebEnvironmentSession:
     def initialize(self):
         self.fetchTargetWebpage()
 
-        if self.config.autologin:
+        if self.config.web_session_autologin:
             self.runAutoLogin()
 
         self.traceNumber = 0
@@ -621,12 +621,12 @@ class WebEnvironmentSession:
                             canScroll: false,
                             canScrollUp: false,
                             canScrollDown: false,
-                            left: bounds.left + paddingLeft + 3,
-                            right: bounds.right - paddingRight - 3,
-                            top: bounds.top + paddingTop + 3,
-                            bottom: bounds.bottom - paddingBottom - 3,
-                            width: bounds.width - paddingLeft - paddingRight - 6,
-                            height: bounds.height - paddingTop - paddingBottom - 6,
+                            left: bounds.left + paddingLeft + 2,
+                            right: bounds.right - paddingRight - 2,
+                            top: bounds.top + paddingTop + 2,
+                            bottom: bounds.bottom - paddingBottom - 2,
+                            width: bounds.width - paddingLeft - paddingRight - 4,
+                            height: bounds.height - paddingTop - paddingBottom - 4,
                             elementType: element.tagName.toLowerCase(),
                             keywords: ( element.innerText + " " + element.getAttribute("class") + " " +
                                         element.getAttribute("name") + " " + element.getAttribute("id") + " " + 
@@ -837,7 +837,7 @@ class WebEnvironmentSession:
             for actionMapData in elementActionMaps:
                 actionMap = ActionMap(**actionMapData)
 
-                if self.config['prevent_offsite_links']:
+                if self.config['web_session_prevent_offsite_links']:
                     if actionMap.elementType == 'a':
                         if actionMap.attributes['href'] and self.isURLOffsite(actionMap.attributes['href'], current_page_url):
                             # Skip this element because it links to an offsite page.
@@ -905,20 +905,31 @@ class WebEnvironmentSession:
             """, action.x, action.y)
 
             if isinstance(action, ClickTapAction):
-                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                actionChain.move_to_element_with_offset(element, 0, 0)
-                if action.times == 1:
-                    if self.config['web_session_print_every_action']:
-                        getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                    actionChain.click(on_element=element)
-                    actionChain.pause(self.config.web_session_perform_action_wait_time)
-                elif action.times == 2:
-                    if self.config['web_session_print_every_action']:
-                        getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                    actionChain.double_click(on_element=element)
-                    actionChain.pause(self.config.web_session_perform_action_wait_time)
+                if self.config['web_session_click_mode'] == "fast":
+                    if action.times == 1:
+                        if self.config['web_session_print_every_action']:
+                            getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
+                        element.click()
+                    else:
+                        if self.config['web_session_print_every_action']:
+                            getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source} as {action.type}")
+                        element.double_click()
+                    time.sleep(self.config.web_session_perform_action_wait_time)
+                else:
+                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                    actionChain.move_to_element_with_offset(element, 0, 0)
+                    if action.times == 1:
+                        if self.config['web_session_print_every_action']:
+                            getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
+                        actionChain.click(on_element=element)
+                        actionChain.pause(self.config.web_session_perform_action_wait_time)
+                    elif action.times == 2:
+                        if self.config['web_session_print_every_action']:
+                            getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source} as {action.type}")
+                        actionChain.double_click(on_element=element)
+                        actionChain.pause(self.config.web_session_perform_action_wait_time)
 
-                actionChain.perform()
+                    actionChain.perform()
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
@@ -932,13 +943,18 @@ class WebEnvironmentSession:
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
                     getLogger().info(f"Typing {action.text} at {action.x} {action.y} from {action.source} as {action.type}")
-                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                actionChain.move_to_element_with_offset(element, 0, 0)
-                actionChain.click(on_element=element)
-                actionChain.pause(self.config.web_session_perform_action_wait_time)
-                actionChain.send_keys_to_element(element, action.text)
-                actionChain.pause(self.config.web_session_perform_action_wait_time)
-                actionChain.perform()
+
+                if self.config['web_session_type_mode'] == "fast":
+                    element.send_keys(action.text)
+                    time.sleep(self.config.web_session_perform_action_wait_time)
+                else:
+                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
+                    actionChain.move_to_element_with_offset(element, 0, 0)
+                    actionChain.click(on_element=element)
+                    actionChain.pause(self.config.web_session_perform_action_wait_time)
+                    actionChain.send_keys_to_element(element, action.text)
+                    actionChain.pause(self.config.web_session_perform_action_wait_time)
+                    actionChain.perform()
 
             if isinstance(action, ScrollingAction):
                 if self.config['web_session_print_every_action']:
@@ -948,7 +964,7 @@ class WebEnvironmentSession:
                     self.driver.execute_script("window.scrollTo(0, window.scrollY + 400)")
                 else:
                     self.driver.execute_script("window.scrollTo(0, Math.max(0, window.scrollY - 400))")
-                time.sleep(1.0)
+                time.sleep(self.config.web_session_perform_action_wait_time)
 
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
@@ -1042,7 +1058,7 @@ class WebEnvironmentSession:
     def checkOffsite(self, priorURL):
         try:
             # If the browser went off site and off site links are disabled, then we send it back to the url it started from
-            if self.config['prevent_offsite_links']:
+            if self.config['web_session_prevent_offsite_links']:
                 networkWaitTime = self.waitUntilNoNetworkActivity()
 
                 current_url = self.driver.current_url
@@ -1081,10 +1097,11 @@ class WebEnvironmentSession:
             if self.hasBrowserDied:
                 return None, actionExecutionTimes
 
-            startTime = datetime.now()
-            networkWaitTime = self.checkOffsite(priorURL=self.targetURL)
-            actionExecutionTimes['checkOffsite-first-networkWaitTime'] = networkWaitTime
-            actionExecutionTimes['checkOffsite-first-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
+            if self.config['web_session_enable_offsite_check']:
+                startTime = datetime.now()
+                networkWaitTime = self.checkOffsite(priorURL=self.targetURL)
+                actionExecutionTimes['checkOffsite-first-networkWaitTime'] = networkWaitTime
+                actionExecutionTimes['checkOffsite-first-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
 
             executionTrace = ExecutionTrace(id=str(self.executionSession.id) + "-trace-" + str(self.traceNumber))
             executionTrace.actionExecutionTimes = actionExecutionTimes
@@ -1129,14 +1146,16 @@ class WebEnvironmentSession:
 
             executionTrace.didActionSucceed = success
 
-            startTime = datetime.now()
-            networkWaitTime = self.checkOffsite(priorURL=executionTrace.startURL)
-            actionExecutionTimes['checkOffsite-second-networkWaitTime'] = networkWaitTime
-            actionExecutionTimes['checkOffsite-second-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
+            if self.config['web_session_enable_offsite_check']:
+                startTime = datetime.now()
+                networkWaitTime = self.checkOffsite(priorURL=executionTrace.startURL)
+                actionExecutionTimes['checkOffsite-second-networkWaitTime'] = networkWaitTime
+                actionExecutionTimes['checkOffsite-second-body'] = ((datetime.now() - startTime).total_seconds() - networkWaitTime)
 
-            startTime = datetime.now()
-            self.checkLoadFailure(priorURL=executionTrace.startURL)
-            actionExecutionTimes['checkLoadFailure'] = (datetime.now() - startTime).total_seconds()
+            if self.config['web_session_enable_load_failure_check']:
+                startTime = datetime.now()
+                self.checkLoadFailure(priorURL=executionTrace.startURL)
+                actionExecutionTimes['checkLoadFailure'] = (datetime.now() - startTime).total_seconds()
 
             self.hideInputCaret()
 

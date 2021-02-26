@@ -68,7 +68,17 @@ class NetworkErrorTracer:
                     except UnicodeDecodeError:
                         text = str(flow.response.data.content)
 
-                self.errors.append(HttpError(type="http", path=flow.request.path, statusCode=flow.response.status_code, message=str(text), url=flow.request.url))
+                self.errors.append(HttpError(
+                    type="http",
+                    path=flow.request.path,
+                    statusCode=flow.response.status_code,
+                    message=str(text),
+                    url=flow.request.url,
+                    requestHeaders=dict(flow.request.headers),
+                    responseHeaders=dict(flow.response.headers),
+                    requestData=str(flow.request.data.content),
+                    responseData=str(text)
+                ))
         except Exception as e:
             getLogger().error(traceback.format_exc())
 

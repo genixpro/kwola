@@ -56,11 +56,11 @@ class DotNetRPCErrorTracer:
 
             if isinstance(requestJSON, list):
                 for rpcRequest, rpcResponse in zip(requestJSON, responseJSON):
-                    self.analyzeRPC(rpcRequest, rpcResponse)
+                    self.analyzeRPC(rpcRequest, rpcResponse, flow)
             elif isinstance(requestJSON, dict):
-                self.analyzeRPC(requestJSON, responseJSON)
+                self.analyzeRPC(requestJSON, responseJSON, flow)
 
-    def analyzeRPC(self, rpcRequest, rpcResponse):
+    def analyzeRPC(self, rpcRequest, rpcResponse, flow):
         if rpcResponse['type'] != "rpc":
             message = ""
             if "exceptionmessage" in rpcResponse:
@@ -68,16 +68,16 @@ class DotNetRPCErrorTracer:
             elif "implementationexceptiontype" in rpcResponse:
                 message = f"Exception occurred in backend RPC call: {rpcResponse['implementationexceptiontype']}"
 
-            message += f"\nRequest data: {json.dumps(rpcRequest, indent=4)}\nResponse data: {json.dumps(rpcResponse, indent=4)}"
-
             message = message.strip()
 
             self.errors.append(
                 DotNetRPCError(type="dotnetrpc",
                                message=message,
                                requestData=json.dumps(rpcRequest, indent=4),
-                               responseData=json.dumps(rpcResponse, indent=4)
-                               )
+                               responseData=json.dumps(rpcResponse, indent=4),
+                               requestHeaders=dict(flow.request.headers),
+                               responseHeaders=dict(flow.response.headers)
+                              )
             )
 
     def error(self, flow):

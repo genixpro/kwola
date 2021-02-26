@@ -29,6 +29,7 @@ import pickle
 from google.cloud import storage
 import google
 import google.cloud
+import google.cloud.exceptions
 from ..components.utils.retry import autoretry
 from ..config.config import getSharedGCSStorageClient
 
@@ -82,15 +83,12 @@ def saveObjectToDisk(targetObject, folder, config, overrideSaveFormat=None, over
             config.saveKwolaFileData(folder, fileName, gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression))
 
     elif dataFormat == "mongo":
-        targetObject.save()
+        targetObject.save(validate=False)
 
     elif dataFormat == "gcs":
-        storageClient = getSharedGCSStorageClient()
-        applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + targetObject.applicationId)
-        objectPath = os.path.join(folder, f"{targetObject.id}.json.gz")
-        objectBlob = storage.Blob(objectPath, applicationStorageBucket)
+        fileName = f"{targetObject.id}.json.gz"
         data = gzip.compress(bytes(targetObject.to_json(indent=4), "utf8"), compresslevel=compression)
-        objectBlob.upload_from_string(data)
+        config.saveKwolaFileData(folder, fileName, data, useCacheBucket=False)
 
 @autoretry()
 def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True, applicationId=None):
@@ -103,11 +101,8 @@ def loadObjectFromDisk(modelClass, id, folder, config, printErrorOnFailure=True,
             if applicationId is None:
                 raise RuntimeError("Can't load object from google cloud storage without an applicationId, which is used to indicate the bucket.")
 
-            storageClient = getSharedGCSStorageClient()
-            applicationStorageBucket = storage.Bucket(storageClient, "kwola-testing-run-data-" + applicationId)
-            objectPath = os.path.join(folder, f"{id}.json.gz")
-            objectBlob = storage.Blob(objectPath, applicationStorageBucket)
-            data = objectBlob.download_as_string()
+            fileName = f"{id}.json.gz"
+            data = config.loadKwolaFileData(folder, fileName, useCacheBucket=False)
             object = modelClass.from_json(str(gzip.decompress(data), "utf8"))
             return object
 

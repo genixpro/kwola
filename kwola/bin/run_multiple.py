@@ -20,28 +20,34 @@
 
 
 from ..config.config import KwolaCoreConfiguration
-from ..datamodels.CustomIDField import CustomIDField
-from ..datamodels.TestingStepModel import TestingStep
-from ..tasks import RunTestingStep
-from .main import getConfigurationDirFromCommandLineArgs
+from ..tasks import TrainAgentLoop
 from ..diagnostics.test_installation import testInstallation
+import os.path
+import questionary
+import sys
 from ..config.logger import getLogger, setupLocalLogging
 import logging
 
+
 def main():
     """
-        This is the entry point for the Kwola secondary command, kwola_run_test_step.
+        This is the entry point for the the kwola run_multiple command, which is used to run multiple consecutive Kwola runs
+        one after another.
     """
     setupLocalLogging()
     success = testInstallation(verbose=True)
     if not success:
-        print("Refusing to start testing step. There appears to be a problem with your Kwola installation or environment.")
+        print(
+            "Unable to start the training loop. There appears to be a problem "
+            "with your Kwola installation or environment. Exiting.")
         exit(1)
 
-    configDir = getConfigurationDirFromCommandLineArgs()
-    config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
 
-    testingStep = TestingStep(id=CustomIDField.generateNewUUID(TestingStep, config), testStepIndexWithinRun=0)
-    testingStep.saveToDisk(config)
+    configDirs = sys.argv[1:]
 
-    RunTestingStep.runTestingStep(configDir, str(testingStep.id))
+    for configDir in configDirs:
+        getLogger().info(f"Starting the training loop for {configDir}")
+        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+        TrainAgentLoop.trainAgent(config)
+        getLogger().info(f"Finished the training loop for {configDir}")
+

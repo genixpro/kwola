@@ -18,6 +18,7 @@
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
+from ...components.proxy.BrowserFirewall import BrowserFirewall
 from ...components.proxy.RewriteProxy import RewriteProxy
 from ...components.proxy.PathTracer import PathTracer
 from ...components.proxy.UserAgentTracer import UserAgentTracer
@@ -164,8 +165,10 @@ class ProxyProcess:
         userAgentTracer = UserAgentTracer()
         networkErrorTracer = NetworkErrorTracer()
         dotNetRPCErrorTracer = DotNetRPCErrorTracer()
+        browserFirewall = BrowserFirewall(config)
 
         mitmProxyPlugins = [
+            browserFirewall,
             codeRewriter,
             pathTracer,
             userAgentTracer,

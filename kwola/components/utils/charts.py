@@ -54,7 +54,7 @@ def generateRewardChart(config, applicationId):
 
     ax.plot(range(len(rewardValues)), rewardValues, color='green')
 
-    ax.set_ylim(0, 15)
+    ax.set_ylim(0, 25)
 
     ax.set(xlabel='Testing Step #', ylabel='Reward',
            title='Reward per session')
@@ -70,6 +70,119 @@ def generateRewardChart(config, applicationId):
     pool.close()
     pool.join()
 
+def averageFitnessForTestingStep(config, testingStepId):
+    testingStep = TestingStep.loadFromDisk(testingStepId, config)
+
+    stepFitnessValues = []
+    for sessionId in testingStep.executionSessions:
+        session = ExecutionSession.loadFromDisk(sessionId, config)
+        if session.status == "completed" and session.bestApplicationProvidedCumulativeFitness is not None:
+            stepFitnessValues.append(session.bestApplicationProvidedCumulativeFitness)
+
+    if len(stepFitnessValues) > 0:
+        return numpy.mean(stepFitnessValues)
+    else:
+        return None
+
+
+def generateFitnessChart(config, applicationId):
+    getLogger().info(f"Generating the fitness chart")
+
+    config = KwolaCoreConfiguration(config)
+
+    testingSteps = sorted(
+        [step for step in TrainingManager.loadAllTestingSteps(config, applicationId=applicationId) if step.status == "completed"],
+        key=lambda step: step.startTime, reverse=False)
+
+    fitnessValueFutures = []
+
+    pool = multiprocessing.Pool(config['chart_generation_dataload_workers'])
+
+    for step in testingSteps:
+        fitnessValueFutures.append(pool.apply_async(averageFitnessForTestingStep, [config, step.id]))
+
+    fitnessValues = [future.get() for future in fitnessValueFutures if future.get() is not None]
+
+    if len(fitnessValues) > 0:
+        bestFitness = numpy.max(fitnessValues)
+
+        fig, ax = plt.subplots()
+
+        fitnessValues = scipy.signal.medfilt(fitnessValues, kernel_size=9)
+
+        ax.plot(range(len(fitnessValues)), fitnessValues, color='green')
+
+        ax.set_ylim(0, 100)
+
+        ax.set(xlabel='Testing Step #', ylabel='Fitness',
+               title='Fitness per session')
+        ax.grid()
+
+        _, localFilePath = tempfile.mkstemp(suffix=".png")
+        fig.savefig(localFilePath)
+        with open(localFilePath, 'rb') as f:
+            config.saveKwolaFileData("charts", "fitness_chart.png", f.read())
+        os.unlink(localFilePath)
+
+        getLogger().info(f"Best Fitness Value: {bestFitness}")
+
+        pool.close()
+        pool.join()
+
+def averageTracesWithNewBranchesForTestingStep(config, testingStepId):
+    testingStep = TestingStep.loadFromDisk(testingStepId, config)
+
+    stepTraceWithNewBranchCounts = []
+    for sessionId in testingStep.executionSessions:
+        session = ExecutionSession.loadFromDisk(sessionId, config)
+        if session.status == "completed" and session.countTracesWithNewBranches is not None:
+            stepTraceWithNewBranchCounts.append(session.countTracesWithNewBranches)
+
+    if len(stepTraceWithNewBranchCounts) > 0:
+        return numpy.mean(stepTraceWithNewBranchCounts)
+    else:
+        return None
+
+
+def generateTracesWithNewBranchesChart(config, applicationId):
+    getLogger().info(f"Generating the traces with new branches chart")
+
+    config = KwolaCoreConfiguration(config)
+
+    testingSteps = sorted(
+        [step for step in TrainingManager.loadAllTestingSteps(config, applicationId=applicationId) if step.status == "completed"],
+        key=lambda step: step.startTime, reverse=False)
+
+    countTracesWithNewBranchesFutures = []
+
+    pool = multiprocessing.Pool(config['chart_generation_dataload_workers'])
+
+    for step in testingSteps:
+        countTracesWithNewBranchesFutures.append(pool.apply_async(averageTracesWithNewBranchesForTestingStep, [config, step.id]))
+
+    countTracesWithNewBranchesValues = [future.get() for future in countTracesWithNewBranchesFutures if future.get() is not None]
+
+    if len(countTracesWithNewBranchesValues) > 0:
+        fig, ax = plt.subplots()
+
+        countTracesWithNewBranchesValues = scipy.signal.medfilt(countTracesWithNewBranchesValues, kernel_size=9)
+
+        ax.plot(range(len(countTracesWithNewBranchesValues)), countTracesWithNewBranchesValues, color='green')
+
+        ax.set_ylim(0, config['testing_sequence_length'])
+
+        ax.set(xlabel='Testing Step #', ylabel='Traces with new branches',
+               title='# of testing traces that have new branches')
+        ax.grid()
+
+        _, localFilePath = tempfile.mkstemp(suffix=".png")
+        fig.savefig(localFilePath)
+        with open(localFilePath, 'rb') as f:
+            config.saveKwolaFileData("charts", "traces_with_new_branches.png", f.read())
+        os.unlink(localFilePath)
+
+        pool.close()
+        pool.join()
 
 def generateCoverageChart(config, applicationId):
     getLogger().info(f"Generating the coverage chart")
@@ -140,6 +253,7 @@ def findAllTrainingStepIds(config, applicationId=None):
                 stepId = stepId.replace(".json", "")
                 stepId = stepId.replace(".gz", "")
                 stepId = stepId.replace(".pickle", "")
+                stepId = stepId.replace(".enc", "")
 
                 trainingStepIds.append(stepId)
 
@@ -283,6 +397,7 @@ def generateCumulativeCoverageChart(config, applicationId=None, numberOfTestingS
     ax.plot(numpy.array(range(len(cumulativeLinesExecutedValues))) * numberOfTestingStepsPerValue, cumulativeLinesExecutedValues, color='green')
     ax.set_ylim(0, 600)
     ax.set(xlabel='Testing Steps Completed', ylabel='Cumulative Total Lines Triggered (green)', title=f"Cumulative Lines Triggered Chart, Group Size: {numberOfTestingStepsPerValue}")
+    ax.set_ylim(650, 750)
     # ax2 = ax.twinx()
     # ax2.plot(numpy.array(range(len(cumulativeTotalLinesValues))) * numberOfTestingStepsPerValue, cumulativeTotalLinesValues, color='red')
     # ax2.set(ylabel="Cumulative Lines Available (red)")
@@ -312,6 +427,7 @@ def loadAllBugs(config, applicationId=None):
                 bugId = bugId.replace(".json", "")
                 bugId = bugId.replace(".gz", "")
                 bugId = bugId.replace(".pickle", "")
+                bugId = bugId.replace(".enc", "")
 
                 if bugId not in bugIds:
                     bugIds.add(bugId)
@@ -376,17 +492,11 @@ def generateAllCharts(config, applicationId=None, enableCumulativeCoverage=False
 
     futures = []
 
-    if config['chart_enable_cumulative_coverage_chart'] and enableCumulativeCoverage:
-        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 100]))
-        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 25]))
-        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 10]))
-        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 5]))
-
     futures.append(pool.apply_async(generateRewardChart, [config.serialize(), applicationId]))
-    futures.append(pool.apply_async(generateCoverageChart, [config.serialize(), applicationId]))
-
-    if config['chart_enable_cumulative_errors_chart']:
-        futures.append(pool.apply_async(generateCumulativeErrorsFoundChart, [config.serialize(), applicationId]))
+    futures.append(pool.apply_async(generateFitnessChart, [config.serialize(), applicationId]))
+    futures.append(pool.apply_async(generateTracesWithNewBranchesChart, [config.serialize(), applicationId]))
+    if enableCumulativeCoverage:
+        futures.append(pool.apply_async(generateCoverageChart, [config.serialize(), applicationId]))
 
     futures.append(pool.apply_async(generateLossChart, [config.serialize(), applicationId, 'totalLosses', "Total Loss", 'total_loss_chart.png']))
     futures.append(pool.apply_async(generateLossChart, [config.serialize(), applicationId, 'presentRewardLosses', "Present Reward Loss", 'present_reward_loss_chart.png']))
@@ -394,6 +504,15 @@ def generateAllCharts(config, applicationId=None, enableCumulativeCoverage=False
     futures.append(pool.apply_async(generateLossChart, [config.serialize(), applicationId, 'stateValueLosses', "State Value Loss", 'state_value_loss_chart.png']))
     futures.append(pool.apply_async(generateLossChart, [config.serialize(), applicationId, 'advantageLosses', "Advantage Loss", 'advantage_loss_chart.png']))
     futures.append(pool.apply_async(generateLossChart, [config.serialize(), applicationId, 'actionProbabilityLosses', "Action Probability Loss", 'action_probability_loss_chart.png']))
+
+    if config['chart_enable_cumulative_coverage_chart'] and enableCumulativeCoverage:
+        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 100]))
+        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 25]))
+        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 10]))
+        futures.append(pool.apply_async(generateCumulativeCoverageChart, [config.serialize(), applicationId, 5]))
+
+    if config['chart_enable_cumulative_errors_chart']:
+        futures.append(pool.apply_async(generateCumulativeErrorsFoundChart, [config.serialize(), applicationId]))
 
     for future in futures:
         future.get()

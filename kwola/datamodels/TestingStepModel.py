@@ -60,6 +60,8 @@ class TestingStep(Document):
 
     windowSize = StringField()
 
+    testStepIndexWithinRun = IntField()
+
     def saveToDisk(self, config):
         saveObjectToDisk(self, "testing_steps", config)
 

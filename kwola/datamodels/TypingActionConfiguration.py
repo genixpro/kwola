@@ -11,7 +11,7 @@ import math
 
 globalFakeStringGenerator = Faker()
 
-class TypingActionConfiguration(EmbeddedDocument):
+class TypingActionConfiguration(DynamicEmbeddedDocument):
     type = StringField()
 
     biasKeywords = StringField()

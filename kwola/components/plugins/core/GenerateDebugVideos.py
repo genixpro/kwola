@@ -40,7 +40,7 @@ class GenerateDebugVideos(TestingStepPluginBase):
             atexit.register(lambda: debugVideoSubprocess2.terminate())
             debugVideoSubprocesses.append(debugVideoSubprocess2)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.config['video_generation_processes']) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.config['testing_video_generation_processes']) as executor:
             futures = []
             for debugVideoSubprocess in debugVideoSubprocesses:
                 futures.append(executor.submit(GenerateDebugVideos.runAndJoinSubprocess, debugVideoSubprocess))

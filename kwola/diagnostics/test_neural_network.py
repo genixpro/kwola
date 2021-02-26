@@ -43,7 +43,7 @@ def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
             print("Running a test training iteration")
 
         batches = [agent.prepareEmptyBatch()]
-        agent.learnFromBatches(batches)
+        agent.learnFromBatches(batches, trainingStepIndex=100)
 
         return True
     except Exception:

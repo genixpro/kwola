@@ -33,8 +33,11 @@ from ..components.utils.regex import sharedUrlRegex
 from google.cloud import storage
 import google
 import google.cloud
+import google.cloud.exceptions
 from ..config.logger import getLogger, setupLocalLogging
 from ..components.utils.retry import autoretry
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+import hashlib
 
 globalCachedPrebuiltConfigs = {}
 
@@ -226,6 +229,19 @@ class KwolaCoreConfiguration:
     def saveKwolaFileData(self, folder, fileName, fileData, useCacheBucket=False):
         filePath = os.path.join(folder, fileName)
 
+        if self['data_serialization_encryption_key']:
+            nonceData = os.urandom(16)
+
+            keyHash = hashlib.sha256()
+            keyHash.update(bytes(self['data_serialization_encryption_key'] + folder + fileName, "utf8"))
+            cipher = Cipher(algorithms.AES(keyHash.digest()), modes.CTR(nonceData))
+
+            encryptor = cipher.encryptor()
+            fileData = nonceData + encryptor.update(fileData) + encryptor.finalize()
+            filePath += ".enc"
+        else:
+            cipher = None
+
         if self['data_file_storage_method'] == 'local':
             # Todo - we shouldn't be making these os.path.exists calls every single time we save file data
             # Its inefficient.
@@ -257,10 +273,28 @@ class KwolaCoreConfiguration:
     def loadKwolaFileData(self, folder, fileName, printErrorOnFailure=True, useCacheBucket=False):
         filePath = os.path.join(folder, fileName)
 
+        if self['data_serialization_encryption_key']:
+            keyHash = hashlib.sha256()
+            keyHash.update(bytes(self['data_serialization_encryption_key'] + folder + fileName, "utf8"))
+        else:
+            keyHash = None
+
         try:
             if self['data_file_storage_method'] == 'local':
+                if self['data_serialization_encryption_key']:
+                    filePath += ".enc"
+
                 with open(os.path.join(self.configurationDirectory, filePath), 'rb') as f:
                     data = f.read()
+
+                    if self['data_serialization_encryption_key']:
+                        nonceData = data[:16]
+                        data = data[16:]
+
+                        cipher = Cipher(algorithms.AES(keyHash.digest()), modes.CTR(nonceData))
+                        decryptor = cipher.decryptor()
+                        data = decryptor.update(data) + decryptor.finalize()
+
                     return data
             elif self['data_file_storage_method'] == 'gcs':
                 if 'applicationId' not in self or self.applicationId is None:
@@ -271,8 +305,27 @@ class KwolaCoreConfiguration:
                 if useCacheBucket:
                     bucketId += "-cache"
                 applicationStorageBucket = storage.Bucket(storageClient, bucketId)
-                objectBlob = storage.Blob(filePath, applicationStorageBucket)
-                data = objectBlob.download_as_string()
+
+                if self['data_serialization_encryption_key']:
+                    try:
+                        objectBlob = storage.Blob(filePath + ".enc", applicationStorageBucket)
+                        data = objectBlob.download_as_string()
+
+                        nonceData = data[:16]
+                        data = data[16:]
+                        cipher = Cipher(algorithms.AES(keyHash.digest()), modes.CTR(nonceData))
+
+                        decryptor = cipher.decryptor()
+                        data = decryptor.update(data) + decryptor.finalize()
+
+                    except google.cloud.exceptions.NotFound:
+                        # This is here just to support the days before we used encryption
+                        objectBlob = storage.Blob(filePath, applicationStorageBucket)
+                        data = objectBlob.download_as_string()
+                else:
+                    objectBlob = storage.Blob(filePath, applicationStorageBucket)
+                    data = objectBlob.download_as_string()
+
                 return data
             else:
                 raise RuntimeError(f"Unexpected value {self['data_file_storage_method']} for configuration data_file_storage_method")
@@ -292,6 +345,9 @@ class KwolaCoreConfiguration:
     @autoretry()
     def deleteKwolaFileData(self, folder, fileName, useCacheBucket=False):
         filePath = os.path.join(folder, fileName)
+
+        if self['data_serialization_encryption_key']:
+            filePath += ".enc"
 
         try:
             if self['data_file_storage_method'] == 'local':

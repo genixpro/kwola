@@ -173,7 +173,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
             enableTablet = bool(windowSizeChoices[1].title in results)
             enableSmartphone = bool(windowSizeChoices[2].title in results)
 
-            autologin = False
+            web_session_autologin = False
 
             if email and password:
                 autologin = questionary.select(
@@ -187,16 +187,16 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
 
             autologin = bool(autologin == 'yes')
 
-            prevent_offsite_links = questionary.select(
+            web_session_prevent_offsite_links = questionary.select(
                 "Do you want Kwola to stay on the website it starts on (prevent offsite links)?",
                 choices=[
                     'yes',
                     'no'
                 ]).ask()  # returns value of selection
-            if prevent_offsite_links is None:
+            if web_session_prevent_offsite_links is None:
                 exit(0)
 
-            prevent_offsite_links = bool(prevent_offsite_links == 'yes')
+            web_session_prevent_offsite_links = bool(web_session_prevent_offsite_links == 'yes')
 
             configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir(configName,
                                                                             url=url,
@@ -221,8 +221,8 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                             enableRandomCreditCardCommand=enableRandomCreditCardCommand,
                                                                             enableRandomURLCommand=enableRandomURLCommand,
                                                                             enableScrolling=enableScrolling,
-                                                                            autologin=autologin,
-                                                                            prevent_offsite_links=prevent_offsite_links,
+                                                                            web_session_autologin=autologin,
+                                                                            web_session_prevent_offsite_links=web_session_prevent_offsite_links,
                                                                             web_session_enable_chrome=enableChrome,
                                                                             web_session_enable_firefox=enableFirefox,
                                                                             web_session_enable_edge=enableEdge,
