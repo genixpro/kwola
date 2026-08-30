@@ -75,8 +75,8 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
         },
         "training": {
             "batch_size": 32,
-            "batches_per_iteration": 600,
-            "min_batches_per_iteration": 300,
+            "batches_per_iteration": 900,
+            "min_batches_per_iteration": 900,
             "max_batches_per_iteration": 900,
             "batch_iteration_adjustment": 50,
             "gradient_beta": 0.9,
@@ -97,7 +97,7 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
             "debug_video_every_testing_steps": 25,
         },
         "orchestration": {
-            "browser_workers": 32,
+            "browser_workers": 10,
             "browser_cpu_threads": 2,
             "telemetry_interval_seconds": 5.0,
             "minimum_traces_before_training": 20,
