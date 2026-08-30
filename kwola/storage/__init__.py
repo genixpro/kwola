@@ -4,7 +4,7 @@ from .blobs import AtomicBlobStore
 from .checkpoints import CheckpointPublisher
 from .codec import BinaryCodec, CodecError
 from .manifest import CheckpointMetadata, RunManifest, load_manifest, save_manifest
-from .records import LmdbRunStore, RecordCorruptionError
+from .records import LmdbRunStore, RecordCorruptionError, StorageFullError
 
 __all__ = [
     "AtomicBlobStore",
@@ -15,6 +15,7 @@ __all__ = [
     "LmdbRunStore",
     "RecordCorruptionError",
     "RunManifest",
+    "StorageFullError",
     "load_manifest",
     "save_manifest",
 ]

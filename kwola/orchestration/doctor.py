@@ -79,8 +79,13 @@ def _check_lmdb() -> DiagnosticCheck:
 
 
 def _check_browsers() -> tuple[DiagnosticCheck, ...]:
-    executable = shutil.which("playwright")
-    if executable is None:
+    environment_executable = Path(sys.executable).with_name("playwright")
+    executable = (
+        str(environment_executable)
+        if environment_executable.exists()
+        else shutil.which("playwright")
+    )
+    if not executable:
         failed = DiagnosticCheck(
             name="playwright", passed=False, detail="playwright was not found on PATH"
         )

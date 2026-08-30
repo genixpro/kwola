@@ -31,7 +31,7 @@ class LoginConfig(StrictModel):
 
 
 class BrowserConfig(StrictModel):
-    enabled: tuple[BrowserKind, ...] = (BrowserKind.CHROMIUM,)
+    enabled: tuple[BrowserKind, ...] = (BrowserKind.CHROMIUM, BrowserKind.FIREFOX)
     viewports: tuple[ViewportConfig, ...] = (ViewportConfig(width=1920, height=1080),)
     headless: bool = True
     prevent_offsite_navigation: bool = True

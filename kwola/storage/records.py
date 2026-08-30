@@ -13,6 +13,10 @@ class RecordCorruptionError(RuntimeError):
     pass
 
 
+class StorageFullError(RuntimeError):
+    pass
+
+
 class LmdbRunStore:
     def __init__(
         self,
@@ -49,8 +53,15 @@ class LmdbRunStore:
     def put(self, collection: str, key: str, value: Mapping[str, Any]) -> None:
         if self._readonly:
             raise PermissionError("run store is read-only")
-        with self._environment.begin(write=True) as transaction:
-            transaction.put(self._key(collection, key), self._codec.encode(value), overwrite=True)
+        try:
+            with self._environment.begin(write=True) as transaction:
+                transaction.put(
+                    self._key(collection, key),
+                    self._codec.encode(value),
+                    overwrite=True,
+                )
+        except lmdb.MapFullError as error:
+            raise StorageFullError("run database has exhausted its configured map size") from error
 
     def get(self, collection: str, key: str) -> dict[str, Any] | None:
         with self._environment.begin() as transaction:
