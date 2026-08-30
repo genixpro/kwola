@@ -39,13 +39,14 @@ class AutologinService:
     def run(self, page: Page) -> bool:
         if not self._config.enabled:
             return False
+        email, password = self._config.credentials()
         elements = self._find(page)
         if not elements.emails and not elements.passwords and elements.submits:
             self._click(page, elements.submits[0])
             elements = self._find(page)
         typed_email = False
         if elements.emails and not elements.passwords and elements.submits:
-            self._type(page, elements.emails[0], self._config.email or "")
+            self._type(page, elements.emails[0], email)
             self._click(page, elements.submits[0])
             typed_email = True
             elements = self._find(page)
@@ -60,8 +61,8 @@ class AutologinService:
             )
         before = page.url
         if not typed_email:
-            self._type(page, elements.emails[0], self._config.email or "")
-        self._type(page, elements.passwords[0], self._config.password or "")
+            self._type(page, elements.emails[0], email)
+        self._type(page, elements.passwords[0], password)
         self._click(page, self._nearest_submit(elements))
         self._waiter.wait(page)
         return page.url != before

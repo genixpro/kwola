@@ -1,12 +1,30 @@
 """Pydantic configuration models used at run and process boundaries."""
 
+import os
+import re
 from typing import Literal, Self
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kwola.domain.actions import BrowserKind
 
 ProfileName = Literal["testing", "standard", "rig"]
+_ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _environment_secret(name: str | None, label: str) -> str | None:
+    if name is None:
+        return None
+    value = os.environ.get(name)
+    if not value:
+        raise ValueError(f"{label} environment variable is unset or empty: {name}")
+    return value
+
+
+def _valid_environment_name(value: str | None) -> str | None:
+    if value is not None and _ENVIRONMENT_NAME.fullmatch(value) is None:
+        raise ValueError("credential environment variable names must be shell identifiers")
+    return value
 
 
 class StrictModel(BaseModel):
@@ -20,14 +38,31 @@ class ViewportConfig(StrictModel):
 
 class LoginConfig(StrictModel):
     enabled: bool = False
-    email: str | None = None
-    password: str | None = None
+    email: str | None = Field(default=None, exclude=True, repr=False)
+    password: str | None = Field(default=None, exclude=True, repr=False)
+    email_environment: str | None = None
+    password_environment: str | None = None
+
+    _environment_names_are_valid = field_validator("email_environment", "password_environment")(
+        _valid_environment_name
+    )
 
     @model_validator(mode="after")
     def credentials_required_when_enabled(self) -> Self:
-        if self.enabled and (not self.email or not self.password):
-            raise ValueError("autologin requires both email and password")
+        email_source = self.email or self.email_environment
+        password_source = self.password or self.password_environment
+        if self.enabled and (not email_source or not password_source):
+            raise ValueError("autologin requires email and password credential sources")
         return self
+
+    def credentials(self) -> tuple[str, str]:
+        email = self.email or _environment_secret(self.email_environment, "autologin email")
+        password = self.password or _environment_secret(
+            self.password_environment, "autologin password"
+        )
+        if not email or not password:
+            raise ValueError("autologin credentials are unavailable")
+        return email, password
 
 
 class BrowserConfig(StrictModel):
@@ -143,8 +178,10 @@ class ActionWeightsConfig(StrictModel):
 
 
 class ActionConfig(StrictModel):
-    email: str | None = None
-    password: str | None = None
+    email: str | None = Field(default=None, exclude=True, repr=False)
+    password: str | None = Field(default=None, exclude=True, repr=False)
+    email_environment: str | None = None
+    password_environment: str | None = None
     name: str | None = None
     paragraph: str | None = None
     random_letters: bool = False
@@ -163,6 +200,16 @@ class ActionConfig(StrictModel):
     right_click: bool = False
     scrolling: bool = True
     weights: ActionWeightsConfig = ActionWeightsConfig()
+
+    _environment_names_are_valid = field_validator("email_environment", "password_environment")(
+        _valid_environment_name
+    )
+
+    def resolved_email(self) -> str | None:
+        return self.email or _environment_secret(self.email_environment, "action email")
+
+    def resolved_password(self) -> str | None:
+        return self.password or _environment_secret(self.password_environment, "action password")
 
 
 class PolicyConfig(StrictModel):

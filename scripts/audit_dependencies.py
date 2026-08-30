@@ -53,11 +53,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"EXCEPTED {finding.source} {finding.advisory_id} "
                 f"{finding.package} severity={finding.severity}"
             )
-        elif finding.fixable and finding.severity in {"high", "critical"}:
+        elif finding.severity in {"high", "critical"}:
             failures.append(finding)
             print(
                 f"FAIL {finding.source} {finding.advisory_id} "
-                f"{finding.package} severity={finding.severity} fixable=true"
+                f"{finding.package} severity={finding.severity} "
+                f"fixable={str(finding.fixable).lower()}"
             )
         else:
             print(

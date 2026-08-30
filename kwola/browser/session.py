@@ -52,16 +52,29 @@ class BrowserSessionCoordinator:
             self._waiter.wait(self._adapter.page)
             self._autologin.run(self._adapter.page)
             return self.observe()
-        except BaseException:
-            self.close()
+        except BaseException as error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                error.add_note(f"browser session cleanup also failed: {cleanup_error}")
             raise
 
     def close(self) -> None:
+        failure: BaseException | None = None
         try:
             self._adapter.close()
-        finally:
-            if self._proxy is not None:
+        except BaseException as error:
+            failure = error
+        if self._proxy is not None:
+            try:
                 self._proxy.close()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                else:
+                    failure.add_note(f"proxy cleanup also failed: {error}")
+        if failure is not None:
+            raise failure
 
     def discover_actions(self) -> ActionMap:
         return self._extractor.extract(self._adapter.page)

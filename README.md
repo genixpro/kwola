@@ -47,6 +47,13 @@ Every run contains strictly validated `kwola.json` and `manifest.json` files, an
 content-addressed blobs, disposable prepared-sample cache records, reports, logs, and atomically
 published PyTorch checkpoints. Unknown configuration fields are rejected.
 
+Credentials are referenced by environment-variable name and are never written into new run
+configuration files. For example, set `browser.autologin.email_environment` and
+`browser.autologin.password_environment` in `kwola.json`, then export those named variables before
+running Kwola. The equivalent fixed-action fields are `policy.actions.email_environment` and
+`policy.actions.password_environment`. Legacy 1.0 files containing inline credentials remain
+loadable, but Kwola refuses to write new configuration files containing inline secrets.
+
 See [Architecture](docs/architecture.md) for component and process ownership, storage layout, hook
 ordering, and failure behavior. See [Acceptance evidence](docs/acceptance.md) for the recorded
 baseline and final rig results.
@@ -63,6 +70,9 @@ npm audit --json > npm-audit.json
 uv run python scripts/audit_dependencies.py --python-json pip-audit.json \
   --npm-json npm-audit.json --exceptions security/advisory-exceptions.json
 ```
+
+Every high or critical advisory fails this policy unless it has an owned, justified, unexpired
+exception, regardless of whether an upstream fix is currently available.
 
 Release acceptance additionally passes `--require-no-exceptions` to the dependency policy and runs
 the complete gate on the Linux two-GPU host without modifying the source 1.0 run:

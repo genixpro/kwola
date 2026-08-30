@@ -19,10 +19,20 @@ def load_config(run_dir: Path) -> RunConfig:
 
 
 def save_config(config: RunConfig, run_dir: Path) -> Path:
+    _reject_inline_secrets(config)
     run_dir.mkdir(parents=True, exist_ok=True)
     target = run_dir / CONFIG_NAME
     _atomic_json_write(target, config.model_dump(mode="json"))
     return target
+
+
+def _reject_inline_secrets(config: RunConfig) -> None:
+    login = config.browser.autologin
+    actions = config.policy.actions
+    if any((login.email, login.password, actions.email, actions.password)):
+        raise ValueError(
+            "inline credentials cannot be persisted; configure *_environment fields instead"
+        )
 
 
 def create_run_config(

@@ -405,6 +405,9 @@ class FakeTrainingModel:
     def load_state_dict(self, _payload: object) -> None:
         return None
 
+    def load_checkpoint_state_dict(self, payload: object) -> None:
+        self.load_state_dict(payload)
+
 
 class FakeTrainingOptimizer:
     def __init__(self, *_args: object) -> None:

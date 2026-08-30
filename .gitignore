@@ -5,6 +5,17 @@ venv
 dist
 node_modules
 kwola_run_0**
+# Run directories may be named arbitrarily; keep their identifying configuration and artifacts out
+# of source control even when they are created below the repository.
+kwola.json
+manifest.json
+run.lmdb/
+blobs/
+cache/
+checkpoints/
+reports/
+logs/
+telemetry/
 build/
 .coverage*
 .mypy_cache/

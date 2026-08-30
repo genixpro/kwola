@@ -30,8 +30,8 @@ def _fixed_channels(config: PolicyConfig) -> list[ActionChannel]:
     actions = config.actions
     weights = actions.weights
     fixed = (
-        ("typeEmail", actions.email, weights.type_email, ("email", "user")),
-        ("typePassword", actions.password, weights.type_password, ("pass",)),
+        ("typeEmail", actions.resolved_email(), weights.type_email, ("email", "user")),
+        ("typePassword", actions.resolved_password(), weights.type_password, ("pass",)),
         ("typeName", actions.name, weights.type_name, ("name",)),
         ("typeParagraph", actions.paragraph, weights.type_paragraph, ()),
     )

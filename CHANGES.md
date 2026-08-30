@@ -23,6 +23,10 @@
   and worker warnings. Hook shutdown remains reverse ordered, including failed startup/finish paths.
 - Runtime dependencies now use Torch 2.13.0 from PyPI, mitmproxy 12.2.3, OpenCV 5, Matplotlib 3.11,
   and the latest Babel 7 CLI/core releases. The custom CUDA 12.6 package source has been removed.
+- New run configurations reference credentials through environment variables and refuse to persist
+  inline secrets. Existing 1.0 configurations with inline credentials remain readable.
+- High and critical dependency findings now require an explicit time-bounded exception even when no
+  compatible upstream fix exists.
 - Time-limited audit exceptions for cryptography, msgpack, and tornado findings constrained by
   mitmproxy 12.2.3 expire on 2026-09-30; CI will fail if they are not removed or renewed.
 - Pull requests and pushes now run locked Python 3.12/Node 24 installs, both supported browsers,

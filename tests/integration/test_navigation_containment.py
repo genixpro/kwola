@@ -88,9 +88,23 @@ def test_every_cross_origin_document_navigation_is_blocked_but_subresources_load
                     assert "/api" in foreign_requests
                 assert "/iframe" not in foreign_requests
 
-                for selector in ("#anchor", "#form", "#script", "#popup"):
+                for selector, destination in (
+                    ("#anchor", "anchor"),
+                    ("#form", "form"),
+                    ("#script", "script"),
+                    ("#popup", "popup"),
+                ):
                     adapter.navigate(primary)
                     adapter.page.locator(selector).click(no_wait_after=True)
+                    for _ in range(20):
+                        _console, network = telemetry.snapshot()
+                        if any(
+                            entry.failure is not None
+                            and entry.url.rsplit("/", maxsplit=1)[-1].startswith(destination)
+                            for entry in network
+                        ):
+                            break
+                        adapter.page.wait_for_timeout(50)
                     adapter.page.wait_for_timeout(100)
                     try:
                         adapter.ensure_allowed()

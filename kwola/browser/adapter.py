@@ -1,5 +1,6 @@
 """Thin Playwright lifecycle adapter."""
 
+from collections.abc import Callable
 from typing import Self
 from urllib.parse import urljoin
 
@@ -65,22 +66,29 @@ class PlaywrightBrowserAdapter:
     def start(self) -> None:
         if self._playwright is not None:
             raise RuntimeError("browser adapter is already started")
-        self._playwright = sync_playwright().start()
-        browser_type = getattr(self._playwright, self._browser_kind.value)
-        proxy = {"server": self._proxy_server} if self._proxy_server else None
-        self._browser = browser_type.launch(headless=self._config.headless, proxy=proxy)
-        self._context = self._browser.new_context(
-            viewport={"width": self._viewport.width, "height": self._viewport.height},
-            ignore_https_errors=self._proxy_server is not None,
-        )
-        self._context.route("**/*", self._route_request)
-        self._page = self._context.new_page()
-        self._context.on("page", self._handle_new_page)
-        self._page.set_default_timeout(self._config.action_timeout_seconds * 1000)
-        if self._capture_console:
-            self._page.on("console", self._record_console)
-        if self._capture_network:
-            self._page.on("response", self._record_response)
+        try:
+            self._playwright = sync_playwright().start()
+            browser_type = getattr(self._playwright, self._browser_kind.value)
+            proxy = {"server": self._proxy_server} if self._proxy_server else None
+            self._browser = browser_type.launch(headless=self._config.headless, proxy=proxy)
+            self._context = self._browser.new_context(
+                viewport={"width": self._viewport.width, "height": self._viewport.height},
+                ignore_https_errors=self._proxy_server is not None,
+            )
+            self._context.route("**/*", self._route_request)
+            self._page = self._context.new_page()
+            self._context.on("page", self._handle_new_page)
+            self._page.set_default_timeout(self._config.action_timeout_seconds * 1000)
+            if self._capture_console:
+                self._page.on("console", self._record_console)
+            if self._capture_network:
+                self._page.on("response", self._record_response)
+        except BaseException as error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                error.add_note(f"browser cleanup also failed: {cleanup_error}")
+            raise
 
     def navigate(self, target: str) -> None:
         self._navigation.require_allowed(target)
@@ -96,17 +104,32 @@ class PlaywrightBrowserAdapter:
         self._navigation.require_allowed(self.page.url)
 
     def close(self) -> None:
-        if self._context is not None:
-            self._context.close()
-        if self._browser is not None:
-            self._browser.close()
-        if self._playwright is not None:
-            self._playwright.stop()
+        context = self._context
+        browser = self._browser
+        playwright = self._playwright
         self._page = None
         self._context = None
         self._browser = None
         self._playwright = None
         self._blocked_popups = 0
+        failures: list[BaseException] = []
+        closers: list[Callable[[], None]] = []
+        if context is not None:
+            closers.append(context.close)
+        if browser is not None:
+            closers.append(browser.close)
+        if playwright is not None:
+            closers.append(playwright.stop)
+        for close in closers:
+            try:
+                close()
+            except BaseException as error:
+                failures.append(error)
+        if failures:
+            first = failures[0]
+            for additional in failures[1:]:
+                first.add_note(f"additional browser cleanup failure: {additional}")
+            raise first
 
     def _record_console(self, message: ConsoleMessage) -> None:
         self._telemetry.record_console(ConsoleEntry(message.type, message.text, self.page.url))

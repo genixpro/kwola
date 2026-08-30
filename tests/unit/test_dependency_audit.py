@@ -71,9 +71,9 @@ def test_osv_severity_parses_labels_numeric_scores_and_cvss_vectors() -> None:
 
 @pytest.mark.parametrize(
     ("fix_available", "expected"),
-    ((True, 1), (False, 0)),
+    ((True, 1), (False, 1)),
 )
-def test_high_npm_finding_fails_only_when_fixable(
+def test_high_npm_finding_always_requires_an_exception(
     tmp_path: Path, fix_available: bool, expected: int
 ) -> None:
     python_json, npm_json, exceptions = _audit_inputs(tmp_path, fix_available)
@@ -90,6 +90,38 @@ def test_high_npm_finding_fails_only_when_fixable(
             ]
         )
         == expected
+    )
+
+
+def test_matching_exception_allows_unfixable_high_finding(tmp_path: Path) -> None:
+    python_json, npm_json, exceptions = _audit_inputs(tmp_path, False)
+    exceptions.write_text(
+        json.dumps(
+            [
+                {
+                    "advisory_id": "GHSA-fixture",
+                    "package": "example",
+                    "rationale": "upstream has not published a compatible fix",
+                    "owner": "tests",
+                    "expires": "2099-01-01",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        audit_dependencies.main(
+            [
+                "--python-json",
+                str(python_json),
+                "--npm-json",
+                str(npm_json),
+                "--exceptions",
+                str(exceptions),
+            ]
+        )
+        == 0
     )
 
 

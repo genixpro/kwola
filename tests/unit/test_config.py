@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from kwola.config import create_run_config, load_config, profile_config
+from kwola.config import create_run_config, load_config, profile_config, save_config
+from kwola.config.models import RunConfig
 
 
 def test_profiles_are_fresh_and_preserve_expected_topologies() -> None:
@@ -77,6 +78,73 @@ def test_config_round_trip_is_atomic_and_directory_must_be_empty(tmp_path: Path)
     assert not tuple(run_dir.glob(".kwola.json.*"))
     with pytest.raises(FileExistsError):
         create_run_config("https://example.com", "testing", run_dir, 123)
+
+
+def test_credentials_use_environment_references_without_persisting_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = profile_config("testing", "https://example.com", 1).model_dump()
+    data["browser"]["autologin"] = {
+        "enabled": True,
+        "email_environment": "KWOLA_TEST_LOGIN_EMAIL",
+        "password_environment": "KWOLA_TEST_LOGIN_PASSWORD",
+    }
+    data["policy"]["actions"].update(
+        email_environment="KWOLA_TEST_ACTION_EMAIL",
+        password_environment="KWOLA_TEST_ACTION_PASSWORD",
+    )
+    config = RunConfig.model_validate(data)
+    monkeypatch.setenv("KWOLA_TEST_LOGIN_EMAIL", "login@example.test")
+    monkeypatch.setenv("KWOLA_TEST_LOGIN_PASSWORD", "login-secret")
+    monkeypatch.setenv("KWOLA_TEST_ACTION_EMAIL", "action@example.test")
+    monkeypatch.setenv("KWOLA_TEST_ACTION_PASSWORD", "action-secret")
+
+    path = save_config(config, tmp_path)
+    serialized = path.read_text(encoding="utf-8")
+    loaded = load_config(tmp_path)
+
+    assert "login-secret" not in serialized
+    assert "action-secret" not in serialized
+    assert loaded.browser.autologin.credentials() == ("login@example.test", "login-secret")
+    assert loaded.policy.actions.resolved_email() == "action@example.test"
+    assert loaded.policy.actions.resolved_password() == "action-secret"
+
+
+def test_inline_credentials_remain_loadable_but_cannot_be_persisted(tmp_path: Path) -> None:
+    data = profile_config("testing", "https://example.com", 1).model_dump()
+    data["browser"]["autologin"] = {
+        "enabled": True,
+        "email": "legacy@example.test",
+        "password": "legacy-secret",
+    }
+    config = RunConfig.model_validate(data)
+
+    assert config.browser.autologin.credentials() == (
+        "legacy@example.test",
+        "legacy-secret",
+    )
+    with pytest.raises(ValueError, match="inline credentials"):
+        save_config(config, tmp_path)
+
+
+def test_credential_environment_references_are_validated_and_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = profile_config("testing", "https://example.com", 1).model_dump()
+    data["browser"]["autologin"] = {
+        "enabled": True,
+        "email_environment": "not-valid-name",
+        "password_environment": "PASSWORD",
+    }
+    with pytest.raises(ValidationError, match="shell identifiers"):
+        RunConfig.model_validate(data)
+
+    data["browser"]["autologin"]["email_environment"] = "EMAIL"
+    config = RunConfig.model_validate(data)
+    monkeypatch.delenv("EMAIL", raising=False)
+    monkeypatch.setenv("PASSWORD", "secret")
+    with pytest.raises(ValueError, match="EMAIL"):
+        config.browser.autologin.credentials()
 
 
 @pytest.mark.parametrize(
