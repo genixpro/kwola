@@ -13,7 +13,7 @@ Kros 1 and Kros 3 returned HTTP 200 at `127.0.0.1:3001` and `127.0.0.1:3003`.
 
 ## Final 1.0.0 results
 
-- The locked build passed Ruff formatting/linting, strict mypy over 80 source files, 72 local tests
+- The locked build passed Ruff formatting/linting, strict mypy over 80 source files, 73 local tests
   (plus two opt-in rig contracts), all architecture limits, and 91.68% branch-aware coverage (85%
   enforced). Configuration is 98%, rewards 100%, loss math 95%, storage 94–100%, and worker
   supervision 99% covered.
