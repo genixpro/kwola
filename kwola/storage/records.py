@@ -50,6 +50,10 @@ class LmdbRunStore:
     def close(self) -> None:
         self._environment.close()
 
+    @property
+    def readonly(self) -> bool:
+        return self._readonly
+
     def put(self, collection: str, key: str, value: Mapping[str, Any]) -> None:
         if self._readonly:
             raise PermissionError("run store is read-only")

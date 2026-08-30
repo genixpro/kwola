@@ -25,12 +25,14 @@ class SampleCache:
             if isinstance(payload, dict):
                 return payload, False
         rebuilt = dict(builder())
-        self._store.put(
-            "sample_cache",
-            session_id,
-            {"cache_version": self._version, "payload": rebuilt},
-        )
+        if not self._store.readonly:
+            self._store.put(
+                "sample_cache",
+                session_id,
+                {"cache_version": self._version, "payload": rebuilt},
+            )
         return rebuilt, True
 
     def invalidate(self, session_id: str) -> None:
-        self._store.delete("sample_cache", session_id)
+        if not self._store.readonly:
+            self._store.delete("sample_cache", session_id)

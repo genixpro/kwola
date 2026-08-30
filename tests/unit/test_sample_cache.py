@@ -22,3 +22,18 @@ def test_cache_rebuilds_when_missing_or_version_changes(tmp_path: Path) -> None:
     assert cached_rebuilt is False
     assert updated == {"value": 2}
     assert updated_rebuilt is True
+
+
+def test_readonly_cache_rebuilds_without_publishing(tmp_path: Path) -> None:
+    database = tmp_path / "database"
+    with LmdbRunStore(database, map_size=1024**2) as store:
+        store.put("run", "state", {})
+    with LmdbRunStore(database, map_size=1024**2, readonly=True) as store:
+        cache = SampleCache(store, 2)
+
+        payload, rebuilt = cache.get_or_rebuild("new-session", lambda: {"trace_ids": ["a"]})
+        cache.invalidate("new-session")
+
+        assert rebuilt is True
+        assert payload == {"trace_ids": ["a"]}
+        assert store.get("sample_cache", "new-session") is None
