@@ -97,7 +97,7 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
             "debug_video_every_testing_steps": 25,
         },
         "orchestration": {
-            "browser_workers": 12,
+            "browser_workers": 32,
             "browser_cpu_threads": 2,
             "telemetry_interval_seconds": 5.0,
             "minimum_traces_before_training": 20,

@@ -19,7 +19,7 @@ def test_profiles_are_fresh_and_preserve_expected_topologies() -> None:
     assert [layer.kernels for layer in standard.model.layers] == [32, 48, 64, 96, 128]
     assert first.training.batch_size == 4
     assert standard.training.batch_size == 24
-    assert rig.orchestration.browser_workers == 12
+    assert rig.orchestration.browser_workers == 32
     assert rig.policy.testing_sequence_length == 50
     assert rig.training.batch_prefetch
     assert rig.training.batch_size == 32
