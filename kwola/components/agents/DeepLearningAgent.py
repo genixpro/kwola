@@ -46,6 +46,7 @@ import subprocess
 import tempfile
 import torch
 import torch.nn as nn
+import torch.nn.functional as functional
 import torch.optim as optim
 import traceback
 import pickle
@@ -77,11 +78,13 @@ class DeepLearningAgent:
         # We create a method that will convert torch CPU tensors into
         # torch CUDA tensors if this model is set in GPU mode.
         if self.whichGpu == "all":
-            self.variableWrapperFunc = lambda t, x: torch.as_tensor(x, dtype=t.dtype).pin_memory().cuda(non_blocking=True)
+            self.variableWrapperFunc = lambda t, x: torch.as_tensor(x).pin_memory().to(
+                device="cuda", dtype=t.dtype, non_blocking=True)
         elif self.whichGpu is None:
             self.variableWrapperFunc = lambda t, x: torch.as_tensor(x, dtype=t.dtype)
         else:
-            self.variableWrapperFunc = lambda t, x: torch.as_tensor(x, dtype=t.dtype).pin_memory().cuda(device=f"cuda:{self.whichGpu}", non_blocking=True)
+            self.variableWrapperFunc = lambda t, x: torch.as_tensor(x).pin_memory().to(
+                device=f"cuda:{self.whichGpu}", dtype=t.dtype, non_blocking=True)
 
         # Fetch the folder that we will store the model parameters in
         self.modelFileName = "deep_learning_model"
@@ -539,7 +542,12 @@ class DeepLearningAgent:
                     module=self.model,
                     device_ids=[outputDevice.index],
                     output_device=outputDevice.index,
-                    find_unused_parameters=True,
+                    # TraceNet only constructs heads enabled by the current
+                    # configuration, and every constructed parameter
+                    # participates in the training forward pass.  Enabling
+                    # unused-parameter discovery adds a full autograd graph
+                    # traversal to every partial batch.
+                    find_unused_parameters=False,
                 )
             else:
                 self.modelParallel = self.model
@@ -3031,7 +3039,6 @@ class DeepLearningAgent:
         # batches.
         self.optimizer.zero_grad(set_to_none=True)
 
-        actionProbRewardSquareEdgeHalfSize = self.variableWrapperFunc(torch.IntTensor, numpy.array([int(self.config['training_action_prob_reward_square_size'] / 2)]))
         zeroTensor = self.variableWrapperFunc(torch.IntTensor, numpy.array([0]))
         oneTensor = self.variableWrapperFunc(torch.IntTensor, numpy.array([1]))
         oneTensorLong = self.variableWrapperFunc(torch.LongTensor, numpy.array([1]))
@@ -3048,6 +3055,12 @@ class DeepLearningAgent:
         maxDiscountedReward = self.variableWrapperFunc(torch.FloatTensor, numpy.array([self.config['reward_max_discounted_reward']]))
 
         for batchIndex, batch in enumerate(batches):
+            # Each Kwola optimizer iteration accumulates several partial
+            # batches.  DDP only needs to reduce gradients on the final
+            # backward pass; synchronizing every partial batch multiplies NCCL
+            # traffic without changing the accumulated gradient.
+            if isinstance(self.modelParallel, nn.parallel.DistributedDataParallel):
+                self.modelParallel.require_backward_grad_sync = batchIndex == (len(batches) - 1)
             with profiler.record_function(f"partial_batch_{batchIndex}"):
                 with profiler.record_function("data_transfer"):
                     # Here we create torch tensors out of literally all possible data we will need to do any calculations.
@@ -3058,8 +3071,6 @@ class DeepLearningAgent:
                     pixelActionMaps = self.variableWrapperFunc(torch.IntTensor, numpy.array(batch['pixelActionMaps']))
                     nextStatePixelActionMaps = self.variableWrapperFunc(torch.IntTensor, numpy.array(batch['nextPixelActionMaps']))
                     discountRate = self.variableWrapperFunc(torch.FloatTensor, numpy.array([self.config['reward_discount_rate']]))
-                    widthTensor = self.variableWrapperFunc(torch.IntTensor, numpy.array([batch["processedImages"].shape[3]]))
-                    heightTensor = self.variableWrapperFunc(torch.IntTensor, numpy.array([batch["processedImages"].shape[2]]))
                     presentRewardsTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch["presentRewards"]))
                     processedImagesTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['processedImages']))
                     recentActionsVectorTensor = self.variableWrapperFunc(torch.FloatTensor, numpy.array(batch['recentActionsVector']))
@@ -3189,63 +3200,69 @@ class DeepLearningAgent:
                         nextStatePresentRewardPredictions = nextStateOutputs['presentRewards']
                         nextStateDiscountedFutureRewardPredictions = nextStateOutputs['discountFutureRewards']
                 
-                # Here we just zip together all of the various data for each sample in this batch, so that we can iterate
-                # over all of it at the same time and process each sample in the batch separately
-                zippedValues = zip(range(len(presentRewardPredictions)), presentRewardPredictions, discountedFutureRewardPredictions,
-                                   nextStatePresentRewardPredictions, nextStateDiscountedFutureRewardPredictions,
-                                   rewardPixelMasks, presentRewardsTensor, stateValuePredictions, advantagePredictions,
-                                   batch['actionTypes'], batch['actionXs'], batch['actionYs'],
-                                   pixelActionMaps, actionProbabilityPredictions, batch['processedImages'])
-
                 with profiler.record_function("post_processing"):
-                    comboPixelMasks = []
-                    presentRewardsMasks = []
-                    discountedFutureRewardsMasks = []
-                    advantageMasks = []
+                    batchSize = presentRewardPredictions.shape[0]
+                    imageHeight = presentRewardPredictions.shape[2]
+                    imageWidth = presentRewardPredictions.shape[3]
+                    sampleIndexes = torch.arange(batchSize, device=presentRewardPredictions.device)
+                    selectedActionIndexes = self.variableWrapperFunc(
+                        torch.LongTensor,
+                        numpy.array([self.actionsSorted.index(actionType) for actionType in batch['actionTypes']]),
+                    )
+
+                    # Gather the maps for the actions actually taken by every
+                    # sample in one operation.  The historical implementation
+                    # launched these small kernels once per sample, leaving the
+                    # GPU idle between Python loop iterations.
+                    selectedPixelActionMaps = pixelActionMaps[sampleIndexes, selectedActionIndexes]
+                    comboPixelMask = rewardPixelMasks * selectedPixelActionMaps
+                    presentRewardsMasked = presentRewardPredictions[
+                        sampleIndexes, selectedActionIndexes] * comboPixelMask
+                    discountedFutureRewardsMasked = discountedFutureRewardPredictions[
+                        sampleIndexes, selectedActionIndexes] * comboPixelMask
+                    advantageMasked = advantagePredictions[
+                        sampleIndexes, selectedActionIndexes] * comboPixelMask
+
                     actionProbabilityTargetImage = torch.zeros_like(actionProbabilityPredictions)
+                    if not self.config['testing_use_advantage_values_for_predictions']:
+                        with profiler.record_function("action_probabilities"):
+                            # A flattened argmax has the same action/y/x
+                            # tie-breaking order as the former three-stage
+                            # per-sample reductions, but processes the whole
+                            # batch in a single GPU operation.
+                            bestFlatIndexes = advantagePredictions.detach().flatten(1).argmax(dim=1)
+                            pixelsPerAction = imageHeight * imageWidth
+                            bestActionTypes = torch.div(
+                                bestFlatIndexes, pixelsPerAction, rounding_mode='floor')
+                            bestPixelIndexes = torch.remainder(bestFlatIndexes, pixelsPerAction)
+                            bestActionYs = torch.div(
+                                bestPixelIndexes, imageWidth, rounding_mode='floor')
+                            bestActionXs = torch.remainder(bestPixelIndexes, imageWidth)
 
-                    # Here we are just iterating over all of the relevant data and tensors for each sample in the batch
-                    for sampleIndex, presentRewardImage, discountedFutureRewardImage, \
-                        nextStatePresentRewardImage, nextStateDiscountedFutureRewardImage, \
-                        origRewardPixelMask, presentReward, stateValuePrediction, advantageImage, \
-                        actionType, actionX, actionY, pixelActionMap, actionProbabilityImage, processedImage in zippedValues:
+                            halfSize = int(self.config['training_action_prob_reward_square_size'] / 2)
+                            bestLefts = torch.clamp(bestActionXs - halfSize, min=0)
+                            bestRights = torch.clamp(bestActionXs + halfSize, max=imageWidth - 1)
+                            bestTops = torch.clamp(bestActionYs - halfSize, min=0)
+                            bestBottoms = torch.clamp(bestActionYs + halfSize, max=imageHeight - 1)
 
-                        with profiler.record_function("masks"):
-                            comboPixelMask = origRewardPixelMask * pixelActionMap[self.actionsSorted.index(actionType)]
-
-                            # Here, we fetch out the reward and advantage images associated with the action that the AI actually
-                            # took in the trace. We then multiply by the reward pixel mask. This gives us a reward image that only
-                            # has values in the area covering the HTML element the algorithm actually touched with its action
-                            # at this step.
-                            presentRewardsMasked = presentRewardImage[self.actionsSorted.index(actionType)]
-                            discountedFutureRewardsMasked = discountedFutureRewardImage[self.actionsSorted.index(actionType)]
-                            advantageMasked = advantageImage[self.actionsSorted.index(actionType)]
-
-                            comboPixelMasks.append(comboPixelMask.unsqueeze(0))
-                            presentRewardsMasks.append(presentRewardsMasked.unsqueeze(0))
-                            discountedFutureRewardsMasks.append(discountedFutureRewardsMasked.unsqueeze(0))
-                            advantageMasks.append(advantageMasked.unsqueeze(0))
-
-                        if not self.config['testing_use_advantage_values_for_predictions']:
-                            with profiler.record_function("action_probabilities"):
-                                # Now to train the "actor" in the actor critic model, we have to do something different. Instead of
-                                # training the actor to predict how much better / worse particular actions are versus other actions,
-                                # now we just straight up train the actor to predict what is the best action it should take when its
-                                # in a given state. Therefore, we use the advantage calculations to determine what is the best action
-                                # to take. We then construct a target image which basically has a square of 1's on the location the
-                                # AI should click and 0's everywhere else.
-                                bestActionX, bestActionY, bestActionType = self.getActionInfoTensorsFromRewardMap(advantageImage.detach())
-                                bestLeft = torch.max(bestActionX - actionProbRewardSquareEdgeHalfSize, zeroTensor)
-                                bestRight = torch.min(bestActionX + actionProbRewardSquareEdgeHalfSize, widthTensor - 1)
-                                bestTop = torch.max(bestActionY - actionProbRewardSquareEdgeHalfSize, zeroTensor)
-                                bestBottom = torch.min(bestActionY + actionProbRewardSquareEdgeHalfSize, heightTensor - 1)
-                                actionProbabilityTargetImage[sampleIndex, bestActionType, bestTop:bestBottom, bestLeft:bestRight] = 1
-                                actionProbabilityTargetImage[sampleIndex, bestActionType] *= pixelActionMap[bestActionType]
-
-                    comboPixelMask = torch.cat(comboPixelMasks, dim=0)
-                    presentRewardsMasked = torch.cat(presentRewardsMasks, dim=0) * comboPixelMask
-                    discountedFutureRewardsMasked = torch.cat(discountedFutureRewardsMasks, dim=0) * comboPixelMask
-                    advantageMasked = torch.cat(advantageMasks, dim=0) * comboPixelMask
+                            xCoordinates = torch.arange(
+                                imageWidth, device=advantagePredictions.device).view(1, 1, imageWidth)
+                            yCoordinates = torch.arange(
+                                imageHeight, device=advantagePredictions.device).view(1, imageHeight, 1)
+                            squareMask = (
+                                (xCoordinates >= bestLefts[:, None, None])
+                                & (xCoordinates < bestRights[:, None, None])
+                                & (yCoordinates >= bestTops[:, None, None])
+                                & (yCoordinates < bestBottoms[:, None, None])
+                            )
+                            actionMask = functional.one_hot(
+                                bestActionTypes, num_classes=len(self.actionsSorted)
+                            ).to(actionProbabilityTargetImage.dtype)[:, :, None, None]
+                            actionProbabilityTargetImage = (
+                                squareMask[:, None].to(actionProbabilityTargetImage.dtype)
+                                * actionMask
+                                * pixelActionMaps
+                            )
 
                     with profiler.record_function("next_state_discount"):
                         # Here, we compute the best possible action we can take in the subsequent step from this one, and what is
@@ -3412,6 +3429,9 @@ class DeepLearningAgent:
                         totalSampleLosses,
                         batch
                     ))
+
+        if isinstance(self.modelParallel, nn.parallel.DistributedDataParallel):
+            self.modelParallel.require_backward_grad_sync = True
 
         # Put a check in so that we don't do the optimizer step if there are NaNs in the loss
         if numpy.count_nonzero(numpy.isnan([totalLoss.data.item() for totalLoss in totalLosses])) == 0:

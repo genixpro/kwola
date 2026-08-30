@@ -79,6 +79,7 @@ class TrainingManager:
         self.subProcessCommandQueues = []
         self.subProcessBatchResultQueues = []
         self.subProcesses = []
+        self.threadExecutor = None
 
         if plugins is None:
             self.plugins = []
@@ -182,7 +183,8 @@ class TrainingManager:
                 for plugin in self.plugins:
                     plugin.trainingStepStarted(self.trainingStep)
 
-        except Exception as e:
+        except (Exception, KeyboardInterrupt, SystemExit) as e:
+            self.shutdownAndJoinSubProcesses(graceful=False)
             errorMessage = f"Error occurred during initiation of training! {traceback.format_exc()}"
             getLogger().warning(f"{errorMessage}")
             return {"success": False, "exception": errorMessage}
@@ -245,17 +247,26 @@ class TrainingManager:
             self.saveAgent()
             self.shutdownAndJoinSubProcesses()
 
-        except Exception:
+        except (Exception, KeyboardInterrupt, SystemExit):
             getLogger().error(f"Error occurred while learning sequence!\n{traceback.format_exc()}")
             success = False
             exception = traceback.format_exc()
         finally:
-            files = os.listdir(self.batchDirectory)
-            for file in files:
-                os.unlink(os.path.join(self.batchDirectory, file))
-            shutil.rmtree(self.batchDirectory)
+            # Failures and externally requested shutdowns must not leave
+            # spawn workers re-parented to init.  Those workers otherwise
+            # consume CPU/RAM and starve later GPU experiments.
+            self.shutdownAndJoinSubProcesses(graceful=success)
+            if self.batchDirectory and os.path.isdir(self.batchDirectory):
+                files = os.listdir(self.batchDirectory)
+                for file in files:
+                    os.unlink(os.path.join(self.batchDirectory, file))
+                shutil.rmtree(self.batchDirectory)
 
-            del self.agent
+            if self.agent is not None:
+                del self.agent
+
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                torch.distributed.destroy_process_group()
 
         # This print statement will trigger the parent manager process to kill this process.
         getLogger().info(f"==== Training Step Completed ====")
@@ -311,10 +322,23 @@ class TrainingManager:
             self.batchesPrepared += 1
 
     def createSubproccesses(self):
-        # Haven't decided yet whether we should force Kwola to always write to disc or spool in memory
-        # using /tmp. The following lines switch between the two approaches
-        # self.batchDirectory = tempfile.mkdtemp(dir=getKwolaUserDataDirectory("batches"))
-        self.batchDirectory = tempfile.mkdtemp()
+        # Prepared batches are short-lived and large (roughly 120 MB for the
+        # standard profile).  Prefer Linux's RAM-backed shared-memory filesystem
+        # when it has enough headroom; writing the producer queue through the
+        # root filesystem can starve both GPUs even when the samples themselves
+        # are already cached.  Small CI /dev/shm mounts safely fall back to the
+        # platform temporary directory.
+        spoolRoot = None
+        sharedMemoryRoot = "/dev/shm"
+        minimumSharedMemoryBytes = 8 * 1024 ** 3
+        if os.path.isdir(sharedMemoryRoot) and os.access(sharedMemoryRoot, os.W_OK):
+            try:
+                if shutil.disk_usage(sharedMemoryRoot).free >= minimumSharedMemoryBytes:
+                    spoolRoot = sharedMemoryRoot
+            except OSError:
+                pass
+        self.batchDirectory = tempfile.mkdtemp(prefix="kwola-batches-", dir=spoolRoot)
+        getLogger().info(f"Using {self.batchDirectory} for transient prepared batches")
 
         self.subProcessCommandQueues = []
         self.subProcessBatchResultQueues = []
@@ -401,12 +425,24 @@ class TrainingManager:
         return batches
 
 
-    def shutdownAndJoinSubProcesses(self):
+    def shutdownAndJoinSubProcesses(self, graceful=True):
+        if not self.subProcesses:
+            return
         getLogger().info(f"Shutting down and joining the sub-processes")
+
+        if not graceful:
+            # Futures blocked on a result queue otherwise keep the executor
+            # (and therefore the rank process) alive after an interrupted run.
+            # One sentinel per possible consumer releases all running fetches;
+            # queued futures are cancelled below.
+            for resultQueue in self.subProcessBatchResultQueues:
+                for _ in range(self.config['training_max_batch_prep_thread_workers']):
+                    resultQueue.put(None)
+
         for subProcess, subProcessCommandQueue in zip(self.subProcesses, self.subProcessCommandQueues):
             subProcessCommandQueue.put(("quit", {}))
             getLogger().info(f"Waiting for batch prep subprocess with pid {subProcess.pid} to quit")
-            subProcess.join(timeout=30)
+            subProcess.join(timeout=30 if graceful else 5)
             if subProcess.is_alive():
                 # Use kill in python 3.7+, terminate in lower versions
                 if hasattr(subProcess, 'kill'):
@@ -415,6 +451,14 @@ class TrainingManager:
                 else:
                     getLogger().info(f"Sending the subprocess with pid {subProcess.pid} the terminate signal.")
                     subProcess.terminate()
+                subProcess.join(timeout=10)
+
+        if self.threadExecutor is not None and not graceful:
+            self.threadExecutor.shutdown(wait=False, cancel_futures=True)
+            self.threadExecutor = None
+        self.subProcesses = []
+        self.subProcessCommandQueues = []
+        self.subProcessBatchResultQueues = []
 
     def saveAgent(self):
         # Safe guard, don't save the model if any nan's were detected
@@ -669,7 +713,11 @@ class TrainingManager:
 
             cacheHitRate = numpy.mean(cacheHits)
 
-            resultFileDescriptor, resultFileName = tempfile.mkstemp()
+            # Keep the assembled result in the same selected spool as its
+            # component samples.  tempfile's default may be disk-backed even
+            # when batchDirectory is RAM-backed.
+            resultFileDescriptor, resultFileName = tempfile.mkstemp(
+                prefix="kwola-assembled-batch-", dir=batchDirectory)
             with open(resultFileDescriptor, 'wb') as file:
                 pickle.dump((batch, cacheHitRate), file, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -830,6 +878,7 @@ class TrainingManager:
                 raise RuntimeError("There are no execution sessions to process in the algorithm.")
 
             processPool = multiprocessingpool.Pool(processes=config['training_initial_batch_prep_workers'], initializer=setupLocalLogging)
+            currentProcessPoolWorkerCount = config['training_initial_batch_prep_workers']
             backgroundTraceSaveProcessPool = multiprocessingpool.Pool(processes=config['training_background_trace_save_workers'], initializer=setupLocalLogging)
             executionSessionTraceWeightSaveFutures = {}
 
@@ -841,6 +890,7 @@ class TrainingManager:
             currentProcessPoolFutures = []
 
             needToResetPool = False
+            forcePoolReset = False
             starved = False
 
             subProcessBatchResultQueue.put("ready")
@@ -862,6 +912,7 @@ class TrainingManager:
                         # Depending on the cache hit rate
                         if batchCount % config['training_reset_workers_every_n_batches'] == (config['training_reset_workers_every_n_batches'] - 1):
                             needToResetPool = True
+                            forcePoolReset = True
 
                         windowSize = random.choice(allWindowSizes)
 
@@ -891,26 +942,32 @@ class TrainingManager:
 
                         # If the cache is full and the main process isn't starved for batches, we shrink the process pool down to a smaller size.
                         if numpy.mean(cacheRates) > config['training_cache_full_state_min_cache_hit_rate'] and not starved:
-                            lastProcessPool = processPool
-                            lastProcessPoolFutures = list(currentProcessPoolFutures)
-                            currentProcessPoolFutures = []
-
-                            getLogger().debug(f"Resetting batch prep process pool. Cache full state. New workers: {config['training_cache_full_batch_prep_workers']}")
-
-                            processPool = multiprocessingpool.Pool(processes=config['training_cache_full_batch_prep_workers'], initializer=setupLocalLogging)
-
+                            desiredWorkerCount = config['training_cache_full_batch_prep_workers']
                             cacheFullState = True
                         # Otherwise we have a full sized process pool so we can plow through all the results.
                         else:
+                            desiredWorkerCount = config['training_max_batch_prep_workers']
+                            cacheFullState = False
+
+                        # A starved/full notification must not replace a pool
+                        # with an identically sized pool.  Doing so temporarily
+                        # doubles all preparation workers and can prevent the
+                        # old queued batches from ever draining.  Periodic
+                        # maintenance resets remain available through the
+                        # explicit reset interval.
+                        if desiredWorkerCount != currentProcessPoolWorkerCount or forcePoolReset:
                             lastProcessPool = processPool
                             lastProcessPoolFutures = list(currentProcessPoolFutures)
                             currentProcessPoolFutures = []
 
-                            getLogger().debug(f"Resetting batch prep process pool. Cache starved state. New workers: {config['training_max_batch_prep_workers']}")
+                            getLogger().debug(
+                                f"Resetting batch prep process pool. New workers: {desiredWorkerCount}")
 
-                            processPool = multiprocessingpool.Pool(processes=config['training_max_batch_prep_workers'], initializer=setupLocalLogging)
+                            processPool = multiprocessingpool.Pool(
+                                processes=desiredWorkerCount, initializer=setupLocalLogging)
+                            currentProcessPoolWorkerCount = desiredWorkerCount
 
-                            cacheFullState = False
+                        forcePoolReset = False
 
                     if lastProcessPool is not None:
                         all = True
@@ -942,6 +999,8 @@ class TrainingManager:
         subProcessCommandQueue.put(("batch", {}))
 
         batchFileName = subProcessBatchResultQueue.get()
+        if batchFileName is None:
+            raise RuntimeError("Training batch preparation was shut down")
         with open(batchFileName, 'rb') as file:
             batch, cacheHit = pickle.load(file)
         os.unlink(batchFileName)

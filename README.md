@@ -49,6 +49,16 @@ Both cards must report compute capability 7.5 and `torch.version.cuda` must be
 checkpoint writer. Existing historical checkpoints are archival and are not a
 supported input to new Python 3.12 runs.
 
+The `standard_experiment` profile is tuned for the original dual RTX 2070
+SUPER rig: batch size 24 per rank, four accumulated partial batches, two batch
+preparation coordinators, eight fixed preparation workers per coordinator, and
+a 24-batch lookahead. On the acceptance rig this sustained approximately 1.2
+seconds per optimizer step (about 161 samples/second across both ranks), used
+about 4.3 GiB VRAM per GPU, and kept roughly 50 GiB of system RAM available
+while a Chromium testing session ran concurrently. Linux hosts with at least 8
+GiB free in `/dev/shm` automatically spool transient assembled batches there;
+smaller hosts fall back to the normal temporary directory.
+
 For HTTPS instrumentation, run `uv run kwola_install_proxy_cert` once to open
 the mitmproxy certificate page in Playwright Chromium and install its CA into
 the browser trust store. If proxy verification fails, Kwola reports the target

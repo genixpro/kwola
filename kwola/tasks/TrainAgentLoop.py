@@ -314,30 +314,35 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
             if anyFailures and exitOnFail:
                 raise RuntimeError("One of the testing / training loops failed and did not return successfully. Exiting the training loop.")
 
-            if not anyFailures:
-                getLogger().info(f"Updating the symbols table")
-                for future in testStepFutures:
-                    result = future.result()
-                    testingStepId = result['testingStepId']
-                    updateModelSymbols(config, testingStepId)
+            if anyFailures:
+                getLogger().error(
+                    "One of the coordinated tasks failed. Retrying this loop without advancing training progress.")
+                time.sleep(3)
+                continue
 
-                # Here, we dynamically adjust the number of iterations to be executed in a training step
-                # so that it aligns automatically with the time needed to complete the testing steps
-                lastTestFinish = None
-                lastTrainFinish = None
-                for future in testStepFutures:
-                    if lastTestFinish is None or lastTestFinish < future.result()['finishTime']:
-                        lastTestFinish = future.result()['finishTime']
+            getLogger().info(f"Updating the symbols table")
+            for future in testStepFutures:
+                result = future.result()
+                testingStepId = result['testingStepId']
+                updateModelSymbols(config, testingStepId)
 
-                for future in trainStepFutures:
-                    if lastTrainFinish is None or lastTrainFinish < future.result()['finishTime']:
-                        lastTrainFinish = future.result()['finishTime']
+            # Here, we dynamically adjust the number of iterations to be executed in a training step
+            # so that it aligns automatically with the time needed to complete the testing steps
+            lastTestFinish = None
+            lastTrainFinish = None
+            for future in testStepFutures:
+                if lastTestFinish is None or lastTestFinish < future.result()['finishTime']:
+                    lastTestFinish = future.result()['finishTime']
 
-                if lastTestFinish > lastTrainFinish:
-                    config['training_iterations_per_training_step'] += config['training_iterations_per_training_step_adjustment_size_per_loop']
-                else:
-                    config['training_iterations_per_training_step'] = max(5, config['training_iterations_per_training_step'] - config['training_iterations_per_training_step_adjustment_size_per_loop'])
-                config.saveConfig()
+            for future in trainStepFutures:
+                if lastTrainFinish is None or lastTrainFinish < future.result()['finishTime']:
+                    lastTrainFinish = future.result()['finishTime']
+
+            if lastTestFinish > lastTrainFinish:
+                config['training_iterations_per_training_step'] += config['training_iterations_per_training_step_adjustment_size_per_loop']
+            else:
+                config['training_iterations_per_training_step'] = max(5, config['training_iterations_per_training_step'] - config['training_iterations_per_training_step_adjustment_size_per_loop'])
+            config.saveConfig()
 
             time.sleep(3)
 
