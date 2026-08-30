@@ -40,7 +40,8 @@ content-addressed blobs, disposable prepared-sample cache records, reports, logs
 published PyTorch checkpoints. Unknown configuration fields are rejected.
 
 See [Architecture](docs/architecture.md) for component and process ownership, storage layout, hook
-ordering, and failure behavior.
+ordering, and failure behavior. See [Acceptance evidence](docs/acceptance.md) for the recorded
+baseline and final rig results.
 
 ## Development
 
