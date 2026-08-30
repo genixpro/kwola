@@ -1,0 +1,205 @@
+"""Two-rank recorded-sample training with explicit DDP ownership."""
+
+import copy
+import multiprocessing
+import socket
+import time
+from contextlib import closing
+from pathlib import Path
+from typing import Any
+
+import torch
+from torch import distributed
+from torch.multiprocessing import spawn  # type: ignore[attr-defined]
+from torch.nn.parallel import DistributedDataParallel
+
+from kwola.agent import TraceNet
+from kwola.config import load_config
+from kwola.orchestration.results import RunnerResult
+from kwola.storage import CheckpointPublisher, LmdbRunStore, load_manifest
+
+from .ddp import DistributedCoordinator, DistributedSettings
+from .optimizer import ModelOptimizer, OptimizerMetrics
+from .samples import RecordedSampleAssembler
+
+
+def run_distributed_training(run_dir: Path) -> RunnerResult:
+    config = load_config(run_dir)
+    devices = config.training.device_indices
+    if len(devices) != config.training.world_size:
+        raise RuntimeError("distributed training requires one device index per rank")
+    if torch.cuda.device_count() < config.training.world_size:
+        raise RuntimeError("insufficient CUDA devices for configured world size")
+    _prepare_cache(run_dir)
+    context = multiprocessing.get_context("spawn")
+    results: Any = context.SimpleQueue()
+    init_method = f"tcp://127.0.0.1:{_free_port()}"
+    spawn(  # type: ignore[no-untyped-call]
+        _training_rank,
+        args=(config.training.world_size, devices, init_method, run_dir, results),
+        nprocs=config.training.world_size,
+        join=True,
+    )
+    return RunnerResult.model_validate_json(results.get())
+
+
+def _prepare_cache(run_dir: Path) -> None:
+    with _store(run_dir) as store:
+        assembler = _assembler(run_dir, store)
+        if assembler.prepare_cache() == 0:
+            raise RuntimeError("training requires at least one recorded browser trace")
+
+
+def _training_rank(
+    rank: int,
+    world_size: int,
+    devices: tuple[int, ...],
+    init_method: str,
+    run_dir: Path,
+    results: Any,
+) -> None:
+    started = time.perf_counter()
+    settings = DistributedSettings(rank, world_size, devices[rank], init_method)
+    with DistributedCoordinator(settings) as coordinator:
+        metrics, model, optimizer, step_index = _rank_step(run_dir, coordinator)
+        loss = torch.tensor([metrics.loss], device=coordinator.device)
+        distributed.all_reduce(loss, op=distributed.ReduceOp.SUM)
+        coordinator.barrier()
+        if coordinator.is_publisher:
+            result = _publish_result(
+                run_dir,
+                model,
+                optimizer,
+                step_index,
+                metrics,
+                float(loss.item() / world_size),
+                time.perf_counter() - started,
+            )
+            results.put(result.model_dump_json())
+
+
+def _rank_step(
+    run_dir: Path, coordinator: DistributedCoordinator
+) -> tuple[OptimizerMetrics, TraceNet, ModelOptimizer, int]:
+    config = load_config(run_dir)
+    manifest = load_manifest(run_dir)
+    with _store(run_dir, readonly=True) as store:
+        state = store.get("run", "state") or {}
+        step_index = int(state.get("training_steps", 0))
+        batch = _assembler(run_dir, store).assemble(
+            batch_size=config.training.batch_size,
+            edge=64 if config.profile == "testing" else 320,
+            device=coordinator.device,
+            impossible_reward=config.policy.rewards.impossible_action,
+            offset=coordinator.settings.rank * config.training.batch_size,
+        )
+    model = TraceNet(config.model, num_actions=6).to(coordinator.device)
+    checkpoint = manifest.checkpoint.file if manifest.checkpoint else None
+    payload = _load_model(run_dir, checkpoint, model, coordinator.device)
+    target = copy.deepcopy(model).to(coordinator.device).eval()
+    parallel = DistributedDataParallel(
+        model,
+        device_ids=[coordinator.settings.local_device],
+        output_device=coordinator.settings.local_device,
+    )
+    optimizer = ModelOptimizer(parallel, config.training)
+    if payload is not None:
+        optimizer.optimizer.load_state_dict(payload["optimizer"])
+    metrics = optimizer.step_training(
+        batch,
+        target,
+        step_index,
+        config.policy.rewards.discount_rate,
+        config.policy.rewards.max_discounted_reward,
+    )
+    return metrics, model, optimizer, step_index
+
+
+def _publish_result(
+    run_dir: Path,
+    model: TraceNet,
+    optimizer: ModelOptimizer,
+    step_index: int,
+    metrics: OptimizerMetrics,
+    mean_loss: float,
+    duration: float,
+) -> RunnerResult:
+    config = load_config(run_dir)
+    manifest = load_manifest(run_dir)
+    publisher = CheckpointPublisher(run_dir, config.storage.checkpoints_directory)
+    published = publisher.publish(
+        rank=0,
+        generation=step_index + 1,
+        writer=lambda stream: torch.save(
+            {"model": model.state_dict(), "optimizer": optimizer.optimizer.state_dict()}, stream
+        ),
+        manifest=manifest,
+        now=time.time(),
+    )
+    assert published is not None
+    checkpoint, _manifest = published
+    _record_step(run_dir, step_index, mean_loss, metrics.duration_seconds)
+    return RunnerResult(
+        status="completed",
+        step_id=f"training-{step_index:08d}",
+        duration_seconds=duration,
+        artifacts=(str(checkpoint.relative_to(run_dir)),),
+        metrics={
+            "loss": mean_loss,
+            "optimizer_seconds": metrics.duration_seconds,
+            "samples_per_second": metrics.samples_per_second * config.training.world_size,
+        },
+    )
+
+
+def _load_model(
+    run_dir: Path,
+    checkpoint: str | None,
+    model: TraceNet,
+    device: torch.device,
+) -> dict[str, Any] | None:
+    if checkpoint is None:
+        return None
+    payload: dict[str, Any] = torch.load(run_dir / checkpoint, map_location=device)
+    model.load_state_dict(payload["model"])
+    return payload
+
+
+def _record_step(run_dir: Path, index: int, loss: float, duration: float) -> None:
+    with _store(run_dir) as store:
+        state = store.get("run", "state") or {}
+        state["training_steps"] = index + 1
+        store.put("run", "state", state)
+        store.put(
+            "training_steps",
+            f"training-{index:08d}",
+            {"loss": loss, "optimizer_seconds": duration, "status": "completed", "ranks": 2},
+        )
+
+
+def _assembler(run_dir: Path, store: LmdbRunStore) -> RecordedSampleAssembler:
+    config = load_config(run_dir)
+    return RecordedSampleAssembler(
+        run_dir,
+        store,
+        symbol_dictionary_size=config.model.symbol_dictionary_size,
+        discount_rate=config.policy.rewards.discount_rate,
+        max_discounted_reward=config.policy.rewards.max_discounted_reward,
+        cache_version=config.training.sample_cache_version,
+    )
+
+
+def _store(run_dir: Path, readonly: bool = False) -> LmdbRunStore:
+    config = load_config(run_dir)
+    return LmdbRunStore(
+        run_dir / config.storage.database_directory,
+        map_size=config.storage.database_map_size_bytes,
+        compression_level=config.storage.codec_compression_level,
+        readonly=readonly,
+    )
+
+
+def _free_port() -> int:
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as connection:
+        connection.bind(("127.0.0.1", 0))
+        return int(connection.getsockname()[1])

@@ -9,7 +9,8 @@ from torch import nn
 from kwola.agent.tracenet import TraceNetRequest
 from kwola.config.models import TrainingConfig
 
-from .losses import aggregate_loss
+from .losses import aggregate_loss, behavior_loss
+from .samples import TrainingBatch
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,3 +45,32 @@ class ModelOptimizer:
         duration = time.perf_counter() - started
         batch_size = int(request.backbone.image.shape[0])
         return OptimizerMetrics(float(loss.detach()), duration, batch_size / duration)
+
+    def step_training(
+        self,
+        batch: TrainingBatch,
+        target_model: nn.Module,
+        training_index: int,
+        discount_rate: float,
+        max_discounted_reward: float,
+    ) -> OptimizerMetrics:
+        started = time.perf_counter()
+        self.model.train()
+        self.optimizer.zero_grad(set_to_none=True)
+        losses = behavior_loss(
+            self.model,
+            target_model,
+            batch,
+            self.config,
+            training_index,
+            self.config.world_size,
+            discount_rate,
+            max_discounted_reward,
+        )
+        losses.total.backward()  # type: ignore[no-untyped-call]
+        self.optimizer.step()
+        if batch.request.backbone.image.is_cuda:
+            torch.cuda.synchronize(batch.request.backbone.image.device)
+        duration = time.perf_counter() - started
+        throughput = len(batch.sample_ids) / duration
+        return OptimizerMetrics(float(losses.total.detach()), duration, throughput)

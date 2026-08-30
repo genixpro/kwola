@@ -73,11 +73,8 @@ class DistributedCoordinator:
     def close(self) -> None:
         if not self._started:
             return
-        try:
-            distributed.barrier()
-        finally:
-            distributed.destroy_process_group()
-            self._started = False
+        distributed.destroy_process_group()
+        self._started = False
 
     def _require_started(self) -> None:
         if not self._started:

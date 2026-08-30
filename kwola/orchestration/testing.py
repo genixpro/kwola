@@ -191,6 +191,19 @@ class TestingRunner:
                 "reward": reward,
                 "branch_symbols": list(after.branch_symbols),
                 "network_symbols": list(after.network_symbols),
+                "viewport": [before.viewport.width, before.viewport.height],
+                "action_targets": [
+                    {
+                        "bounds": [target.left, target.top, target.right, target.bottom],
+                        "click": target.can_click,
+                        "right_click": target.can_right_click,
+                        "type": target.can_type,
+                        "scroll": target.can_scroll,
+                        "scroll_up": target.can_scroll_up,
+                        "scroll_down": target.can_scroll_down,
+                    }
+                    for target in before.action_map.targets
+                ],
                 "screenshot": str(screenshot.relative_to(self._run_dir)),
             },
         )
