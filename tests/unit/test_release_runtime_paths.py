@@ -442,7 +442,8 @@ def test_single_training_path_checkpoint_load_and_distributed_dispatch(
     run_dir = tmp_path / "single"
     initialize_run("https://example.com", "testing", run_dir, 21)
     with LmdbRunStore(run_dir / "run.lmdb") as store:
-        store.put("traces", "trace-1", {"screenshot": "unused"})
+        for index in range(4):
+            store.put("traces", f"trace-{index}", {"screenshot": "unused"})
     runner = TrainingRunner(run_dir, hooks=HookRegistry(()))
     monkeypatch.setattr(training_module, "TraceNet", FakeTrainingModel)
     monkeypatch.setattr(training_module, "ModelOptimizer", FakeTrainingOptimizer)

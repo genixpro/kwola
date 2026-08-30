@@ -63,11 +63,18 @@ browser, proxy, Babel, or training workers remain.
 The deterministic learning gate includes a terminal bandit where greedy Q converges on the better
 action and a two-step task where the terminal reward propagates into the first action's future map.
 Unit evidence must also cover exact masked Double-DQN targets, campaign-wide atomic coverage claims,
-instrumentation absence, ordered exploration thresholds, replay coverage/shuffling/rank disjointness,
-varied persistent crop augmentation, and strict checkpoint round trips. Training telemetry records
-the present and future losses, selected Q, bootstrap target, absolute TD error, and gradient norm.
+instrumentation absence, independent two-stage exploration, replay coverage/shuffling/rank
+disjointness, fresh-global-batch gating and high-water persistence, bounded update counts,
+validity-preserving next-state crops, zero bootstrap for empty next-action masks, conservative-Q
+margin behavior, varied persistent crop augmentation, and strict checkpoint round trips. Training
+telemetry records the present, future, and conservative-Q losses, selected Q, bootstrap target,
+absolute TD error, and gradient norm.
 
 ## Schema-v2 measured results (2026-08-30)
+
+These measurements predate the fresh-trace replay budget described above. The 600-iteration steps are
+retained as historical throughput evidence; they do not describe the current per-invocation training
+cadence and do not prove the new learning-hardening requirements.
 
 - The final source passed Ruff formatting/linting, strict mypy over 91 Python sources, and the full
   suite on both macOS and the Linux rig: 189 passed, two opt-in tests skipped, and 88.45%/88.72%
@@ -91,6 +98,15 @@ the present and future losses, selected Q, bootstrap target, absolute TD error, 
   the loaded window the GPUs averaged 73.1% and 71.3%, host CPU averaged 38.1% with a 100% peak, no
   swap or I/O wait occurred, and the pipeline retained ample RAM. The intentional interrupt recorded
   `pipeline_stopped`; the final scan found no browser, proxy, instrumentation, or training workers.
+
+## Post-review learning verification (2026-08-30)
+
+After the replay, crop-validity, and conservative-Q changes, the macOS working tree passed Ruff
+formatting and linting, strict mypy over 94 Python sources, and the non-network unit,
+characterization, and architecture suite: 194 passed with 87.44% branch-aware coverage. Four
+full-suite integration cases that bind local listening sockets could not execute in the restricted
+local sandbox. This is local correctness evidence only; it does not replace the required fresh Linux
+rig acceptance run or its two-GPU/browser performance evidence.
 
 The unchanged performance gates are at least 145 samples/second, no more than 1.35 seconds median
 optimizer time, and no more than 5 GiB peak VRAM. The 1.0.0 measurements above are historical

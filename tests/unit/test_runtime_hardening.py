@@ -19,7 +19,11 @@ from kwola.training import distributed as distributed_training
 from kwola.training.benchmark import run_benchmark
 from kwola.training.ddp import DistributedCoordinator, DistributedSettings
 from kwola.training.optimizer import OptimizerMetrics
-from kwola.training.replay import ReplaySampler
+from kwola.training.replay import (
+    ReplaySampler,
+    bounded_replay_iterations,
+    minimum_replay_size,
+)
 
 
 class FakeAssembler:
@@ -33,6 +37,14 @@ class FakeAssembler:
         if offset == self.failure_offset:
             raise ValueError("assembly failed")
         return offset
+
+
+def test_replay_training_is_bounded_to_one_duplicate_free_global_pass() -> None:
+    assert minimum_replay_size(batch_size=48, world_size=2) == 96
+    assert bounded_replay_iterations(95, 600, 48, 2) == 0
+    assert bounded_replay_iterations(96, 600, 48, 2) == 1
+    assert bounded_replay_iterations(240, 600, 48, 2) == 2
+    assert bounded_replay_iterations(240, 1, 48, 2) == 1
 
 
 def test_batch_stream_offsets_initial_batch_and_prefetch_failures() -> None:
@@ -298,7 +310,7 @@ def test_training_runner_iterations_state_record_and_dispatch(
         training_index=249,
         iteration_count=2,
     )
-    runner._record("training-00000000", metrics, 2)
+    runner._record("training-00000000", metrics, 2, 4)
     monkeypatch.setattr(
         runner,
         "_run_single",
@@ -314,6 +326,7 @@ def test_training_runner_iterations_state_record_and_dispatch(
     assert result.status == "completed"
     with LmdbRunStore(tmp_path / "run.lmdb", readonly=True) as store:
         assert store.get("run", "state")["training_iterations"] == 2  # type: ignore[index]
+        assert store.get("run", "state")["training_trace_count"] == 4  # type: ignore[index]
 
 
 def test_cpu_benchmark_executes_complete_optimizer_path(
@@ -363,10 +376,13 @@ def test_distributed_entry_validation_simulation_and_rank_recording(
         distributed_training.multiprocessing, "get_context", lambda _kind: FakeSpawnContext()
     )
     monkeypatch.setattr(distributed_training, "spawn", lambda *_args, **_values: None)
+    with LmdbRunStore(rig_run / "run.lmdb") as store:
+        for index in range(96):
+            store.put("traces", f"trace-{index}", {"index": index})
     assert distributed_training.run_distributed_training(rig_run).status == "completed"
 
     metrics = OptimizerMetrics(2.0, 4.0, 5.0)
-    distributed_training._record_step(rig_run, 0, 2.0, metrics, 3, 10.0, 1.0, 2.0, 0.5)
+    distributed_training._record_step(rig_run, 0, 2.0, metrics, 3, 96, 10.0, 1.0, 2.0, 0.5)
     with LmdbRunStore(rig_run / "run.lmdb", readonly=True) as store:
         record = store.get("training_steps", "training-00000000")
     assert record is not None and record["ranks"] == 2
@@ -376,11 +392,20 @@ def test_distributed_cache_and_iteration_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 15)
-    with pytest.raises(RuntimeError, match="at least one"):
+    with pytest.raises(RuntimeError, match="at least 4"):
         distributed_training._prepare_cache(tmp_path)
     with LmdbRunStore(tmp_path / "run.lmdb") as store:
-        store.put("traces", "trace-1", {"screenshot": "unused"})
+        for index in range(4):
+            store.put("traces", f"trace-{index}", {"screenshot": "unused"})
     distributed_training._prepare_cache(tmp_path)
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        store.update(
+            "run",
+            "state",
+            lambda current: {**(current or {}), "training_trace_count": 4},
+        )
+    with pytest.raises(RuntimeError, match="at least 4"):
+        distributed_training._prepare_cache(tmp_path)
     assert (
         distributed_training._load_models(
             tmp_path,

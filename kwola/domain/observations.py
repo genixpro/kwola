@@ -28,3 +28,4 @@ class Observation:
     errors: tuple[str, ...] = ()
     branch_trace_available: bool = False
     application_fitness: float | None = None
+    network_event_count: int | None = None

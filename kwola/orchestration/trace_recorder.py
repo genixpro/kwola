@@ -1,7 +1,7 @@
 """Recorded-trace persistence and reward feature ownership."""
 
 import hashlib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ class NoveltyState:
     screenshots: set[str]
     urls: set[str]
     errors: set[str]
+    branches: set[int]
 
     @classmethod
     def initial(cls, observation: Observation) -> "NoveltyState":
@@ -26,6 +27,7 @@ class NoveltyState:
             {digest},
             {observation.url},
             set(observation.errors),
+            set(observation.branch_symbols),
         )
 
 
@@ -39,6 +41,7 @@ class TraceFeatures:
     url_changed: bool
     url_new: bool
     log_output: bool
+    network_traffic: bool
 
 
 class TraceRecorder:
@@ -83,18 +86,16 @@ class TraceRecorder:
         }
 
         def build(claimed: tuple[str, ...]) -> dict[str, Any]:
-            completed = replace(
-                features,
-                new_branches=tuple(sorted(symbols_by_key[key] for key in claimed)),
-            )
-            reward = _reward(self._config, after, completed)
+            campaign_new_branches = tuple(sorted(symbols_by_key[key] for key in claimed))
+            reward = _reward(self._config, after, features)
             return self._payload(
                 step_id,
                 index,
                 action,
                 before,
                 after,
-                completed,
+                features,
+                campaign_new_branches,
                 reward,
                 cursor,
                 screenshots,
@@ -165,6 +166,7 @@ class TraceRecorder:
         before: Observation,
         after: Observation,
         features: TraceFeatures,
+        campaign_new_branches: tuple[int, ...],
         reward: float,
         cursor: str,
         screenshots: tuple[str, str],
@@ -184,8 +186,10 @@ class TraceRecorder:
             "errors": list(after.errors),
             "new_errors": list(features.new_errors),
             "new_branch_symbols": list(features.new_branches),
+            "campaign_new_branch_symbols": list(campaign_new_branches),
             "branch_trace_available": after.branch_trace_available,
             "new_network_symbols": list(features.new_network),
+            "network_traffic": features.network_traffic,
             "screenshot_changed": features.screenshot_changed,
             "screenshot_new": features.screenshot_new,
             "url_new": features.url_new,
@@ -201,11 +205,16 @@ class TraceRecorder:
 
 
 def _features(before: Observation, after: Observation, state: NoveltyState) -> TraceFeatures:
+    new_branches = (
+        tuple(sorted(set(after.branch_symbols) - state.branches))
+        if after.branch_trace_available
+        else ()
+    )
     new_network = tuple(sorted(set(after.network_symbols) - set(before.network_symbols)))
     new_errors = tuple(sorted(set(after.errors) - state.errors))
     digest = hashlib.sha256(after.screenshot).hexdigest()
     result = TraceFeatures(
-        (),
+        new_branches,
         new_network,
         new_errors,
         before.screenshot != after.screenshot,
@@ -213,11 +222,20 @@ def _features(before: Observation, after: Observation, state: NoveltyState) -> T
         before.url != after.url,
         after.url not in state.urls,
         len(after.console_messages) > len(before.console_messages),
+        _network_traffic(before, after, new_network),
     )
     state.screenshots.add(digest)
     state.urls.add(after.url)
     state.errors.update(after.errors)
+    if after.branch_trace_available:
+        state.branches.update(after.branch_symbols)
     return result
+
+
+def _network_traffic(before: Observation, after: Observation, new_network: tuple[int, ...]) -> bool:
+    if before.network_event_count is None or after.network_event_count is None:
+        return bool(new_network)
+    return after.network_event_count > before.network_event_count
 
 
 def _reward(config: RunConfig, after: Observation, features: TraceFeatures) -> float:
@@ -226,7 +244,7 @@ def _reward(config: RunConfig, after: Observation, features: TraceFeatures) -> f
             branch_trace_available=after.branch_trace_available,
             code_executed=bool(after.branch_symbols),
             new_branches_executed=bool(features.new_branches),
-            network_traffic=bool(after.network_symbols),
+            network_traffic=features.network_traffic,
             new_network_traffic=bool(features.new_network),
             screenshot_changed=features.screenshot_changed,
             screenshot_new=features.screenshot_new,

@@ -129,6 +129,8 @@ def test_single_session_uses_midpoint_axis() -> None:
     )
 
 
-def test_exploration_thresholds_reject_weighted_probability_above_total() -> None:
-    with pytest.raises(ValueError, match="cannot exceed"):
-        ExplorationProbabilities(random=0.2, weighted_random=0.3)
+def test_weighted_exploration_probability_is_an_independent_second_stage() -> None:
+    probability = ExplorationProbabilities(random=0.2, weighted_random=0.3)
+
+    assert probability.random == 0.2
+    assert probability.weighted_random == 0.3

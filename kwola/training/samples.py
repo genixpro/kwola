@@ -18,10 +18,12 @@ from kwola.storage import LmdbRunStore
 
 from .action_masks import cached_cropped_action_masks
 from .cache import SampleCache
-from .geometry import Crop, action_crop, centered_crop, effective_crop, random_crop
+from .crop_selection import valid_next_crop
+from .geometry import Crop, action_crop, centered_crop, effective_crop
 from .image_cache import DecodedImageCache
 from .sample_features import (
     action_index_for_trace,
+    coordinate_tensors,
     cursor_vector,
     execution_features,
     future_symbols,
@@ -220,7 +222,7 @@ class RecordedSampleAssembler:
             scaled_action(item.trace, (item.crop.width, item.crop.height), item.crop)
             for item in current
         ]
-        x, y = _coordinate_tensors(coordinates, device)
+        x, y = coordinate_tensors(coordinates, device)
         return TrainingBatch(
             request=request,
             next_request=next_request,
@@ -345,7 +347,14 @@ class RecordedSampleAssembler:
                 *desired,
             )
         else:
-            crop = random_crop(image.shape[1], image.shape[0], *desired, self._random)
+            crop = valid_next_crop(
+                trace,
+                image.shape[1],
+                image.shape[0],
+                *desired,
+                self._channels,
+                self._random,
+            )
         return _PreparedSample(key, trace, image, effective_crop(crop))
 
     @staticmethod
@@ -460,7 +469,7 @@ def _auxiliary_tensors(
             scaled_action(item.trace, (item.crop.width, item.crop.height), item.crop)
             for item in selected
         ]
-        x, y = _coordinate_tensors(coordinates, device)
+        x, y = coordinate_tensors(coordinates, device)
     indexes = None
     offsets = None
     weights = None
@@ -471,15 +480,6 @@ def _auxiliary_tensors(
         ]
         indexes, offsets, weights = weighted_symbol_bags(future, device)
     return _AuxiliaryTensors(enabled, actions, x, y, indexes, offsets, weights)
-
-
-def _coordinate_tensors(
-    coordinates: Sequence[tuple[int, int]], device: torch.device
-) -> tuple[Tensor, Tensor]:
-    return (
-        torch.tensor([item[0] for item in coordinates], device=device),
-        torch.tensor([item[1] for item in coordinates], device=device),
-    )
 
 
 def _attention_symbols(

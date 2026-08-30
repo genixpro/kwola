@@ -26,7 +26,7 @@ from kwola.training.optimizer import (
     OptimizerMetrics,
     summarize_optimizer_metrics,
 )
-from kwola.training.replay import ReplaySampler
+from kwola.training.replay import ReplaySampler, require_replay_iterations
 from kwola.training.samples import RecordedSampleAssembler
 
 from .lifecycle import RunnerLifecycle
@@ -69,10 +69,18 @@ class TrainingRunner:
         if gpu is not None:
             torch.cuda.set_device(gpu)
         with self._store() as store:
-            step_index, trace_count, training_index, iteration_count = self._state(store)
+            step_index, trace_count, trained_trace_count, training_index, iteration_count = (
+                self._state(store)
+            )
             if trace_count == 0:
                 raise RuntimeError("training requires at least one recorded browser trace")
             self._assembler(store).prepare_cache(self._config.training.sample_cache_workers)
+        iteration_count = require_replay_iterations(
+            trace_count - trained_trace_count,
+            iteration_count,
+            self._config.training.batch_size,
+            1,
+        )
         step_id = f"training-{step_index:08d}"
         model = TraceNet(
             self._config.model, num_actions=len(action_catalog(self._config.policy))
@@ -95,6 +103,7 @@ class TrainingRunner:
             step_id,
             metrics,
             iteration_count,
+            trace_count,
         )
         return RunnerResult(
             status="completed",
@@ -111,6 +120,7 @@ class TrainingRunner:
                 "mean_bootstrap_target": metrics.mean_bootstrap_target,
                 "mean_absolute_td_error": metrics.mean_absolute_td_error,
                 "gradient_norm": metrics.gradient_norm,
+                "conservative_q_loss": metrics.conservative_q_loss,
             },
         )
 
@@ -222,11 +232,12 @@ class TrainingRunner:
         target_model.load_state_dict(payload["target_model"], strict=True)  # type: ignore[arg-type]
         optimizer.optimizer.load_state_dict(payload["optimizer"])  # type: ignore[arg-type]
 
-    def _state(self, store: LmdbRunStore) -> tuple[int, int, int, int]:
+    def _state(self, store: LmdbRunStore) -> tuple[int, int, int, int, int]:
         state = store.get("run", "state") or {}
         return (
             int(state.get("training_steps", 0)),
             sum(1 for _ in store.scan("traces")),
+            int(state.get("training_trace_count", 0)),
             int(state.get("training_iterations", 0)),
             int(
                 state.get(
@@ -236,13 +247,16 @@ class TrainingRunner:
             ),
         )
 
-    def _record(self, step_id: str, metrics: OptimizerMetrics, iterations: int) -> None:
+    def _record(
+        self, step_id: str, metrics: OptimizerMetrics, iterations: int, trace_count: int
+    ) -> None:
         with self._store() as store:
 
             def complete(current: dict[str, Any] | None) -> dict[str, Any]:
                 state = dict(current or {})
                 state["training_steps"] = int(state.get("training_steps", 0)) + 1
                 state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
+                state["training_trace_count"] = trace_count
                 return state
 
             store.update("run", "state", complete)
@@ -259,6 +273,7 @@ class TrainingRunner:
                     "mean_bootstrap_target": metrics.mean_bootstrap_target,
                     "mean_absolute_td_error": metrics.mean_absolute_td_error,
                     "gradient_norm": metrics.gradient_norm,
+                    "conservative_q_loss": metrics.conservative_q_loss,
                     "iterations": iterations,
                     "status": "completed",
                 },

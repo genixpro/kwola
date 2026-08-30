@@ -1,4 +1,4 @@
-"""Masked Double-DQN losses for TraceNet's decomposed value maps."""
+"""Masked Double-DQN and conservative offline-Q losses for TraceNet value maps."""
 
 from dataclasses import dataclass
 
@@ -15,6 +15,7 @@ class QLoss:
     total: Tensor
     present_reward: Tensor
     discounted_reward: Tensor
+    conservative_q: Tensor
     trace_prediction: Tensor
     execution_feature: Tensor
     cursor_prediction: Tensor
@@ -50,11 +51,13 @@ def q_learning_loss(
     present, future, selected_q, td_error = _value_losses(
         outputs, batch, future_targets, config.losses
     )
+    conservative = _conservative_q_loss(outputs, batch, selected_q, config.losses)
     auxiliary = _auxiliary_losses(outputs, batch, config.losses)
     return QLoss(
-        total=present + future + sum(auxiliary),
+        total=present + future + conservative + sum(auxiliary),
         present_reward=present,
         discounted_reward=future,
+        conservative_q=conservative,
         trace_prediction=auxiliary[0],
         execution_feature=auxiliary[1],
         cursor_prediction=auxiliary[2],
@@ -102,6 +105,38 @@ def _value_losses(
     )
 
 
+def _conservative_q_loss(
+    outputs: dict[str, Tensor],
+    batch: TrainingBatch,
+    selected_q: Tensor,
+    weights: LossConfig,
+) -> Tensor:
+    """Keep unsupported valid actions below the demonstrated action value."""
+    values = outputs["actionValues"]
+    zero = values.sum() * 0
+    if weights.conservative_q == 0:
+        return zero
+
+    valid = batch.request.pixel_action_maps > 0
+    indexes = torch.arange(len(batch.sample_ids), device=values.device)
+    demonstrated = torch.zeros_like(valid)
+    demonstrated_region = (
+        _reward_masks(batch, values)
+        * batch.request.pixel_action_maps[indexes, batch.action_indexes]
+    ) > 0
+    demonstrated[indexes, batch.action_indexes] = demonstrated_region
+    alternatives = valid & ~demonstrated
+    has_alternative = alternatives.flatten(1).any(dim=1)
+    alternative_max = values.masked_fill(~alternatives, torch.finfo(values.dtype).min)
+    alternative_max = alternative_max.flatten(1).amax(dim=1)
+    penalties = nn.functional.relu(
+        alternative_max - selected_q.detach() + weights.conservative_q_margin
+    )
+    penalties = penalties * has_alternative.type_as(penalties)
+    count = has_alternative.sum().clamp_min(1)
+    return penalties.sum() / count * weights.conservative_q + zero
+
+
 def _double_dqn_targets(
     model: nn.Module,
     target_model: nn.Module,
@@ -119,7 +154,9 @@ def _double_dqn_targets(
             best_actions = online_values.flatten(1).argmax(dim=1)
             selected = target_values.flatten(1).gather(1, best_actions[:, None])[:, 0]
             discounted = torch.clamp(selected * discount_rate, min=-maximum, max=maximum)
-            return discounted * batch.next_state_valid.type_as(discounted)
+            has_valid_action = batch.next_request.pixel_action_maps.flatten(1).gt(0).any(dim=1)
+            valid_bootstrap = batch.next_state_valid & has_valid_action
+            return discounted * valid_bootstrap.type_as(discounted)
     finally:
         if model_was_training:
             model.train()

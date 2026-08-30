@@ -7,17 +7,26 @@ import torch
 
 from kwola.storage import AtomicBlobStore, LmdbRunStore
 from kwola.training.action_masks import action_masks
+from kwola.training.crop_selection import valid_next_crop
 from kwola.training.geometry import Crop, process_screenshot
 from kwola.training.image_cache import DecodedImageCache
 from kwola.training.sample_features import (
     _flood_reward,
     _paint_action_circle,
     coverage_symbols,
+    execution_features,
     recent_symbols,
     step_symbol_features,
     symbol_features,
 )
 from kwola.training.samples import ACTION_KINDS, RecordedSampleAssembler
+
+
+def test_execution_features_prefer_action_local_network_traffic() -> None:
+    trace = {"network_symbols": [10], "network_traffic": False}
+
+    assert execution_features(trace)[5] == 0.0
+    assert execution_features({"network_symbols": [10]})[5] == 1.0
 
 
 def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
@@ -208,6 +217,19 @@ def test_crop_local_action_masks_preserve_supported_target_fallback() -> None:
 
     assert not bool(action_masks(outside, (1920, 1080), None, crop=crop).any())
     assert bool(action_masks(unsupported, (1920, 1080), None, crop=crop).all())
+
+
+def test_next_crop_always_contains_a_valid_action() -> None:
+    trace = _trace(1, "unused.png")
+    trace["viewport"] = [1920, 1080]
+    trace["action"] = {"kind": "click", "x": 1700, "y": 800}
+    trace["action_targets"] = [
+        {"bounds": [1650, 750, 1800, 900], "click": True},
+    ]
+
+    crop = valid_next_crop(trace, 576, 324, 448, 320, None, random.Random(3))
+
+    assert bool(action_masks(trace, (576, 324), None, crop=crop).any())
 
 
 def test_decoded_image_cache_matches_live_grayscale_encoding(tmp_path: Path) -> None:

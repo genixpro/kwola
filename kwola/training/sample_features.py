@@ -184,6 +184,15 @@ def scaled_action(
     )
 
 
+def coordinate_tensors(
+    coordinates: Sequence[tuple[int, int]], device: torch.device
+) -> tuple[Tensor, Tensor]:
+    return (
+        torch.tensor([item[0] for item in coordinates], device=device),
+        torch.tensor([item[1] for item in coordinates], device=device),
+    )
+
+
 def reward_mask(
     trace: Mapping[str, Any],
     size: int | tuple[int, int],
@@ -224,7 +233,7 @@ def execution_features(trace: Mapping[str, Any]) -> tuple[float, ...]:
         float(bool(trace.get("new_errors"))),
         float(bool(trace.get("branch_symbols"))),
         float(bool(trace.get("new_branch_symbols"))),
-        float(bool(trace.get("network_symbols"))),
+        float(bool(trace.get("network_traffic", trace.get("network_symbols")))),
         float(bool(trace.get("new_network_symbols"))),
         float(bool(trace.get("screenshot_changed"))),
         float(bool(trace.get("screenshot_new"))),
