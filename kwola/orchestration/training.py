@@ -164,6 +164,11 @@ class TrainingRunner:
                 self._config.training.crop_random_y,
             ),
             decoded_image_cache_size=self._config.training.decoded_image_cache_size,
+            enable_trace_prediction=self._config.model.enable_trace_prediction,
+            enable_execution_feature_prediction=(
+                self._config.model.enable_execution_feature_prediction
+            ),
+            enable_cursor_prediction=self._config.model.enable_cursor_prediction,
             source=random.Random(self._config.seed),
         )
 

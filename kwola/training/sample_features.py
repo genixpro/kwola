@@ -241,18 +241,25 @@ def _step_traces(
 
 
 def _paint_action_circle(image: Tensor, x: int, y: int, radius: int, gain: float) -> None:
+    left = max(0, x - radius + 1)
+    right = min(image.shape[1], x + radius)
+    top = max(0, y - radius + 1)
+    bottom = min(image.shape[0], y + radius)
+    if left >= right or top >= bottom:
+        return
     yy, xx = torch.meshgrid(
-        torch.arange(image.shape[0], device=image.device),
-        torch.arange(image.shape[1], device=image.device),
+        torch.arange(top - y, bottom - y, device=image.device),
+        torch.arange(left - x, right - x, device=image.device),
         indexing="ij",
     )
-    distance = torch.sqrt((xx - x).square() + (yy - y).square())
+    distance = torch.sqrt(xx.square() + yy.square())
     circle = torch.where(
         distance < radius,
         ((radius - distance) / radius * 0.7 + 0.3) * gain,
         torch.zeros_like(distance),
     )
-    image.copy_(torch.minimum(torch.ones_like(image), image + circle))
+    target = image[top:bottom, left:right]
+    target.copy_(torch.minimum(torch.ones_like(target), target + circle))
 
 
 def _size(size: int | tuple[int, int]) -> tuple[int, int]:
@@ -269,7 +276,9 @@ def _flood_reward(
     quantized = np.rint(image * 100).astype(np.uint8)
     for seed_y in range(seed_top, seed_bottom + 1):
         for seed_x in range(seed_left, seed_right + 1):
+            if flooded[seed_y, seed_x]:
+                continue
             flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
-            cv2.floodFill(quantized.copy(), flood_mask, (seed_x, seed_y), (255,), (0,), (0,))
+            cv2.floodFill(quantized, flood_mask, (seed_x, seed_y), (255,), (0,), (0,))
             flooded |= flood_mask[1:-1, 1:-1]
     return np.bitwise_and(flooded, allowed)

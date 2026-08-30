@@ -1,15 +1,13 @@
 """Deterministic reconstruction of training tensors from recorded traces."""
 
 import random
-from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import cv2
 import numpy as np
 import torch
 from numpy.typing import NDArray
@@ -20,8 +18,10 @@ from kwola.agent.tracenet import TraceNetRequest
 from kwola.domain.actions import ActionChannel, ActionKind
 from kwola.storage import LmdbRunStore
 
+from .action_masks import action_masks
 from .cache import SampleCache
-from .geometry import Crop, action_crop, centered_crop, process_screenshot, random_crop
+from .geometry import Crop, action_crop, centered_crop, random_crop
+from .image_cache import DecodedImageCache
 from .sample_features import (
     action_index_for_trace,
     coverage_symbols,
@@ -34,6 +34,7 @@ from .sample_features import (
     scaled_action,
     weighted_symbol_bags,
 )
+from .trace_index import TraceIndex, cache_payload, trace_order
 
 ACTION_KINDS = tuple(ActionKind)
 
@@ -61,34 +62,15 @@ class _PreparedSample:
     crop: Crop
 
 
-class _DecodedImageCache:
-    def __init__(self, capacity: int, downscale_ratio: float) -> None:
-        self._capacity = capacity
-        self._downscale_ratio = downscale_ratio
-        self._values: OrderedDict[tuple[str, int | None], NDArray[np.float32]] = OrderedDict()
-
-    def decode(self, path: Path, edge: int | None) -> NDArray[np.float32]:
-        key = (str(path), edge)
-        cached = self._values.get(key)
-        if cached is not None:
-            self._values.move_to_end(key)
-            return cached
-        encoded = np.frombuffer(path.read_bytes(), dtype=np.uint8)
-        decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-        if decoded is None:
-            raise ValueError(f"invalid screenshot blob: {path}")
-        decoded_uint8 = cast(NDArray[np.uint8], decoded)
-        if edge is None:
-            image = process_screenshot(decoded_uint8, self._downscale_ratio)
-        else:
-            resized = cv2.resize(decoded_uint8, (edge, edge), interpolation=cv2.INTER_AREA)
-            image = cast(NDArray[np.float32], resized[:, :, 0].astype(np.float32) / 255.0)
-        if self._capacity:
-            self._values[key] = image
-            self._values.move_to_end(key)
-            while len(self._values) > self._capacity:
-                self._values.popitem(last=False)
-        return image
+@dataclass(frozen=True, slots=True)
+class _AuxiliaryTensors:
+    enabled: bool
+    actions: Tensor | None
+    x: Tensor | None
+    y: Tensor | None
+    indexes: Tensor | None
+    offsets: Tensor | None
+    weights: Tensor | None
 
 
 class RecordedSampleAssembler:
@@ -111,6 +93,9 @@ class RecordedSampleAssembler:
         crop_random: tuple[int, int] = (0, 0),
         decoded_image_cache_size: int = 0,
         freeze_records: bool = False,
+        enable_trace_prediction: bool = True,
+        enable_execution_feature_prediction: bool = True,
+        enable_cursor_prediction: bool = True,
         source: random.Random | None = None,
     ) -> None:
         self._run_dir = run_dir
@@ -126,9 +111,13 @@ class RecordedSampleAssembler:
         self._crop_size = crop_size
         self._next_crop_size = next_crop_size
         self._crop_random = crop_random
-        self._images = _DecodedImageCache(decoded_image_cache_size, image_downscale_ratio)
+        self._images = DecodedImageCache(decoded_image_cache_size, image_downscale_ratio)
         self._freeze_records = freeze_records
         self._trace_snapshot: list[tuple[str, dict[str, Any]]] | None = None
+        self._trace_index: TraceIndex | None = None
+        self._trace_prediction = enable_trace_prediction
+        self._execution_prediction = enable_execution_feature_prediction
+        self._cursor_prediction = enable_cursor_prediction
         self._random = source or random.Random(0)
 
     def assemble(
@@ -145,39 +134,25 @@ class RecordedSampleAssembler:
         if not traces:
             raise RuntimeError("training requires at least one recorded browser trace")
         selected = [traces[(offset + index) % len(traces)] for index in range(batch_size)]
-        return self._batch(selected, traces, edge, next_edge, device, impossible_reward)
+        index = self._trace_index or TraceIndex.build(traces)
+        return self._batch(selected, index, edge, next_edge, device, impossible_reward)
 
     def prepare_cache(self, workers: int = 0) -> int:
         traces = self._recorded_traces()
-        self._validate_screenshots(traces, workers)
+        _validate_screenshots(self._run_dir, traces, workers)
         return len(traces)
 
     def prepare_step(self, step_id: str, workers: int = 0) -> int:
         traces = list(self._store.scan_prefix("traces", f"{step_id}-trace-"))
         trace_ids = tuple(key for key, _trace in traces)
-        self._cache.get_or_rebuild(step_id, partial(_cache_payload, trace_ids))
-        self._validate_screenshots(traces, workers)
+        self._cache.get_or_rebuild(step_id, partial(cache_payload, trace_ids))
+        _validate_screenshots(self._run_dir, traces, workers)
         return len(traces)
-
-    def _validate_screenshots(
-        self, traces: Sequence[tuple[str, dict[str, Any]]], workers: int
-    ) -> None:
-        if workers > 0:
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                tuple(executor.map(self._validate_screenshot, (trace for _key, trace in traces)))
-            return
-        for _key, trace in traces:
-            self._validate_screenshot(trace)
-
-    def _validate_screenshot(self, trace: Mapping[str, Any]) -> None:
-        path = self._run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
-        if not path.is_file() or not path.read_bytes():
-            raise ValueError(f"missing or empty screenshot blob: {path}")
 
     def _recorded_traces(self) -> list[tuple[str, dict[str, Any]]]:
         if self._trace_snapshot is not None:
             return self._trace_snapshot
-        traces = sorted(self._store.scan("traces"), key=_trace_order)
+        traces = sorted(self._store.scan("traces"), key=trace_order)
         groups: dict[str, list[str]] = {}
         by_id = dict(traces)
         for key, trace in traces:
@@ -185,7 +160,7 @@ class RecordedSampleAssembler:
         prepared: list[tuple[str, dict[str, Any]]] = []
         for step_id, trace_ids in groups.items():
             payload, _rebuilt = self._cache.get_or_rebuild(
-                step_id, partial(_cache_payload, tuple(trace_ids))
+                step_id, partial(cache_payload, tuple(trace_ids))
             )
             cached_ids = payload.get("trace_ids", [])
             if not isinstance(cached_ids, list) or any(key not in by_id for key in cached_ids):
@@ -194,12 +169,13 @@ class RecordedSampleAssembler:
             prepared.extend((key, by_id[key]) for key in cached_ids)
         if self._freeze_records:
             self._trace_snapshot = prepared
+            self._trace_index = TraceIndex.build(prepared)
         return prepared
 
     def _batch(
         self,
         selected: Sequence[tuple[str, dict[str, Any]]],
-        traces: Sequence[tuple[str, dict[str, Any]]],
+        traces: TraceIndex,
         edge: int | None,
         next_edge: int | None,
         device: torch.device,
@@ -207,7 +183,7 @@ class RecordedSampleAssembler:
     ) -> TrainingBatch:
         current = [self._prepare(item, edge, current=True) for item in selected]
         request = self._request(current, traces, device, impossible_reward, True)
-        next_samples, next_valid = _next_samples(selected, traces)
+        next_samples, next_valid = traces.next_samples(selected)
         following = [self._prepare(item, next_edge or edge, current=False) for item in next_samples]
         next_request = self._request(following, traces, device, impossible_reward, False)
         coordinates = [
@@ -243,18 +219,26 @@ class RecordedSampleAssembler:
                     for item in current
                 ]
             ).to(device),
-            execution_features=torch.tensor(
-                [execution_features(trace) for _key, trace in selected],
-                dtype=torch.float32,
-                device=device,
+            execution_features=(
+                torch.tensor(
+                    [execution_features(trace) for _key, trace in selected],
+                    dtype=torch.float32,
+                    device=device,
+                )
+                if self._execution_prediction
+                else None
             ),
-            cursors=torch.stack([cursor_vector(trace) for _key, trace in selected]).to(device),
+            cursors=(
+                torch.stack([cursor_vector(trace) for _key, trace in selected]).to(device)
+                if self._cursor_prediction
+                else None
+            ),
         )
 
     def _request(
         self,
         selected: Sequence[_PreparedSample],
-        traces: Sequence[tuple[str, dict[str, Any]]],
+        traces: TraceIndex,
         device: torch.device,
         impossible_reward: float,
         auxiliary: bool,
@@ -262,7 +246,7 @@ class RecordedSampleAssembler:
         images = torch.stack([self._crop_image(item) for item in selected]).to(device)
         masks = torch.stack(
             [
-                _action_masks(
+                action_masks(
                     item.trace,
                     (item.crop.image_width, item.crop.image_height),
                     self._channels,
@@ -270,30 +254,28 @@ class RecordedSampleAssembler:
                 for item in selected
             ]
         ).to(device)
-        actions = torch.tensor(
-            [action_index_for_trace(item.trace, self._channels) for item in selected],
-            device=device,
+        aux = _auxiliary_tensors(
+            selected,
+            traces,
+            self._channels,
+            self._symbol_dictionary_size,
+            device,
+            auxiliary,
+            self._trace_prediction,
+            self._execution_prediction,
+            self._cursor_prediction,
         )
-        coordinates = [
-            scaled_action(item.trace, (item.crop.width, item.crop.height), item.crop)
-            for item in selected
-        ]
-        x, y = _coordinate_tensors(coordinates, device)
-        future = [
-            future_symbols(item.trace, traces, self._symbol_dictionary_size) for item in selected
-        ]
-        indexes, offsets, weights = weighted_symbol_bags(future, device)
         return TraceNetRequest(
             self._backbone(selected, traces, images, device),
             masks,
             impossible_reward,
-            compute_auxiliary=auxiliary,
-            auxiliary_action_type=actions if auxiliary else None,
-            auxiliary_action_x=x if auxiliary else None,
-            auxiliary_action_y=y if auxiliary else None,
-            future_symbol_indexes=indexes if auxiliary else None,
-            future_symbol_offsets=offsets if auxiliary else None,
-            future_symbol_weights=weights if auxiliary else None,
+            compute_auxiliary=aux.enabled,
+            auxiliary_action_type=aux.actions,
+            auxiliary_action_x=aux.x,
+            auxiliary_action_y=aux.y,
+            future_symbol_indexes=aux.indexes,
+            future_symbol_offsets=aux.offsets,
+            future_symbol_weights=aux.weights,
         )
 
     def _prepare(
@@ -338,7 +320,7 @@ class RecordedSampleAssembler:
     def _backbone(
         self,
         selected: Sequence[_PreparedSample],
-        traces: Sequence[tuple[str, dict[str, Any]]],
+        traces: TraceIndex,
         images: Tensor,
         device: torch.device,
     ) -> BackboneInput:
@@ -353,7 +335,7 @@ class RecordedSampleAssembler:
                 action_images[index],
                 action_vectors[index],
                 item.trace,
-                traces,
+                traces.step(item.trace),
                 (width, height),
                 self._channels,
                 self._recent_action_history,
@@ -362,10 +344,12 @@ class RecordedSampleAssembler:
                 item.crop,
             )
         coverage = [
-            coverage_symbols(item.trace, traces, self._symbol_dictionary_size) for item in selected
+            coverage_symbols(item.trace, traces.step(item.trace), self._symbol_dictionary_size)
+            for item in selected
         ]
         recent = [
-            recent_symbols(item.trace, traces, self._symbol_dictionary_size) for item in selected
+            recent_symbols(item.trace, traces.step(item.trace), self._symbol_dictionary_size)
+            for item in selected
         ]
         recent_tensors = weighted_symbol_bags(recent, device)
         coverage_tensors = weighted_symbol_bags(coverage, device)
@@ -387,27 +371,58 @@ class RecordedSampleAssembler:
         )
 
 
-def _trace_order(item: tuple[str, Mapping[str, Any]]) -> tuple[str, int]:
-    return str(item[1]["step_id"]), int(item[1]["index"])
+def _validate_screenshots(
+    run_dir: Path, traces: Sequence[tuple[str, dict[str, Any]]], workers: int
+) -> None:
+    validate = partial(_validate_screenshot, run_dir)
+    if workers > 0:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            tuple(executor.map(validate, (trace for _key, trace in traces)))
+        return
+    for _key, trace in traces:
+        validate(trace)
 
 
-def _cache_payload(trace_ids: Sequence[str]) -> dict[str, Any]:
-    return {"trace_ids": list(trace_ids)}
+def _validate_screenshot(run_dir: Path, trace: Mapping[str, Any]) -> None:
+    path = run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
+    if not path.is_file() or not path.read_bytes():
+        raise ValueError(f"missing or empty screenshot blob: {path}")
 
 
-def _next_samples(
-    selected: Sequence[tuple[str, dict[str, Any]]],
-    traces: Sequence[tuple[str, dict[str, Any]]],
-) -> tuple[list[tuple[str, dict[str, Any]]], list[bool]]:
-    lookup = {(str(trace["step_id"]), int(trace["index"])): (key, trace) for key, trace in traces}
-    samples = []
-    validity = []
-    for current in selected:
-        trace = current[1]
-        next_trace = lookup.get((str(trace["step_id"]), int(trace["index"]) + 1))
-        samples.append(next_trace or current)
-        validity.append(next_trace is not None)
-    return samples, validity
+def _auxiliary_tensors(
+    selected: Sequence[_PreparedSample],
+    traces: TraceIndex,
+    channels: tuple[ActionChannel, ...] | None,
+    symbol_dictionary_size: int,
+    device: torch.device,
+    auxiliary: bool,
+    trace_prediction: bool,
+    execution_prediction: bool,
+    cursor_prediction: bool,
+) -> _AuxiliaryTensors:
+    enabled = auxiliary and any((trace_prediction, execution_prediction, cursor_prediction))
+    actions = None
+    x = None
+    y = None
+    if enabled:
+        actions = torch.tensor(
+            [action_index_for_trace(item.trace, channels) for item in selected], device=device
+        )
+        coordinates = [
+            scaled_action(item.trace, (item.crop.width, item.crop.height), item.crop)
+            for item in selected
+        ]
+        x, y = _coordinate_tensors(coordinates, device)
+    indexes = None
+    offsets = None
+    weights = None
+    if auxiliary and trace_prediction:
+        future = [
+            future_symbols(item.trace, traces.step(item.trace), symbol_dictionary_size)
+            for item in selected
+        ]
+        indexes, offsets, weights = weighted_symbol_bags(future, device)
+    return _AuxiliaryTensors(enabled, actions, x, y, indexes, offsets, weights)
 
 
 def _coordinate_tensors(
@@ -417,59 +432,6 @@ def _coordinate_tensors(
         torch.tensor([item[0] for item in coordinates], device=device),
         torch.tensor([item[1] for item in coordinates], device=device),
     )
-
-
-def _action_masks(
-    trace: Mapping[str, Any], size: tuple[int, int], channels: tuple[ActionChannel, ...] | None
-) -> Tensor:
-    width, height = size
-    targets = trace.get("action_targets")
-    if not isinstance(targets, list) or not targets:
-        return torch.ones(len(channels or ACTION_KINDS), height, width)
-    masks = torch.zeros(len(channels or ACTION_KINDS), height, width)
-    for target in targets:
-        _paint_target(masks, target, trace.get("viewport", [width, height]), channels)
-    return masks if bool(masks.any()) else torch.ones_like(masks)
-
-
-def _paint_target(
-    masks: Tensor,
-    target: Mapping[str, Any],
-    viewport: Sequence[int],
-    channels: tuple[ActionChannel, ...] | None,
-) -> None:
-    height, width = masks.shape[-2:]
-    left, top, right, bottom = (int(value) for value in target["bounds"])
-    x1 = min(width - 1, max(0, left * width // int(viewport[0])))
-    y1 = min(height - 1, max(0, top * height // int(viewport[1])))
-    x2 = min(width, max(x1 + 1, right * width // int(viewport[0])))
-    y2 = min(height, max(y1 + 1, bottom * height // int(viewport[1])))
-    for index, channel in enumerate(channels or _generic_channels()):
-        if _target_supports(target, channel):
-            masks[index, y1:y2, x1:x2] = 1
-
-
-def _generic_channels() -> tuple[ActionChannel, ...]:
-    return tuple(
-        ActionChannel(
-            kind.value,
-            kind,
-            1.0,
-            text_strategy="letters" if kind is ActionKind.TYPE else None,
-            direction="up" if kind is ActionKind.SCROLL else None,
-        )
-        for kind in ACTION_KINDS
-    )
-
-
-def _target_supports(target: Mapping[str, Any], channel: ActionChannel) -> bool:
-    if channel.kind in {ActionKind.CLICK, ActionKind.DOUBLE_CLICK}:
-        return bool(target.get("click"))
-    if channel.kind is ActionKind.RIGHT_CLICK:
-        return bool(target.get("right_click"))
-    if channel.kind in {ActionKind.CLEAR, ActionKind.TYPE}:
-        return bool(target.get("type"))
-    return bool(target.get("scroll_up" if channel.direction == "up" else "scroll_down"))
 
 
 def _attention_symbols(

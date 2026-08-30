@@ -417,6 +417,9 @@ def _assembler(run_dir: Path, store: LmdbRunStore) -> RecordedSampleAssembler:
         crop_random=(config.training.crop_random_x, config.training.crop_random_y),
         decoded_image_cache_size=config.training.decoded_image_cache_size,
         freeze_records=True,
+        enable_trace_prediction=config.model.enable_trace_prediction,
+        enable_execution_feature_prediction=config.model.enable_execution_feature_prediction,
+        enable_cursor_prediction=config.model.enable_cursor_prediction,
         source=random.Random(config.seed),
     )
 

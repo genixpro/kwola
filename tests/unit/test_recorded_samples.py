@@ -5,6 +5,7 @@ import numpy as np
 import torch
 
 from kwola.storage import AtomicBlobStore, LmdbRunStore
+from kwola.training.sample_features import _flood_reward, _paint_action_circle
 from kwola.training.samples import ACTION_KINDS, RecordedSampleAssembler
 
 
@@ -46,6 +47,28 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
             "cache_version": 3,
             "payload": {"trace_ids": ["testing-0-trace-0000", "testing-0-trace-0001"]},
         }
+        lean = RecordedSampleAssembler(
+            tmp_path,
+            store,
+            symbol_dictionary_size=100,
+            discount_rate=0.85,
+            max_discounted_reward=10.0,
+            cache_version=3,
+            decoded_image_cache_size=4,
+            freeze_records=True,
+            enable_trace_prediction=False,
+            enable_execution_feature_prediction=False,
+            enable_cursor_prediction=False,
+        ).assemble(
+            batch_size=2,
+            edge=64,
+            device=torch.device("cpu"),
+            impossible_reward=-10.0,
+        )
+        assert not lean.request.compute_auxiliary
+        assert lean.request.future_symbol_indexes is None
+        assert lean.execution_features is None
+        assert lean.cursors is None
         path.unlink()
         cached = assembler.assemble(
             batch_size=2,
@@ -54,6 +77,50 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
             impossible_reward=-10.0,
         )
         assert cached.sample_ids == batch.sample_ids
+
+
+def test_local_action_circle_matches_full_frame_calculation() -> None:
+    expected = torch.rand(96, 128)
+    actual = expected.clone()
+    _legacy_paint_action_circle(expected, 3, 92, 40, 0.64)
+    _paint_action_circle(actual, 3, 92, 40, 0.64)
+    torch.testing.assert_close(actual, expected)
+
+
+def test_in_place_flood_reward_matches_copy_per_seed_calculation() -> None:
+    source = np.random.default_rng(7)
+    image = source.integers(0, 8, size=(64, 96), dtype=np.uint8).astype(np.float32) / 100
+    allowed = source.integers(0, 2, size=image.shape, dtype=np.uint8)
+    expected = _legacy_flood_reward(image, allowed, 47, 31)
+    actual = _flood_reward(image, allowed, 47, 31)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def _legacy_paint_action_circle(
+    image: torch.Tensor, x: int, y: int, radius: int, gain: float
+) -> None:
+    yy, xx = torch.meshgrid(
+        torch.arange(image.shape[0]), torch.arange(image.shape[1]), indexing="ij"
+    )
+    distance = torch.sqrt((xx - x).square() + (yy - y).square())
+    circle = torch.where(
+        distance < radius,
+        ((radius - distance) / radius * 0.7 + 0.3) * gain,
+        torch.zeros_like(distance),
+    )
+    image.copy_(torch.minimum(torch.ones_like(image), image + circle))
+
+
+def _legacy_flood_reward(image: np.ndarray, allowed: np.ndarray, x: int, y: int) -> np.ndarray:
+    height, width = image.shape
+    flooded = np.zeros((height, width), dtype=np.uint8)
+    quantized = np.rint(image * 100).astype(np.uint8)
+    for seed_y in range(max(0, y - 2), min(height - 1, y + 2) + 1):
+        for seed_x in range(max(0, x - 2), min(width - 1, x + 2) + 1):
+            flood_mask = np.zeros((height + 2, width + 2), dtype=np.uint8)
+            cv2.floodFill(quantized.copy(), flood_mask, (seed_x, seed_y), (255,), (0,), (0,))
+            flooded |= flood_mask[1:-1, 1:-1]
+    return np.bitwise_and(flooded, allowed)
 
 
 def _trace(index: int, screenshot: str) -> dict[str, object]:
