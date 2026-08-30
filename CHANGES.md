@@ -17,7 +17,8 @@
   target instead of selecting an invalid flattened cell.
 - The loss now includes a configurable conservative-Q margin penalty for unsupported valid actions,
   enabled by default with weight and margin `0.1`. Its contribution is recorded as
-  `conservative_q_loss` in training results, stored training records, and progress telemetry.
+  `conservative_q_loss` in training results, stored training records, and progress telemetry. Masked
+  action sentinels are excluded from its differentiable-zero term to prevent floating-point overflow.
 - Exploration now uses independent stages: `random` controls action-catalog-weighted behavior that
   bypasses inference, while `weighted_random` conditionally selects Q-weighted sampling after model
   evaluation. These settings are no longer ordered thresholds, and the uniform-random interval has

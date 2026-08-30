@@ -113,6 +113,33 @@ def test_conservative_q_margin_lowers_the_best_unsupported_action() -> None:
     assert values.grad[1, 1, 0, 0] == 0
 
 
+def test_conservative_q_zero_term_ignores_masked_value_sentinels() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    batch = _batch(torch.tensor([False, False]))
+    valid = torch.zeros_like(batch.request.pixel_action_maps)
+    valid[0, 0, 0, 0] = 1
+    valid[0, 1, 0, 1] = 1
+    valid[1, 1, 0, 0] = 1
+    valid[1, 0, 0, 1] = 1
+    batch = replace(batch, request=replace(batch.request, pixel_action_maps=valid))
+    values = torch.full(
+        valid.shape,
+        torch.finfo(torch.float32).min,
+        requires_grad=True,
+    )
+    with torch.no_grad():
+        values[valid.bool()] = 0
+
+    loss = _conservative_q_loss(
+        {"actionValues": values}, batch, torch.zeros(2), config.training.losses
+    )
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert values.grad is not None
+    assert torch.isfinite(values.grad).all()
+
+
 def test_present_reward_trains_on_terminal_and_only_recorded_region() -> None:
     config = profile_config("testing", "https://example.com", 1)
     present = torch.zeros(2, 2, 8, 8, requires_grad=True)
