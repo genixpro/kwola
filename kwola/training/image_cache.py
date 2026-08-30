@@ -48,6 +48,17 @@ class DecodedImageCache:
                 self._values.popitem(last=False)
         return image
 
+    def store_encoded(self, path: Path, encoded: bytes) -> None:
+        """Populate the persistent training representation while bytes are already hot."""
+        if self._persistent is None:
+            return
+        payload = np.frombuffer(encoded, dtype=np.uint8)
+        decoded = cv2.imdecode(payload, cv2.IMREAD_GRAYSCALE)
+        if decoded is None:
+            raise ValueError(f"invalid screenshot blob: {path}")
+        image = process_screenshot(cast(NDArray[np.uint8], decoded), self._downscale_ratio)
+        self._store_persistent(path, image)
+
     def _decode_source(self, path: Path, edge: int | None) -> NDArray[np.float32]:
         encoded = np.frombuffer(path.read_bytes(), dtype=np.uint8)
         # Match live observation encoding and avoid decoding three color channels

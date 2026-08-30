@@ -8,7 +8,14 @@ from kwola.storage import AtomicBlobStore, LmdbRunStore
 from kwola.training.action_masks import action_masks
 from kwola.training.geometry import Crop, process_screenshot
 from kwola.training.image_cache import DecodedImageCache
-from kwola.training.sample_features import _flood_reward, _paint_action_circle
+from kwola.training.sample_features import (
+    _flood_reward,
+    _paint_action_circle,
+    coverage_symbols,
+    recent_symbols,
+    step_symbol_features,
+    symbol_features,
+)
 from kwola.training.samples import ACTION_KINDS, RecordedSampleAssembler
 
 
@@ -46,6 +53,26 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
         assert batch.request.pixel_action_maps.shape == (2, len(ACTION_KINDS), 64, 64)
         assert batch.next_state_valid.tolist() == [True, False]
         assert batch.present_rewards.tolist() == [0.5, 1.5]
+        compact = RecordedSampleAssembler(
+            tmp_path,
+            store,
+            symbol_dictionary_size=100,
+            discount_rate=0.85,
+            max_discounted_reward=10.0,
+            cache_version=3,
+            decoded_image_cache_size=4,
+            compact_cpu_tensors=True,
+            freeze_records=True,
+        ).assemble(
+            batch_size=2,
+            edge=64,
+            device=torch.device("cpu"),
+            impossible_reward=-10.0,
+        )
+        assert compact.request.pixel_action_maps.dtype is torch.uint8
+        torch.testing.assert_close(
+            compact.request.pixel_action_maps.float(), batch.request.pixel_action_maps
+        )
         assert store.get("sample_cache", "testing-0") == {
             "cache_version": 3,
             "payload": {"trace_ids": ["testing-0-trace-0000", "testing-0-trace-0001"]},
@@ -149,6 +176,29 @@ def test_decoded_image_cache_matches_live_grayscale_encoding(tmp_path: Path) -> 
     path.unlink()
     persisted = DecodedImageCache(1, 0.3, cache_dir).decode(path, None)
     np.testing.assert_array_equal(persisted, actual)
+
+
+def test_combined_symbol_features_match_individual_builders() -> None:
+    traces = [(f"trace-{index}", _trace(index, "unused.png")) for index in range(8)]
+    current = traces[6][1]
+
+    coverage, recent = symbol_features(current, traces, 100)
+
+    assert coverage == coverage_symbols(current, traces, 100)
+    assert recent == recent_symbols(current, traces, 100)
+
+    indexed = step_symbol_features(traces, 100)
+    for key, trace in traces:
+        expected_coverage = coverage_symbols(trace, traces, 100)
+        expected_recent = recent_symbols(trace, traces, 100)
+        assert indexed[key][0] == expected_coverage
+        assert [item[0] for item in indexed[key][1]] == [item[0] for item in expected_recent]
+        np.testing.assert_allclose(
+            [item[1] for item in indexed[key][1]],
+            [item[1] for item in expected_recent],
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
 
 def _legacy_paint_action_circle(

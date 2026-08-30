@@ -10,6 +10,7 @@ from kwola.config.models import RunConfig
 from kwola.domain.actions import Action
 from kwola.domain.observations import Observation
 from kwola.storage import AtomicBlobStore, LmdbRunStore
+from kwola.training.image_cache import DecodedImageCache
 
 
 @dataclass(slots=True)
@@ -55,6 +56,11 @@ class TraceRecorder:
         self._store = store
         self._artifacts = artifacts
         self._blobs = AtomicBlobStore(run_dir / config.storage.blobs_directory)
+        self._training_images = DecodedImageCache(
+            0,
+            config.model.image_downscale_ratio,
+            run_dir / config.storage.cache_directory / "decoded-images",
+        )
         self._previous_after: tuple[str, str] | None = None
 
     def record(
@@ -102,8 +108,10 @@ class TraceRecorder:
             before_path = self._blobs.write(
                 "screenshots", f"{trace_id}-before.png", before.screenshot
             )
+            self._training_images.store_encoded(before_path, before.screenshot)
             before_relative = str(before_path.relative_to(self._run_dir))
         after_path = self._blobs.write("screenshots", f"{trace_id}.png", after.screenshot)
+        self._training_images.store_encoded(after_path, after.screenshot)
         after_relative = str(after_path.relative_to(self._run_dir))
         self._previous_after = (hashlib.sha256(after.screenshot).hexdigest(), after_relative)
         self._artifacts.append(after_relative)

@@ -77,8 +77,16 @@ class ExperimentRunner:
         state = _PipelineState(
             failures={slot: 0 for slot in range(self._config.orchestration.browser_workers)}
         )
+        startup_stagger = min(0.5, self._config.browser.action_settle_seconds)
         for slot in range(self._config.orchestration.browser_workers):
-            self._submit(executor, telemetry, active, "testing", slot)
+            self._submit(
+                executor,
+                telemetry,
+                active,
+                "testing",
+                slot,
+                retry_delay=slot * startup_stagger,
+            )
         self._start_training_if_ready(executor, telemetry, active, state)
         while True:
             completed, _pending = wait(active, return_when=FIRST_COMPLETED)

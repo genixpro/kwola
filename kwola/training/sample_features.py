@@ -58,6 +58,56 @@ def recent_symbols(
     return tuple(sorted(weights.items())) or ((0, 1.0),)
 
 
+def symbol_features(
+    trace: Mapping[str, Any], traces: Sequence[tuple[str, dict[str, Any]]], size: int
+) -> tuple[tuple[tuple[int, float], ...], tuple[tuple[int, float], ...]]:
+    """Build coverage and decayed recent symbols in one history traversal."""
+    current = int(trace["index"])
+    coverage: set[int] = set()
+    recent: dict[int, float] = {}
+    for _key, item in traces:
+        age = current - int(item["index"])
+        if age <= 0:
+            continue
+        weight = 0.9 ** (age - 1)
+        for symbol in item.get("branch_symbols", []):
+            mapped = int(symbol) % size
+            coverage.add(mapped)
+            recent[mapped] = min(1.0, recent.get(mapped, 0.0) + weight)
+    coverage_bag = tuple((value, 1.0) for value in sorted(coverage or {0}))
+    recent_bag = tuple(sorted(recent.items())) or ((0, 1.0),)
+    return coverage_bag, recent_bag
+
+
+def step_symbol_features(
+    traces: Sequence[tuple[str, dict[str, Any]]], size: int
+) -> dict[str, tuple[tuple[tuple[int, float], ...], tuple[tuple[int, float], ...]]]:
+    """Build symbol features for a whole browser sequence incrementally."""
+    coverage: set[int] = set()
+    recent: dict[int, float] = {}
+    previous_index: int | None = None
+    previous_symbols: Sequence[int] = ()
+    result = {}
+    for key, trace in traces:
+        current = int(trace["index"])
+        if previous_index is not None:
+            distance = current - previous_index
+            recent = {symbol: weight * 0.9**distance for symbol, weight in recent.items()}
+            previous_weight = 0.9 ** (distance - 1)
+            for symbol in previous_symbols:
+                mapped = int(symbol) % size
+                coverage.add(mapped)
+                recent[mapped] = recent.get(mapped, 0.0) + previous_weight
+        coverage_bag = tuple((value, 1.0) for value in sorted(coverage or {0}))
+        recent_bag = tuple(
+            (symbol, min(1.0, weight)) for symbol, weight in sorted(recent.items())
+        ) or ((0, 1.0),)
+        result[key] = coverage_bag, recent_bag
+        previous_index = current
+        previous_symbols = trace.get("branch_symbols", [])
+    return result
+
+
 def future_symbols(
     trace: Mapping[str, Any], traces: Sequence[tuple[str, dict[str, Any]]], size: int
 ) -> tuple[tuple[int, float], ...]:

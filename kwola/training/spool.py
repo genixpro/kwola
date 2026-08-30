@@ -25,7 +25,11 @@ def share_batch(batch: TrainingBatch) -> TrainingBatch:
 
 
 def batch_to_device(batch: TrainingBatch, device: torch.device) -> TrainingBatch:
-    return _map_tensors(batch, lambda tensor: tensor.to(device, non_blocking=True))
+    def transfer(tensor: Tensor) -> Tensor:
+        dtype = torch.float32 if tensor.dtype is torch.uint8 else tensor.dtype
+        return tensor.to(device, dtype=dtype, non_blocking=True)
+
+    return _map_tensors(batch, transfer)
 
 
 def _map_tensors[T](value: T, transform: Any) -> T:

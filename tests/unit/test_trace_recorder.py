@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 from kwola.config import load_config
 from kwola.domain.actions import Action, ActionKind, ActionMap, ActionTarget
 from kwola.domain.observations import Observation, Viewport
@@ -60,9 +63,13 @@ def _observation(
     errors: tuple[str, ...] = (),
 ) -> Observation:
     target = ActionTarget(0, 0, 10, 10, "button", can_click=True)
+    encoded_ok, encoded = cv2.imencode(
+        ".png", np.full((10, 10), screenshot[0], dtype=np.uint8)
+    )
+    assert encoded_ok
     return Observation(
         url,
-        screenshot,
+        encoded.tobytes(),
         Viewport(10, 10),
         ActionMap((target,), 10, 10, "1"),
         1.0,

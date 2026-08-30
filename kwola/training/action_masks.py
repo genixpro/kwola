@@ -18,14 +18,15 @@ def action_masks(
     size: tuple[int, int],
     channels: tuple[ActionChannel, ...] | None,
     crop: Crop | None = None,
+    dtype: torch.dtype = torch.float32,
 ) -> Tensor:
     width, height = size
     output_width = crop.width if crop is not None else width
     output_height = crop.height if crop is not None else height
     targets = trace.get("action_targets")
     if not isinstance(targets, list) or not targets:
-        return torch.ones(len(channels or ACTION_KINDS), output_height, output_width)
-    masks = torch.zeros(len(channels or ACTION_KINDS), output_height, output_width)
+        return torch.ones(len(channels or ACTION_KINDS), output_height, output_width, dtype=dtype)
+    masks = torch.zeros(len(channels or ACTION_KINDS), output_height, output_width, dtype=dtype)
     supported = False
     for target in targets:
         supported |= _paint_target(
@@ -37,6 +38,23 @@ def action_masks(
             crop,
         )
     return masks if supported else torch.ones_like(masks)
+
+
+def cached_cropped_action_masks(
+    key: str,
+    trace: Mapping[str, Any],
+    crop: Crop,
+    channels: tuple[ActionChannel, ...] | None,
+    compact: bool,
+    cache: dict[str, Tensor],
+) -> Tensor:
+    size = crop.image_width, crop.image_height
+    if not compact:
+        return action_masks(trace, size, channels, crop=crop)
+    # Compact CPU batches only need the pixels in the sampled crop.  Building
+    # a full-viewport tensor first defeats most of the memory and allocation
+    # savings, and random current/next crops rarely share the same slice.
+    return action_masks(trace, size, channels, crop=crop, dtype=torch.uint8)
 
 
 def _paint_target(

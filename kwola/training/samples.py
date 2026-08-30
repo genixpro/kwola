@@ -1,5 +1,3 @@
-"""Deterministic reconstruction of training tensors from recorded traces."""
-
 import random
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -18,25 +16,26 @@ from kwola.agent.tracenet import TraceNetRequest
 from kwola.domain.actions import ActionChannel, ActionKind
 from kwola.storage import LmdbRunStore
 
-from .action_masks import action_masks
+from .action_masks import cached_cropped_action_masks
 from .cache import SampleCache
 from .geometry import Crop, action_crop, centered_crop, random_crop
 from .image_cache import DecodedImageCache
 from .sample_features import (
     action_index_for_trace,
-    coverage_symbols,
     cursor_vector,
     execution_features,
     future_symbols,
     recent_actions,
-    recent_symbols,
     reward_mask,
     scaled_action,
+    step_symbol_features,
     weighted_symbol_bags,
 )
 from .trace_index import TraceIndex, cache_payload, trace_order
 
 ACTION_KINDS = tuple(ActionKind)
+SymbolBag = tuple[tuple[int, float], ...]
+SymbolFeatureCache = dict[str, tuple[SymbolBag, SymbolBag]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +92,7 @@ class RecordedSampleAssembler:
         crop_random: tuple[int, int] = (0, 0),
         decoded_image_cache_size: int = 0,
         decoded_image_cache_directory: Path | None = None,
+        compact_cpu_tensors: bool = False,
         freeze_records: bool = False,
         enable_trace_prediction: bool = True,
         enable_execution_feature_prediction: bool = True,
@@ -115,9 +115,11 @@ class RecordedSampleAssembler:
         self._images = DecodedImageCache(
             decoded_image_cache_size, image_downscale_ratio, decoded_image_cache_directory
         )
+        self._compact_cpu_tensors = compact_cpu_tensors
         self._freeze_records = freeze_records
         self._trace_snapshot: list[tuple[str, dict[str, Any]]] | None = None
         self._trace_index: TraceIndex | None = None
+        self._symbol_features: SymbolFeatureCache = {}
         self._trace_prediction = enable_trace_prediction
         self._execution_prediction = enable_execution_feature_prediction
         self._cursor_prediction = enable_cursor_prediction
@@ -184,11 +186,29 @@ class RecordedSampleAssembler:
         device: torch.device,
         impossible_reward: float,
     ) -> TrainingBatch:
+        symbol_cache = self._symbol_features if self._freeze_records else {}
+        action_mask_cache: dict[str, Tensor] = {}
         current = [self._prepare(item, edge, current=True) for item in selected]
-        request = self._request(current, traces, device, impossible_reward, True)
+        request = self._request(
+            current,
+            traces,
+            device,
+            impossible_reward,
+            True,
+            symbol_cache,
+            action_mask_cache,
+        )
         next_samples, next_valid = traces.next_samples(selected)
         following = [self._prepare(item, next_edge or edge, current=False) for item in next_samples]
-        next_request = self._request(following, traces, device, impossible_reward, False)
+        next_request = self._request(
+            following,
+            traces,
+            device,
+            impossible_reward,
+            False,
+            symbol_cache,
+            action_mask_cache,
+        )
         coordinates = [
             scaled_action(item.trace, (item.crop.width, item.crop.height), item.crop)
             for item in current
@@ -245,19 +265,25 @@ class RecordedSampleAssembler:
         device: torch.device,
         impossible_reward: float,
         auxiliary: bool,
+        symbol_cache: SymbolFeatureCache,
+        action_mask_cache: dict[str, Tensor],
     ) -> TraceNetRequest:
         images = torch.stack([self._crop_image(item) for item in selected]).to(device)
         masks = torch.stack(
             [
-                action_masks(
+                cached_cropped_action_masks(
+                    item.key,
                     item.trace,
-                    (item.crop.image_width, item.crop.image_height),
+                    item.crop,
                     self._channels,
-                    crop=item.crop,
+                    self._compact_cpu_tensors,
+                    action_mask_cache,
                 )
                 for item in selected
             ]
         ).to(device)
+        if masks.dtype is torch.uint8 and device.type != "cpu":
+            masks = masks.float()
         aux = _auxiliary_tensors(
             selected,
             traces,
@@ -270,7 +296,7 @@ class RecordedSampleAssembler:
             self._cursor_prediction,
         )
         return TraceNetRequest(
-            self._backbone(selected, traces, images, device),
+            _backbone(self, selected, traces, images, device, symbol_cache),
             masks,
             impossible_reward,
             compute_auxiliary=aux.enabled,
@@ -321,58 +347,69 @@ class RecordedSampleAssembler:
         image = item.image[crop.top : crop.bottom, crop.left : crop.right]
         return torch.from_numpy(image).unsqueeze(0)
 
-    def _backbone(
-        self,
-        selected: Sequence[_PreparedSample],
-        traces: TraceIndex,
-        images: Tensor,
-        device: torch.device,
-    ) -> BackboneInput:
-        batch_size, _, height, width = images.shape
-        action_count = len(self._channels or ACTION_KINDS)
-        action_images = torch.zeros(batch_size, action_count, height, width, device=device)
-        action_vectors = torch.zeros(
-            batch_size, self._recent_action_history * action_count, device=device
+
+def _cached_symbol_features(
+    selected: Sequence[_PreparedSample],
+    traces: TraceIndex,
+    dictionary_size: int,
+    cache: SymbolFeatureCache,
+) -> tuple[list[SymbolBag], list[SymbolBag]]:
+    features = []
+    for item in selected:
+        cached = cache.get(item.key)
+        if cached is None:
+            cache.update(step_symbol_features(traces.step(item.trace), dictionary_size))
+            cached = cache[item.key]
+        features.append(cached)
+    return [item[0] for item in features], [item[1] for item in features]
+
+
+def _backbone(
+    assembler: RecordedSampleAssembler,
+    selected: Sequence[_PreparedSample],
+    traces: TraceIndex,
+    images: Tensor,
+    device: torch.device,
+    symbol_cache: SymbolFeatureCache,
+) -> BackboneInput:
+    batch_size, _, height, width = images.shape
+    action_count = len(assembler._channels or ACTION_KINDS)
+    action_images = torch.zeros(batch_size, action_count, height, width, device=device)
+    action_vectors = torch.zeros(
+        batch_size, assembler._recent_action_history * action_count, device=device
+    )
+    for index, item in enumerate(selected):
+        recent_actions(
+            action_images[index],
+            action_vectors[index],
+            item.trace,
+            traces.step(item.trace),
+            (width, height),
+            assembler._channels,
+            assembler._recent_action_history,
+            assembler._recent_action_radius,
+            assembler._recent_action_decay,
+            item.crop,
         )
-        for index, item in enumerate(selected):
-            recent_actions(
-                action_images[index],
-                action_vectors[index],
-                item.trace,
-                traces.step(item.trace),
-                (width, height),
-                self._channels,
-                self._recent_action_history,
-                self._recent_action_radius,
-                self._recent_action_decay,
-                item.crop,
-            )
-        coverage = [
-            coverage_symbols(item.trace, traces.step(item.trace), self._symbol_dictionary_size)
-            for item in selected
-        ]
-        recent = [
-            recent_symbols(item.trace, traces.step(item.trace), self._symbol_dictionary_size)
-            for item in selected
-        ]
-        recent_tensors = weighted_symbol_bags(recent, device)
-        coverage_tensors = weighted_symbol_bags(coverage, device)
-        symbol_set, symbol_mask = _attention_symbols(coverage, device)
-        steps = torch.tensor(
-            [int(item.trace["index"]) for item in selected],
-            dtype=torch.float32,
-            device=device,
-        )
-        return BackboneInput(
-            images,
-            action_images,
-            action_vectors,
-            *recent_tensors,
-            *coverage_tensors,
-            symbol_set,
-            symbol_mask,
-            steps,
-        )
+    coverage, recent = _cached_symbol_features(
+        selected, traces, assembler._symbol_dictionary_size, symbol_cache
+    )
+    recent_tensors = weighted_symbol_bags(recent, device)
+    coverage_tensors = weighted_symbol_bags(coverage, device)
+    symbol_set, symbol_mask = _attention_symbols(coverage, device)
+    steps = torch.tensor(
+        [int(item.trace["index"]) for item in selected], dtype=torch.float32, device=device
+    )
+    return BackboneInput(
+        images,
+        action_images,
+        action_vectors,
+        *recent_tensors,
+        *coverage_tensors,
+        symbol_set,
+        symbol_mask,
+        steps,
+    )
 
 
 def _validate_screenshots(
@@ -441,7 +478,7 @@ def _coordinate_tensors(
 def _attention_symbols(
     bags: Sequence[tuple[tuple[int, float], ...]], device: torch.device
 ) -> tuple[Tensor, Tensor]:
-    values = [tuple(value for value, _weight in bag) for bag in bags]
+    values = [frozenset(value for value, _weight in bag) for bag in bags]
     symbols = tuple(sorted({value for bag in values for value in bag}))
     symbol_set = torch.tensor(symbols, dtype=torch.long, device=device)
     mask = torch.tensor(

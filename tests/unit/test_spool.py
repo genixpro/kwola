@@ -1,4 +1,5 @@
 import platform
+from dataclasses import replace
 
 import torch
 
@@ -30,3 +31,9 @@ def test_batch_spool_uses_shared_tensor_storage() -> None:
     assert shared.request.backbone.image.is_shared() or platform.system() != "Linux"
     moved = batch_to_device(shared, torch.device("cpu"))
     assert torch.equal(moved.present_rewards, batch.present_rewards)
+    compact = replace(
+        batch,
+        request=replace(batch.request, pixel_action_maps=batch.request.pixel_action_maps.byte()),
+    )
+    expanded = batch_to_device(compact, torch.device("cpu"))
+    assert expanded.request.pixel_action_maps.dtype is torch.float32
