@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from kwola.agent import RandomActionPolicy, RewardCalculator, RewardSignals
+from kwola.agent import InferencePolicy, RewardCalculator, RewardSignals
 from kwola.browser import (
     ActionExecutor,
     ActionMapExtractor,
@@ -83,14 +83,20 @@ class TestingRunner:
         try:
             observation = session.start(str(self._config.target))
             self._dispatch(LifecycleEventName.SESSION_STARTED, step_id)
-            policy = RandomActionPolicy(
+            policy = InferencePolicy(
+                self._run_dir,
+                self._config,
                 random.Random(self._config.seed + step_index),
-                self._config.policy.custom_typing_strings,
             )
             rewards: list[float] = []
             seen_branches = set(observation.branch_symbols)
             for trace_index in range(self._config.policy.testing_sequence_length):
-                action = policy.select(observation.action_map)
+                action = policy.select(
+                    observation,
+                    action_index=trace_index,
+                    test_step_index=step_index,
+                    force_random=random_policy,
+                )
                 trace_id = f"{step_id}-trace-{trace_index:04d}"
                 self._dispatch(LifecycleEventName.BEFORE_ACTION, trace_id)
                 before = observation
