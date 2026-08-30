@@ -4,6 +4,7 @@ import torch
 from torch import Tensor
 
 from kwola.agent.model_backbone import BackboneInput
+from kwola.agent.spatial import coordinate_image
 from kwola.agent.tracenet import TraceNetRequest
 
 
@@ -25,9 +26,16 @@ def diagnostic_batch(
     symbol_mask = torch.zeros(batch_size, 4, dtype=torch.bool, device=device)
     steps = torch.arange(1, batch_size + 1, dtype=torch.float32, device=device)
     masks = torch.ones(batch_size, num_actions, edge, edge, device=device)
+    coordinates = (
+        coordinate_image(edge, edge, device=device).unsqueeze(0).repeat(batch_size, 1, 1, 1)
+    )
+    availability = torch.ones(batch_size, 1, edge, edge, device=device)
     backbone = BackboneInput(
         image,
         recent_images,
+        masks,
+        coordinates,
+        availability,
         recent_vector,
         indexes,
         offsets,

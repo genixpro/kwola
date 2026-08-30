@@ -1,49 +1,41 @@
 import random
-from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
-from numpy.typing import NDArray
 from torch import Tensor
 
-from kwola.agent.model_backbone import BackboneInput
 from kwola.agent.tracenet import TraceNetRequest
 from kwola.domain.actions import ActionChannel, ActionKind
 from kwola.storage import LmdbRunStore
 
 from .action_masks import cached_cropped_action_masks
 from .cache import SampleCache
-from .crop_selection import valid_next_crop
-from .geometry import Crop, action_crop, centered_crop, effective_crop
 from .image_cache import DecodedImageCache
+from .sample_backbone import SymbolFeatureCache, assemble_backbone
 from .sample_features import (
     action_index_for_trace,
     coordinate_tensors,
-    cursor_vector,
+    cursor_index,
     execution_features,
     future_symbols,
-    recent_actions,
     reward_mask,
     scaled_action,
-    step_symbol_features,
     weighted_symbol_bags,
 )
+from .sample_preparation import PreparedSample, prepare_sample, validate_screenshots
 from .trace_index import TraceIndex, cache_payload, trace_order
 
 ACTION_KINDS = tuple(ActionKind)
-SymbolBag = tuple[tuple[int, float], ...]
-SymbolFeatureCache = dict[str, tuple[SymbolBag, SymbolBag]]
 
 
 @dataclass(frozen=True, slots=True)
 class TrainingBatch:
     request: TraceNetRequest
-    next_request: TraceNetRequest
+    next_request: TraceNetRequest | None
     present_rewards: Tensor
     next_state_valid: Tensor
     action_indexes: Tensor
@@ -53,14 +45,7 @@ class TrainingBatch:
     reward_pixel_masks: Tensor | None = None
     execution_features: Tensor | None = None
     cursors: Tensor | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _PreparedSample:
-    key: str
-    trace: dict[str, Any]
-    image: NDArray[np.float32]
-    crop: Crop
+    next_requests: tuple[TraceNetRequest, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +81,7 @@ class RecordedSampleAssembler:
         decoded_image_cache_directory: Path | None = None,
         compact_cpu_tensors: bool = False,
         freeze_records: bool = False,
+        trace_ids: Sequence[str] | None = None,
         enable_trace_prediction: bool = True,
         enable_execution_feature_prediction: bool = True,
         enable_cursor_prediction: bool = True,
@@ -119,6 +105,7 @@ class RecordedSampleAssembler:
         )
         self._compact_cpu_tensors = compact_cpu_tensors
         self._freeze_records = freeze_records
+        self._trace_ids = frozenset(trace_ids) if trace_ids is not None else None
         self._trace_snapshot: list[tuple[str, dict[str, Any]]] | None = None
         self._trace_index: TraceIndex | None = None
         self._symbol_features: SymbolFeatureCache = {}
@@ -153,20 +140,22 @@ class RecordedSampleAssembler:
 
     def prepare_cache(self, workers: int = 0) -> int:
         traces = self._recorded_traces()
-        _validate_screenshots(self._run_dir, traces, workers)
+        validate_screenshots(self._run_dir, traces, workers)
         return len(traces)
 
     def prepare_step(self, step_id: str, workers: int = 0) -> int:
         traces = list(self._store.scan_prefix("traces", f"{step_id}-trace-"))
         trace_ids = tuple(key for key, _trace in traces)
         self._cache.get_or_rebuild(step_id, partial(cache_payload, trace_ids))
-        _validate_screenshots(self._run_dir, traces, workers)
+        validate_screenshots(self._run_dir, traces, workers)
         return len(traces)
 
     def _recorded_traces(self) -> list[tuple[str, dict[str, Any]]]:
         if self._trace_snapshot is not None:
             return self._trace_snapshot
         traces = sorted(self._store.scan("traces"), key=trace_order)
+        if self._trace_ids is not None:
+            traces = [record for record in traces if record[0] in self._trace_ids]
         groups: dict[str, list[str]] = {}
         by_id = dict(traces)
         for key, trace in traces:
@@ -177,7 +166,7 @@ class RecordedSampleAssembler:
                 step_id, partial(cache_payload, tuple(trace_ids))
             )
             cached_ids = payload.get("trace_ids", [])
-            if not isinstance(cached_ids, list) or any(key not in by_id for key in cached_ids):
+            if not isinstance(cached_ids, list) or cached_ids != trace_ids:
                 self._cache.invalidate(step_id)
                 cached_ids = trace_ids
             prepared.extend((key, by_id[key]) for key in cached_ids)
@@ -198,6 +187,7 @@ class RecordedSampleAssembler:
         symbol_cache = self._symbol_features if self._freeze_records else {}
         action_mask_cache: dict[str, Tensor] = {}
         current = [self._prepare(item, edge, current=True) for item in selected]
+        reward_masks = _reward_masks(current, device)
         request = self._request(
             current,
             traces,
@@ -206,18 +196,36 @@ class RecordedSampleAssembler:
             True,
             symbol_cache,
             action_mask_cache,
+            reward_masks,
         )
         next_samples, next_valid = traces.next_samples(selected)
-        following = [self._prepare(item, next_edge or edge, current=False) for item in next_samples]
-        next_request = self._request(
-            following,
-            traces,
-            device,
-            impossible_reward,
-            False,
-            symbol_cache,
-            action_mask_cache,
+        following = [
+            self._prepare(item, next_edge or edge, current=False, full=edge is None)
+            for item in next_samples
+        ]
+        next_requests = tuple(
+            self._request(
+                [item],
+                traces,
+                device,
+                impossible_reward,
+                False,
+                symbol_cache,
+                action_mask_cache,
+            )
+            for item in following
         )
+        next_request = None
+        if edge is not None:
+            next_request = self._request(
+                following,
+                traces,
+                device,
+                impossible_reward,
+                False,
+                symbol_cache,
+                action_mask_cache,
+            )
         coordinates = [
             scaled_action(item.trace, (item.crop.width, item.crop.height), item.crop)
             for item in current
@@ -237,47 +245,24 @@ class RecordedSampleAssembler:
             action_x=x,
             action_y=y,
             sample_ids=tuple(key for key, _trace in selected),
-            reward_pixel_masks=torch.stack(
-                [
-                    reward_mask(
-                        item.trace,
-                        (item.crop.width, item.crop.height),
-                        item.crop,
-                        item.image[
-                            item.crop.top : item.crop.bottom,
-                            item.crop.left : item.crop.right,
-                        ],
-                    )
-                    for item in current
-                ]
-            ).to(device),
-            execution_features=(
-                torch.tensor(
-                    [execution_features(trace) for _key, trace in selected],
-                    dtype=torch.float32,
-                    device=device,
-                )
-                if self._execution_prediction
-                else None
-            ),
-            cursors=(
-                torch.stack([cursor_vector(trace) for _key, trace in selected]).to(device)
-                if self._cursor_prediction
-                else None
-            ),
+            reward_pixel_masks=reward_masks,
+            execution_features=_execution_targets(selected, device, self._execution_prediction),
+            cursors=_cursor_targets(selected, device, self._cursor_prediction),
+            next_requests=next_requests,
         )
 
     def _request(
         self,
-        selected: Sequence[_PreparedSample],
+        selected: Sequence[PreparedSample],
         traces: TraceIndex,
         device: torch.device,
         impossible_reward: float,
         auxiliary: bool,
         symbol_cache: SymbolFeatureCache,
         action_mask_cache: dict[str, Tensor],
+        auxiliary_pixel_masks: Tensor | None = None,
     ) -> TraceNetRequest:
-        images = torch.stack([self._crop_image(item) for item in selected]).to(device)
+        images = torch.stack([_crop_image(item) for item in selected]).to(device)
         masks = torch.stack(
             [
                 cached_cropped_action_masks(
@@ -305,149 +290,98 @@ class RecordedSampleAssembler:
             self._cursor_prediction,
         )
         return TraceNetRequest(
-            _backbone(self, selected, traces, images, device, symbol_cache),
+            assemble_backbone(
+                selected,
+                traces,
+                images,
+                masks,
+                device,
+                symbol_cache,
+                self._channels,
+                self._symbol_dictionary_size,
+                self._recent_action_history,
+                self._recent_action_radius,
+                self._recent_action_decay,
+            ),
             masks,
             impossible_reward,
             compute_auxiliary=aux.enabled,
             auxiliary_action_type=aux.actions,
             auxiliary_action_x=aux.x,
             auxiliary_action_y=aux.y,
+            auxiliary_pixel_masks=auxiliary_pixel_masks,
             future_symbol_indexes=aux.indexes,
             future_symbol_offsets=aux.offsets,
             future_symbol_weights=aux.weights,
         )
 
     def _prepare(
-        self, item: tuple[str, dict[str, Any]], edge: int | None, *, current: bool
-    ) -> _PreparedSample:
-        key, trace = item
-        path = self._run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
-        image = self._images.decode(path, edge)
-        desired = self._crop_size if current else self._next_crop_size
-        if edge is not None:
-            desired = (edge, edge)
-        desired = desired or (image.shape[1], image.shape[0])
-        if current:
-            x, y = scaled_action(trace, (image.shape[1], image.shape[0]))
-            crop = action_crop(
-                x,
-                y,
-                image.shape[1],
-                image.shape[0],
-                *desired,
-                *self._crop_random,
-                self._random,
-            )
-        elif edge is not None:
-            crop = centered_crop(
-                image.shape[1] / 2,
-                image.shape[0] / 2,
-                image.shape[1],
-                image.shape[0],
-                *desired,
-            )
-        else:
-            crop = valid_next_crop(
-                trace,
-                image.shape[1],
-                image.shape[0],
-                *desired,
-                self._channels,
-                self._random,
-            )
-        return _PreparedSample(key, trace, image, effective_crop(crop))
-
-    @staticmethod
-    def _crop_image(item: _PreparedSample) -> Tensor:
-        crop = item.crop
-        image = item.image[crop.top : crop.bottom, crop.left : crop.right]
-        return torch.from_numpy(image).unsqueeze(0)
-
-
-def _cached_symbol_features(
-    selected: Sequence[_PreparedSample],
-    traces: TraceIndex,
-    dictionary_size: int,
-    cache: SymbolFeatureCache,
-) -> tuple[list[SymbolBag], list[SymbolBag]]:
-    features = []
-    for item in selected:
-        cached = cache.get(item.key)
-        if cached is None:
-            cache.update(step_symbol_features(traces.step(item.trace), dictionary_size))
-            cached = cache[item.key]
-        features.append(cached)
-    return [item[0] for item in features], [item[1] for item in features]
-
-
-def _backbone(
-    assembler: RecordedSampleAssembler,
-    selected: Sequence[_PreparedSample],
-    traces: TraceIndex,
-    images: Tensor,
-    device: torch.device,
-    symbol_cache: SymbolFeatureCache,
-) -> BackboneInput:
-    batch_size, _, height, width = images.shape
-    action_count = len(assembler._channels or ACTION_KINDS)
-    action_images = torch.zeros(batch_size, action_count, height, width, device=device)
-    action_vectors = torch.zeros(
-        batch_size, assembler._recent_action_history * action_count, device=device
-    )
-    for index, item in enumerate(selected):
-        recent_actions(
-            action_images[index],
-            action_vectors[index],
-            item.trace,
-            traces.step(item.trace),
-            (width, height),
-            assembler._channels,
-            assembler._recent_action_history,
-            assembler._recent_action_radius,
-            assembler._recent_action_decay,
-            item.crop,
+        self,
+        item: tuple[str, dict[str, Any]],
+        edge: int | None,
+        *,
+        current: bool,
+        full: bool = False,
+    ) -> PreparedSample:
+        return prepare_sample(
+            self._run_dir,
+            self._images,
+            self._channels,
+            self._crop_size,
+            self._next_crop_size,
+            self._crop_random,
+            self._random,
+            item,
+            edge,
+            current=current,
+            full=full,
         )
-    coverage, recent = _cached_symbol_features(
-        selected, traces, assembler._symbol_dictionary_size, symbol_cache
+
+
+def _crop_image(item: PreparedSample) -> Tensor:
+    crop = item.crop
+    image = item.image[crop.top : crop.bottom, crop.left : crop.right]
+    return torch.from_numpy(image).unsqueeze(0)
+
+
+def _reward_masks(selected: Sequence[PreparedSample], device: torch.device) -> Tensor:
+    return torch.stack(
+        [
+            reward_mask(
+                item.trace,
+                (item.crop.width, item.crop.height),
+                item.crop,
+                item.image[item.crop.top : item.crop.bottom, item.crop.left : item.crop.right],
+            )
+            for item in selected
+        ]
+    ).to(device)
+
+
+def _execution_targets(
+    selected: Sequence[tuple[str, dict[str, Any]]], device: torch.device, enabled: bool
+) -> Tensor | None:
+    if not enabled:
+        return None
+    return torch.tensor(
+        [execution_features(trace) for _key, trace in selected],
+        dtype=torch.float32,
+        device=device,
     )
-    recent_tensors = weighted_symbol_bags(recent, device)
-    coverage_tensors = weighted_symbol_bags(coverage, device)
-    symbol_set, symbol_mask = _attention_symbols(coverage, device)
-    steps = torch.tensor(
-        [int(item.trace["index"]) for item in selected], dtype=torch.float32, device=device
+
+
+def _cursor_targets(
+    selected: Sequence[tuple[str, dict[str, Any]]], device: torch.device, enabled: bool
+) -> Tensor | None:
+    if not enabled:
+        return None
+    return torch.tensor(
+        [cursor_index(trace) for _key, trace in selected], dtype=torch.long, device=device
     )
-    return BackboneInput(
-        images,
-        action_images,
-        action_vectors,
-        *recent_tensors,
-        *coverage_tensors,
-        symbol_set,
-        symbol_mask,
-        steps,
-    )
-
-
-def _validate_screenshots(
-    run_dir: Path, traces: Sequence[tuple[str, dict[str, Any]]], workers: int
-) -> None:
-    validate = partial(_validate_screenshot, run_dir)
-    if workers > 0:
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            tuple(executor.map(validate, (trace for _key, trace in traces)))
-        return
-    for _key, trace in traces:
-        validate(trace)
-
-
-def _validate_screenshot(run_dir: Path, trace: Mapping[str, Any]) -> None:
-    path = run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
-    if not path.is_file() or not path.read_bytes():
-        raise ValueError(f"missing or empty screenshot blob: {path}")
 
 
 def _auxiliary_tensors(
-    selected: Sequence[_PreparedSample],
+    selected: Sequence[PreparedSample],
     traces: TraceIndex,
     channels: tuple[ActionChannel, ...] | None,
     symbol_dictionary_size: int,
@@ -480,17 +414,3 @@ def _auxiliary_tensors(
         ]
         indexes, offsets, weights = weighted_symbol_bags(future, device)
     return _AuxiliaryTensors(enabled, actions, x, y, indexes, offsets, weights)
-
-
-def _attention_symbols(
-    bags: Sequence[tuple[tuple[int, float], ...]], device: torch.device
-) -> tuple[Tensor, Tensor]:
-    values = [frozenset(value for value, _weight in bag) for bag in bags]
-    symbols = tuple(sorted({value for bag in values for value in bag}))
-    symbol_set = torch.tensor(symbols, dtype=torch.long, device=device)
-    mask = torch.tensor(
-        [[symbol not in bag for symbol in symbols] for bag in values],
-        dtype=torch.bool,
-        device=device,
-    )
-    return symbol_set, mask

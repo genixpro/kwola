@@ -15,6 +15,7 @@ from kwola.domain.observations import Observation
 from kwola.training.geometry import process_screenshot
 
 from .model_backbone import BackboneInput
+from .spatial import coordinate_image
 from .tracenet import TraceNetRequest
 
 ACTION_KINDS = tuple(ActionKind)
@@ -49,7 +50,9 @@ class ObservationEncoder:
     ) -> TraceNetRequest:
         image = self._image(observation).to(device)
         height, width = image.shape[-2:]
-        masks = action_masks(observation.action_map, (width, height), self._channels)
+        masks, action_map_available = action_masks_with_availability(
+            observation.action_map, (width, height), self._channels
+        )
         masks = masks.unsqueeze(0).to(device)
         coverage = _symbols(
             coverage_symbols if coverage_symbols is not None else observation.branch_symbols,
@@ -83,6 +86,14 @@ class ObservationEncoder:
         backbone = BackboneInput(
             image,
             recent_images,
+            masks,
+            coordinate_image(width, height, device=device).unsqueeze(0),
+            torch.full(
+                (1, 1, height, width),
+                float(action_map_available),
+                dtype=image.dtype,
+                device=device,
+            ),
             recent_vector,
             recent_indexes,
             offsets,
@@ -118,12 +129,21 @@ def action_masks(
     size: int | tuple[int, int],
     channels: tuple[ActionChannel, ...] | None = None,
 ) -> Tensor:
+    return action_masks_with_availability(action_map, size, channels)[0]
+
+
+def action_masks_with_availability(
+    action_map: ActionMap,
+    size: int | tuple[int, int],
+    channels: tuple[ActionChannel, ...] | None = None,
+) -> tuple[Tensor, bool]:
     selected = channels or _generic_channels()
     width, height = (size, size) if isinstance(size, int) else size
     masks = torch.zeros(len(selected), height, width)
     for target in action_map.targets:
         _paint(masks, target, action_map, width, height, selected)
-    return masks if bool(masks.any()) else torch.ones_like(masks)
+    available = bool(masks.any())
+    return (masks if available else torch.ones_like(masks)), available
 
 
 def _paint(

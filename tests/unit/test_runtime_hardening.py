@@ -283,6 +283,7 @@ def test_testing_runner_records_completed_step_with_fake_session(
         assert store.get("testing_steps", "testing-00000000") == {
             "browser": "chromium",
             "random": True,
+            "policy_mode": "random",
             "trace_count": 2,
             "reward": 0.75,
             "application_fitness": 14.0,
@@ -393,16 +394,24 @@ def test_distributed_entry_validation_simulation_and_rank_recording(
 
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     monkeypatch.setattr(distributed_training, "_prepare_cache", lambda _path: None)
-    monkeypatch.setattr(distributed_training, "_shared_initial_batches", lambda _path: ())
+    monkeypatch.setattr(distributed_training, "_shared_initial_batches", lambda _path, _plan: ())
     monkeypatch.setattr(distributed_training, "_free_port", lambda: 12345)
     monkeypatch.setattr(
         distributed_training.multiprocessing, "get_context", lambda _kind: FakeSpawnContext()
     )
-    monkeypatch.setattr(distributed_training, "spawn", lambda *_args, **_values: None)
+    spawned: list[tuple[object, ...]] = []
+
+    def capture_spawn(_target: object, *, args: tuple[object, ...], **_values: object) -> None:
+        spawned.append(args)
+
+    monkeypatch.setattr(distributed_training, "spawn", capture_spawn)
     with LmdbRunStore(rig_run / "run.lmdb") as store:
         for index in range(96):
             store.put("traces", f"trace-{index}", {"index": index})
     assert distributed_training.run_distributed_training(rig_run).status == "completed"
+    plan = spawned[0][-2]
+    assert isinstance(plan, distributed_training._TrainingPlan)
+    assert plan.trace_count == 96
 
     metrics = OptimizerMetrics(2.0, 4.0, 5.0)
     distributed_training._record_step(rig_run, 0, 2.0, metrics, 3, 96, 10.0, 1.0, 2.0, 0.5)

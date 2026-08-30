@@ -1,6 +1,7 @@
 """Configuration-backed recorded-sample assembler construction."""
 
 import random
+from collections.abc import Sequence
 from pathlib import Path
 
 from kwola.agent import action_catalog
@@ -17,6 +18,7 @@ def recorded_sample_assembler(
     *,
     compact_cpu_tensors: bool = False,
     freeze_records: bool = False,
+    trace_ids: Sequence[str] | None = None,
     random_seed: int | None = None,
 ) -> RecordedSampleAssembler:
     return RecordedSampleAssembler(
@@ -38,6 +40,7 @@ def recorded_sample_assembler(
         decoded_image_cache_directory=run_dir / config.storage.cache_directory / "decoded-images",
         compact_cpu_tensors=compact_cpu_tensors,
         freeze_records=freeze_records,
+        trace_ids=trace_ids,
         enable_trace_prediction=config.model.enable_trace_prediction,
         enable_execution_feature_prediction=config.model.enable_execution_feature_prediction,
         enable_cursor_prediction=config.model.enable_cursor_prediction,

@@ -1,7 +1,7 @@
 # Kwola
 
 Kwola is an autonomous browser-testing and learning system for web applications. Kwola 1.1 uses the
-learning schema version 2 and intentionally rejects 1.0 runs and checkpoints; initialize a fresh run
+learning schema version 3 and intentionally rejects older runs and checkpoints; initialize a fresh run
 after upgrading. It requires Python 3.12 and targets Linux for production. It supports Playwright
 Chromium and Firefox, mitmproxy-based JavaScript branch instrumentation, local LMDB runs, and
 PyTorch/NCCL training.
@@ -60,11 +60,10 @@ work deferred by the adaptive iteration cap persist for later training steps ins
 discarded. After startup, retained credit may continue training an unchanged replay snapshot until
 that earned work is exhausted.
 
-Current-state crops remain action-centred with configured jitter. Next-state crops are sampled
-randomly, retried until at least one valid action is visible, and fall back to an action-centred crop.
-Both default to the same dimensions. TraceNet uses mode-independent spatial GroupNorm, and inference
-blends overlapping training-sized tiles into full-viewport reward maps instead of applying
-crop-trained heads to the whole page in one pass.
+Current-state crops remain action-centred with configured jitter. Double-DQN targets reconstruct the
+complete next viewport from the same overlapping, blended tiles used by inference, so action selection
+and target evaluation cover the complete valid action space. Global coordinates, current action masks,
+and action-map availability are model inputs. TraceNet uses mode-independent spatial GroupNorm.
 The default conservative-Q term (`training.losses.conservative_q = 0.1`, margin `0.1`) penalizes the
 highest valid action outside the demonstrated region when it exceeds the demonstrated Q value minus
 the margin; set its weight to `0` to disable it.
@@ -73,6 +72,8 @@ Exploration uses two independent decisions. `random` is the probability of bypas
 action-catalog-weighted random behavior. Otherwise the model runs, and `weighted_random` is the
 conditional probability of sampling from its valid Q map instead of taking the greedy maximum.
 Forced-random steps and runs without a checkpoint use action-catalog-weighted random behavior.
+Pass `--greedy` to bypass both exploration stages while retaining checkpoint-backed inference;
+`--greedy` and `--random` are mutually exclusive.
 
 Every run contains strictly validated `kwola.json` and `manifest.json` files, an LMDB database,
 content-addressed blobs, disposable prepared-sample cache records, reports, logs, and atomically
@@ -106,7 +107,7 @@ Every high or critical advisory fails this policy unless it has an owned, justif
 exception, regardless of whether an upstream fix is currently available.
 
 Release acceptance additionally passes `--require-no-exceptions` to the dependency policy and runs
-the complete gate from a fresh schema-v2 run on the Linux two-GPU host:
+the complete gate from a fresh schema-v3 run on the Linux two-GPU host:
 
 ```sh
 uv run python scripts/run_rig_acceptance.py \

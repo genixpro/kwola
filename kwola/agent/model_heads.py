@@ -20,19 +20,24 @@ class TraceNetHeads(nn.Module):
         super().__init__()
         self.config = config
         self.num_actions = num_actions
+        self.action_embedding = (
+            nn.Embedding(num_actions, config.auxiliary_action_embedding_size)
+            if config.enable_trace_prediction or config.enable_execution_feature_prediction
+            else None
+        )
+        effect_inputs = merged_features + config.auxiliary_action_embedding_size
         self.present_reward = _map_head(config, merged_features, num_actions)
         self.discounted_reward = _map_head(config, merged_features, num_actions)
         self.predicted_trace = _optional_linear(
-            config.enable_trace_prediction, merged_features, config.symbol_embedding_size, nn.ELU()
+            config.enable_trace_prediction, effect_inputs, config.symbol_embedding_size
         )
         self.predicted_execution = _optional_linear(
             config.enable_execution_feature_prediction,
-            merged_features,
+            effect_inputs,
             execution_feature_count,
-            nn.Sigmoid(),
         )
         self.predicted_cursor = _optional_linear(
-            config.enable_cursor_prediction, merged_features, cursor_count, nn.Sigmoid()
+            config.enable_cursor_prediction, merged_features, cursor_count
         )
 
     def reward_maps(self, merged: Tensor) -> tuple[Tensor, Tensor]:
@@ -70,10 +75,8 @@ def _map_head(config: ModelConfig, inputs: int, outputs: int) -> nn.Sequential:
     )
 
 
-def _optional_linear(
-    enabled: bool, inputs: int, outputs: int, activation: nn.Module
-) -> nn.Module | None:
-    return nn.Sequential(nn.Linear(inputs, outputs), activation) if enabled else None
+def _optional_linear(enabled: bool, inputs: int, outputs: int) -> nn.Module | None:
+    return nn.Linear(inputs, outputs) if enabled else None
 
 
 def _masked(values: Tensor, masks: Tensor, impossible: float) -> Tensor:

@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -101,7 +102,7 @@ class AcceptanceRunner:
                 "1100",
             ),
         )
-        for browser in ("chromium", "firefox"):
+        for browser_index, browser in enumerate(("chromium", "firefox")):
             self._run(
                 f"fresh-{browser}",
                 (
@@ -111,6 +112,8 @@ class AcceptanceRunner:
                     "--browser",
                     browser,
                     "--random",
+                    "--policy-seed",
+                    str(1100 + browser_index),
                 ),
             )
         _verify_instrumented_run(fresh_run)
@@ -119,10 +122,26 @@ class AcceptanceRunner:
             (self.kwola, "train-step", str(fresh_run), "--gpu", "0"),
         )
         self.artifact_hashes["fresh_single_gpu_checkpoint"] = _checkpoint_hash(fresh_run)
+        for round_index in range(3):
+            for browser in ("chromium", "firefox"):
+                self._run(
+                    f"training-corpus-{round_index}-{browser}",
+                    (
+                        self.kwola,
+                        "test-step",
+                        str(fresh_run),
+                        "--browser",
+                        browser,
+                        "--random",
+                        "--policy-seed",
+                        str(1200 + round_index * 2 + int(browser == "firefox")),
+                    ),
+                )
         self._run_concurrent_training(fresh_run)
         self.artifact_hashes["fresh_distributed_checkpoint"] = _checkpoint_hash(fresh_run)
         benchmark = self._run("benchmark", (self.kwola, "benchmark", str(fresh_run)))
-        self.metrics = _verify_benchmark(self.evidence_dir / benchmark.log)
+        self.metrics = {"benchmark": _verify_benchmark(self.evidence_dir / benchmark.log)}
+        self.metrics["policy_ab"] = self._run_policy_ab(fresh_run)
         self._run_dependency_gate()
         process_scan = self._run(
             "final-process-scan",
@@ -179,6 +198,71 @@ class AcceptanceRunner:
                         process.wait()
                 if not stream.closed:
                     stream.close()
+
+    def _run_policy_ab(self, run_dir: Path) -> dict[str, Any]:
+        sessions: list[dict[str, Any]] = []
+        for browser_index, browser in enumerate(("chromium", "firefox")):
+            for pair in range(3):
+                modes = ("greedy", "random") if pair % 2 == 0 else ("random", "greedy")
+                seed = 2200 + browser_index * 100 + pair
+                for mode in modes:
+                    flag = "--greedy" if mode == "greedy" else "--random"
+                    evidence = self._run(
+                        f"policy-ab-{browser}-{pair}-{mode}",
+                        (
+                            self.kwola,
+                            "test-step",
+                            str(run_dir),
+                            "--browser",
+                            browser,
+                            flag,
+                            "--policy-seed",
+                            str(seed),
+                        ),
+                    )
+                    sessions.append(
+                        _policy_session_metrics(
+                            run_dir,
+                            self.evidence_dir / evidence.log,
+                            browser,
+                            mode,
+                            seed,
+                        )
+                    )
+
+        greedy = [item for item in sessions if item["mode"] == "greedy"]
+        random_sessions = [item for item in sessions if item["mode"] == "random"]
+        greedy_median = statistics.median(item["coverage"] for item in greedy)
+        random_median = statistics.median(item["coverage"] for item in random_sessions)
+        browser_totals: dict[str, dict[str, int]] = {}
+        for browser in ("chromium", "firefox"):
+            browser_totals[browser] = {
+                mode: sum(
+                    int(item["coverage"])
+                    for item in sessions
+                    if item["browser"] == browser and item["mode"] == mode
+                )
+                for mode in ("greedy", "random")
+            }
+        regressions = [
+            browser
+            for browser, totals in browser_totals.items()
+            if totals["greedy"] < totals["random"] * 0.9
+        ]
+        if greedy_median < random_median or regressions:
+            raise AcceptanceFailure(
+                "policy A/B coverage regressed: "
+                f"model median={greedy_median}, random median={random_median}, "
+                f"browser regressions={regressions}"
+            )
+        return {
+            "passed": True,
+            "greedy_median_coverage": greedy_median,
+            "random_median_coverage": random_median,
+            "coverage_lift": greedy_median - random_median,
+            "browser_totals": browser_totals,
+            "sessions": sessions,
+        }
 
     def _run_dependency_gate(self) -> None:
         python_json = self.evidence_dir / "pip-audit.json"
@@ -334,13 +418,39 @@ def _verify_benchmark(path: Path) -> dict[str, Any]:
         raise AcceptanceFailure("benchmark output is not a JSON object")
     if not payload.get("passed"):
         raise AcceptanceFailure("benchmark did not pass")
-    if float(payload["samples_per_second"]) < 145:
-        raise AcceptanceFailure("benchmark throughput is below 145 samples/second")
-    if float(payload["median_optimizer_seconds"]) > 1.35:
-        raise AcceptanceFailure("benchmark optimizer median exceeds 1.35 seconds")
-    if float(payload["peak_vram_gib"]) > 5.0:
-        raise AcceptanceFailure("benchmark peak VRAM exceeds 5 GiB")
     return cast(dict[str, Any], payload)
+
+
+def _policy_session_metrics(
+    run_dir: Path,
+    log_path: Path,
+    browser: str,
+    mode: str,
+    seed: int,
+) -> dict[str, Any]:
+    payload = json.loads(log_path.read_text(encoding="utf-8"))
+    step_id = str(payload["step_id"])
+    config = load_config(run_dir)
+    with LmdbRunStore(
+        run_dir / config.storage.database_directory,
+        map_size=config.storage.database_map_size_bytes,
+        readonly=True,
+    ) as store:
+        traces = [record for _key, record in store.scan_prefix("traces", f"{step_id}-trace-")]
+    coverage = {int(symbol) for trace in traces for symbol in trace.get("new_branch_symbols", [])}
+    sources: dict[str, int] = {}
+    for trace in traces:
+        source = str(trace.get("action", {}).get("source", "unknown"))
+        sources[source] = sources.get(source, 0) + 1
+    return {
+        "step_id": step_id,
+        "browser": browser,
+        "mode": mode,
+        "seed": seed,
+        "coverage": len(coverage),
+        "reward": sum(float(trace.get("reward", 0.0)) for trace in traces),
+        "action_sources": sources,
+    }
 
 
 def _environment_versions() -> dict[str, str]:

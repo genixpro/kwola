@@ -154,6 +154,17 @@ def test_persistent_assembler_varies_crops_for_repeated_samples(tmp_path: Path) 
             freeze_records=True,
             source=random.Random(17),
         )
+        sample = assembler.assemble(
+            batch_size=1,
+            device=torch.device("cpu"),
+            impossible_reward=-10.0,
+            sample_indexes=(0,),
+        )
+
+        assert sample.next_request is None
+        assert sample.next_requests[0].backbone.image.shape == (1, 1, 128, 128)
+        current_x = sample.request.backbone.coordinate_image[0, 0]
+        assert float(current_x.max() - current_x.min()) < 1.1
 
         crops = {
             assembler.assemble(

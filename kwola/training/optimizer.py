@@ -26,6 +26,42 @@ class OptimizerMetrics:
     mean_absolute_td_error: float = 0.0
     gradient_norm: float = 0.0
     conservative_q_loss: float = 0.0
+    trace_prediction_loss: float = 0.0
+    execution_feature_loss: float = 0.0
+    cursor_prediction_loss: float = 0.0
+    raw_trace_prediction_loss: float = 0.0
+    raw_execution_feature_loss: float = 0.0
+    raw_cursor_prediction_loss: float = 0.0
+    execution_feature_accuracy: float = 0.0
+    execution_feature_f1: float = 0.0
+    cursor_accuracy: float = 0.0
+    target_evaluation_seconds: float = 0.0
+    mean_next_tiles: float = 0.0
+
+
+def optimizer_metrics_payload(metrics: OptimizerMetrics) -> dict[str, float]:
+    """Serialize the detailed learning metrics shared by all training runners."""
+    names = (
+        "present_loss",
+        "future_loss",
+        "mean_selected_q",
+        "mean_bootstrap_target",
+        "mean_absolute_td_error",
+        "gradient_norm",
+        "conservative_q_loss",
+        "trace_prediction_loss",
+        "execution_feature_loss",
+        "cursor_prediction_loss",
+        "raw_trace_prediction_loss",
+        "raw_execution_feature_loss",
+        "raw_cursor_prediction_loss",
+        "execution_feature_accuracy",
+        "execution_feature_f1",
+        "cursor_accuracy",
+        "target_evaluation_seconds",
+        "mean_next_tiles",
+    )
+    return {name: float(getattr(metrics, name)) for name in names}
 
 
 def summarize_optimizer_metrics(
@@ -44,6 +80,25 @@ def summarize_optimizer_metrics(
         mean_absolute_td_error=sum(result.mean_absolute_td_error for result in results) / count,
         gradient_norm=sum(result.gradient_norm for result in results) / count,
         conservative_q_loss=sum(result.conservative_q_loss for result in results) / count,
+        trace_prediction_loss=sum(result.trace_prediction_loss for result in results) / count,
+        execution_feature_loss=sum(result.execution_feature_loss for result in results) / count,
+        cursor_prediction_loss=sum(result.cursor_prediction_loss for result in results) / count,
+        raw_trace_prediction_loss=(
+            sum(result.raw_trace_prediction_loss for result in results) / count
+        ),
+        raw_execution_feature_loss=(
+            sum(result.raw_execution_feature_loss for result in results) / count
+        ),
+        raw_cursor_prediction_loss=(
+            sum(result.raw_cursor_prediction_loss for result in results) / count
+        ),
+        execution_feature_accuracy=(
+            sum(result.execution_feature_accuracy for result in results) / count
+        ),
+        execution_feature_f1=sum(result.execution_feature_f1 for result in results) / count,
+        cursor_accuracy=sum(result.cursor_accuracy for result in results) / count,
+        target_evaluation_seconds=sum(result.target_evaluation_seconds for result in results),
+        mean_next_tiles=sum(result.mean_next_tiles for result in results) / count,
     )
 
 
@@ -119,4 +174,15 @@ class ModelOptimizer:
             mean_absolute_td_error=float(losses.mean_absolute_td_error.detach()),
             gradient_norm=float(gradient_norm.detach()),
             conservative_q_loss=float(losses.conservative_q.detach()),
+            trace_prediction_loss=float(losses.trace_prediction.detach()),
+            execution_feature_loss=float(losses.execution_feature.detach()),
+            cursor_prediction_loss=float(losses.cursor_prediction.detach()),
+            raw_trace_prediction_loss=float(losses.raw_trace_prediction.detach()),
+            raw_execution_feature_loss=float(losses.raw_execution_feature.detach()),
+            raw_cursor_prediction_loss=float(losses.raw_cursor_prediction.detach()),
+            execution_feature_accuracy=float(losses.execution_feature_accuracy.detach()),
+            execution_feature_f1=float(losses.execution_feature_f1.detach()),
+            cursor_accuracy=float(losses.cursor_accuracy.detach()),
+            target_evaluation_seconds=losses.target_evaluation_seconds,
+            mean_next_tiles=losses.mean_next_tiles,
         )

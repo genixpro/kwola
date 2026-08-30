@@ -15,6 +15,9 @@ from .normalization import SpatialGroupNorm
 class BackboneInput:
     image: Tensor
     recent_actions_image: Tensor
+    action_mask_image: Tensor
+    coordinate_image: Tensor
+    action_map_available_image: Tensor
     recent_actions_vector: Tensor
     recent_symbol_indexes: Tensor
     recent_symbol_offsets: Tensor
@@ -70,7 +73,16 @@ class TraceNetBackbone(nn.Module):
         )
 
     def forward(self, data: BackboneInput) -> BackboneOutput:
-        visual_input = torch.cat([data.image, data.recent_actions_image], dim=1)
+        visual_input = torch.cat(
+            [
+                data.image,
+                data.coordinate_image,
+                data.recent_actions_image,
+                data.action_mask_image,
+                data.action_map_available_image,
+            ],
+            dim=1,
+        )
         pixels = self.visual(visual_input)
         batch, _, height, width = pixels.shape
         recent = self._recent_symbol_bag(data)
@@ -133,7 +145,7 @@ class TraceNetBackbone(nn.Module):
 
 def _visual_layers(config: ModelConfig, num_actions: int) -> nn.Sequential:
     modules: list[nn.Module] = []
-    inputs = 1 + num_actions
+    inputs = 4 + num_actions * 2
     for layer in config.layers[:4]:
         modules.extend(
             [

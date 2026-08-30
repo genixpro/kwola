@@ -284,11 +284,15 @@ CURSORS = (
 )
 
 
-def cursor_vector(trace: Mapping[str, Any]) -> Tensor:
+def cursor_index(trace: Mapping[str, Any]) -> int:
     cursor = str(trace.get("cursor", "none"))
-    index = CURSORS.index(cursor) if cursor in CURSORS else CURSORS.index("none")
+    return CURSORS.index(cursor) if cursor in CURSORS else CURSORS.index("none")
+
+
+def cursor_vector(trace: Mapping[str, Any]) -> Tensor:
+    """Return the legacy one-hot representation for reporting compatibility."""
     result = torch.zeros(len(CURSORS), dtype=torch.float32)
-    result[index] = 1
+    result[cursor_index(trace)] = 1
     return result
 
 

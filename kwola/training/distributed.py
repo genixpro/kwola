@@ -28,8 +28,15 @@ from .assembler_factory import recorded_sample_assembler
 from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
 from .ddp import available_tcp_port as _free_port
-from .optimizer import ModelOptimizer, OptimizerMetrics, summarize_optimizer_metrics
-from .replay import ReplaySampler, require_replay_budget
+from .distributed_plan import TrainingPlan as _TrainingPlan
+from .distributed_plan import training_plan as _training_plan
+from .optimizer import (
+    ModelOptimizer,
+    OptimizerMetrics,
+    optimizer_metrics_payload,
+    summarize_optimizer_metrics,
+)
+from .replay import ReplaySampler
 from .replay_state import open_replay_store as _store
 from .replay_state import require_new_replay as _prepare_cache
 from .samples import RecordedSampleAssembler, TrainingBatch
@@ -45,8 +52,9 @@ def run_distributed_training(run_dir: Path) -> RunnerResult:
     if torch.cuda.device_count() < config.training.world_size:
         raise RuntimeError("insufficient CUDA devices for configured world size")
     _prepare_cache(run_dir)
+    plan = _training_plan(run_dir)
     shared_batches = (
-        _shared_initial_batches(run_dir) if config.training.use_shared_memory_spool else ()
+        _shared_initial_batches(run_dir, plan) if config.training.use_shared_memory_spool else ()
     )
     context = multiprocessing.get_context("spawn")
     results: Any = context.SimpleQueue()
@@ -59,6 +67,7 @@ def run_distributed_training(run_dir: Path) -> RunnerResult:
             init_method,
             run_dir,
             results,
+            plan,
             shared_batches,
         ),
         nprocs=config.training.world_size,
@@ -67,22 +76,24 @@ def run_distributed_training(run_dir: Path) -> RunnerResult:
     return RunnerResult.model_validate_json(results.get())
 
 
-def _shared_initial_batches(run_dir: Path) -> tuple[TrainingBatch, ...]:
+def _shared_initial_batches(run_dir: Path, plan: _TrainingPlan) -> tuple[TrainingBatch, ...]:
     config = load_config(run_dir)
     batches = []
     with _store(run_dir, readonly=True) as store:
-        state = store.get("run", "state") or {}
-        training_step = int(state.get("training_steps", 0))
-        assembler = _assembler(run_dir, store, random_seed=config.seed + training_step)
-        trace_count = assembler.trace_count()
+        assembler = _assembler(
+            run_dir,
+            store,
+            random_seed=config.seed + plan.step_index,
+            trace_ids=plan.trace_ids,
+        )
         for rank in range(config.training.world_size):
             sampler = ReplaySampler(
-                trace_count,
+                plan.trace_count,
                 config.training.batch_size,
                 config.training.world_size,
                 rank,
                 config.seed,
-                training_step,
+                plan.step_index,
             )
             batch = assembler.assemble(
                 batch_size=config.training.batch_size,
@@ -101,6 +112,7 @@ def _training_rank(
     init_method: str,
     run_dir: Path,
     results: Any,
+    plan: _TrainingPlan,
     shared_batches: tuple[TrainingBatch, ...],
 ) -> None:
     started = time.perf_counter()
@@ -124,7 +136,7 @@ def _training_rank(
             replay_sample_credit,
             assembly_seconds,
             transfer_seconds,
-        ) = _rank_step(run_dir, coordinator, initial)
+        ) = _rank_step(run_dir, coordinator, plan, initial)
         loss = torch.tensor([metrics.loss], device=coordinator.device)
         distributed.all_reduce(loss, op=distributed.ReduceOp.SUM)
         coordinator.barrier()
@@ -150,30 +162,11 @@ def _training_rank(
 def _rank_step(
     run_dir: Path,
     coordinator: DistributedCoordinator,
+    plan: _TrainingPlan,
     initial_batch: TrainingBatch | None = None,
 ) -> tuple[OptimizerMetrics, TraceNet, TraceNet, ModelOptimizer, int, int, int, int, float, float]:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
-    with _store(run_dir, readonly=True) as store:
-        state = store.get("run", "state") or {}
-        step_index = int(state.get("training_steps", 0))
-        training_index = int(state.get("training_iterations", 0))
-        requested_iterations = int(
-            state.get("scheduled_training_iterations", config.training.batches_per_iteration)
-        )
-        trace_count = sum(1 for _ in store.scan("traces"))
-        trained_trace_count = int(state.get("training_trace_count", 0))
-        budget = require_replay_budget(
-            trace_count - trained_trace_count,
-            requested_iterations,
-            config.training.batch_size,
-            config.training.world_size,
-            config.training.replay_samples_per_new_trace,
-            int(state.get("replay_sample_credit", 0)),
-            trace_count,
-            "distributed training",
-        )
-        iteration_count = budget.iterations
     model = TraceNet(config.model, num_actions=len(action_catalog(config.policy))).to(
         coordinator.device
     )
@@ -193,20 +186,21 @@ def _rank_step(
         model,
         target,
         optimizer,
-        step_index,
-        training_index,
-        iteration_count,
+        plan.step_index,
+        plan.training_index,
+        plan.iteration_count,
         initial_batch,
+        trace_ids=plan.trace_ids,
     )
     return (
         metrics,
         model,
         target,
         optimizer,
-        step_index,
-        trace_count,
-        iteration_count,
-        budget.remaining_sample_credit,
+        plan.step_index,
+        plan.trace_count,
+        plan.iteration_count,
+        plan.replay_sample_credit,
         assembly_seconds,
         transfer_seconds,
     )
@@ -222,23 +216,27 @@ def _rank_iterations(
     training_index: int,
     iteration_count: int,
     initial_batch: TrainingBatch | None,
+    *,
+    trace_ids: tuple[str, ...] | None = None,
 ) -> tuple[OptimizerMetrics, float, float]:
     config = load_config(run_dir)
     results = []
-    count = iteration_count
     assembly_seconds = 0.0
     transfer_seconds = 0.0
     loop_started = time.perf_counter()
     with _store(run_dir, readonly=True) as store:
+        seed = _rank_seed(
+            config.seed, training_step, config.training.world_size, coordinator.settings.rank
+        )
         assembler = _assembler(
             run_dir,
             store,
-            random_seed=(
-                config.seed + training_step * config.training.world_size + coordinator.settings.rank
-            ),
+            random_seed=seed,
+            trace_ids=trace_ids,
         )
+        replay_size = _snapshot_replay_size(assembler, trace_ids)
         sampler = ReplaySampler(
-            assembler.trace_count(),
+            replay_size,
             config.training.batch_size,
             config.training.world_size,
             coordinator.settings.rank,
@@ -248,7 +246,7 @@ def _rank_iterations(
         batch_stream = batches(
             assembler,
             coordinator,
-            count,
+            iteration_count,
             initial_batch,
             config.training.batch_size,
             sampler,
@@ -270,14 +268,14 @@ def _rank_iterations(
             results.append(iteration_metrics)
             if coordinator.is_publisher and (
                 (iteration + 1) % config.training.telemetry_every_iterations == 0
-                or iteration + 1 == count
+                or iteration + 1 == iteration_count
             ):
                 _record_progress(
                     run_dir,
                     coordinator,
                     training_index,
                     iteration,
-                    count,
+                    iteration_count,
                     results,
                     assembly_seconds,
                     transfer_seconds,
@@ -285,12 +283,21 @@ def _rank_iterations(
                 )
             if (index + 1) % config.training.target_network_update_every == 0:
                 target.load_state_dict(model.state_dict())
-    samples = count * config.training.batch_size
-    return (
-        summarize_optimizer_metrics(results, samples),
-        assembly_seconds,
-        transfer_seconds,
-    )
+    samples = iteration_count * config.training.batch_size
+    return summarize_optimizer_metrics(results, samples), assembly_seconds, transfer_seconds
+
+
+def _rank_seed(seed: int, step: int, world_size: int, rank: int) -> int:
+    return seed + step * world_size + rank
+
+
+def _snapshot_replay_size(
+    assembler: RecordedSampleAssembler, trace_ids: tuple[str, ...] | None
+) -> int:
+    replay_size = assembler.trace_count()
+    if trace_ids is not None and replay_size != len(trace_ids):
+        raise RuntimeError("distributed ranks must use the complete parent replay snapshot")
+    return replay_size
 
 
 def _record_progress(
@@ -308,6 +315,7 @@ def _record_progress(
     completed = iteration + 1
     elapsed = time.perf_counter() - loop_started
     global_samples = completed * config.training.batch_size * config.training.world_size
+    summary = summarize_optimizer_metrics(results, completed * config.training.batch_size)
     record_training_progress(
         run_dir,
         event="training_progress",
@@ -320,13 +328,7 @@ def _record_progress(
         assembly_seconds=assembly_seconds,
         transfer_seconds=transfer_seconds,
         end_to_end_samples_per_second=global_samples / elapsed,
-        present_loss=sum(item.present_loss for item in results) / completed,
-        future_loss=sum(item.future_loss for item in results) / completed,
-        mean_selected_q=sum(item.mean_selected_q for item in results) / completed,
-        mean_bootstrap_target=(sum(item.mean_bootstrap_target for item in results) / completed),
-        mean_absolute_td_error=(sum(item.mean_absolute_td_error for item in results) / completed),
-        gradient_norm=sum(item.gradient_norm for item in results) / completed,
-        conservative_q_loss=sum(item.conservative_q_loss for item in results) / completed,
+        **optimizer_metrics_payload(summary),
         gpu_memory_allocated_bytes=torch.cuda.memory_allocated(coordinator.device),
         gpu_memory_reserved_bytes=torch.cuda.memory_reserved(coordinator.device),
     )
@@ -397,13 +399,7 @@ def _publish_result(
             "assembly_seconds": assembly_seconds,
             "transfer_seconds": transfer_seconds,
             "checkpoint_seconds": checkpoint_seconds,
-            "present_loss": metrics.present_loss,
-            "future_loss": metrics.future_loss,
-            "mean_selected_q": metrics.mean_selected_q,
-            "mean_bootstrap_target": metrics.mean_bootstrap_target,
-            "mean_absolute_td_error": metrics.mean_absolute_td_error,
-            "gradient_norm": metrics.gradient_norm,
-            "conservative_q_loss": metrics.conservative_q_loss,
+            **optimizer_metrics_payload(metrics),
         },
     )
 
@@ -468,13 +464,7 @@ def _record_step(
                 "assembly_seconds": assembly_seconds,
                 "transfer_seconds": transfer_seconds,
                 "checkpoint_seconds": checkpoint_seconds,
-                "present_loss": metrics.present_loss,
-                "future_loss": metrics.future_loss,
-                "mean_selected_q": metrics.mean_selected_q,
-                "mean_bootstrap_target": metrics.mean_bootstrap_target,
-                "mean_absolute_td_error": metrics.mean_absolute_td_error,
-                "gradient_norm": metrics.gradient_norm,
-                "conservative_q_loss": metrics.conservative_q_loss,
+                **optimizer_metrics_payload(metrics),
                 "iterations": iterations,
                 "status": "completed",
                 "ranks": config.training.world_size,
@@ -483,7 +473,11 @@ def _record_step(
 
 
 def _assembler(
-    run_dir: Path, store: LmdbRunStore, *, random_seed: int | None = None
+    run_dir: Path,
+    store: LmdbRunStore,
+    *,
+    random_seed: int | None = None,
+    trace_ids: tuple[str, ...] | None = None,
 ) -> RecordedSampleAssembler:
     return recorded_sample_assembler(
         run_dir,
@@ -491,5 +485,6 @@ def _assembler(
         load_config(run_dir),
         compact_cpu_tensors=True,
         freeze_records=True,
+        trace_ids=trace_ids,
         random_seed=random_seed,
     )

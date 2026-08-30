@@ -131,7 +131,10 @@ def test_only_rank_zero_publishes_checkpoint_and_manifest(tmp_path: Path) -> Non
     assert verify_checkpoint(tmp_path, updated.checkpoint) == path
 
 
-def test_loading_a_version_one_manifest_requires_fresh_initialization(tmp_path: Path) -> None:
+@pytest.mark.parametrize("schema_version", (1, 2))
+def test_loading_a_legacy_manifest_requires_fresh_initialization(
+    tmp_path: Path, schema_version: int
+) -> None:
     config = profile_config("testing", "https://example.com", 42)
     payload = RunManifest.create(
         target=config.target,
@@ -139,14 +142,14 @@ def test_loading_a_version_one_manifest_requires_fresh_initialization(tmp_path: 
         seed=config.seed,
         enabled_browsers=config.browser.enabled,
     ).model_dump(mode="json")
-    payload["schema_version"] = 1
+    payload["schema_version"] = schema_version
     (tmp_path / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ValueError, match="initialize a fresh"):
         load_manifest(tmp_path)
 
 
-def test_schema_v2_checkpoint_round_trips_online_target_and_optimizer(tmp_path: Path) -> None:
+def test_schema_v3_checkpoint_round_trips_online_target_and_optimizer(tmp_path: Path) -> None:
     config = profile_config("testing", "https://example.com", 42)
     manifest = RunManifest.create(
         target=config.target,
@@ -156,7 +159,7 @@ def test_schema_v2_checkpoint_round_trips_online_target_and_optimizer(tmp_path: 
     )
     save_manifest(manifest, tmp_path)
     payload = {
-        "learning_schema_version": 2,
+        "learning_schema_version": 3,
         "model": {"weight": torch.tensor([1.0])},
         "target_model": {"weight": torch.tensor([2.0])},
         "optimizer": {"state": {7: {"step": torch.tensor(3.0)}}},

@@ -44,9 +44,6 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
             "additional_stamp_depth": 10,
             "symbol_dictionary_size": 100_000,
             "symbol_embedding_size": 128,
-            "enable_cursor_prediction": False,
-            "enable_execution_feature_prediction": False,
-            "enable_trace_prediction": False,
         },
         "training": {
             "batch_size": 24,
@@ -75,9 +72,6 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
             "additional_stamp_depth": 10,
             "symbol_dictionary_size": 100_000,
             "symbol_embedding_size": 128,
-            "enable_cursor_prediction": False,
-            "enable_execution_feature_prediction": False,
-            "enable_trace_prediction": False,
         },
         "training": {
             "batch_size": 48,

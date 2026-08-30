@@ -46,7 +46,10 @@ def _run_parser(subcommands: Any) -> None:
 def _test_step_parser(subcommands: Any) -> None:
     command = subcommands.add_parser("test-step", help="Run one browser testing step")
     command.add_argument("run_dir", type=Path)
-    command.add_argument("--random", action="store_true", dest="random_policy")
+    policy = command.add_mutually_exclusive_group()
+    policy.add_argument("--random", action="store_true", dest="random_policy")
+    policy.add_argument("--greedy", action="store_true", dest="greedy_policy")
+    command.add_argument("--policy-seed", type=int)
     command.add_argument("--browser", choices=tuple(BrowserKind), type=BrowserKind)
     command.add_argument("--viewport", type=_viewport)
     command.set_defaults(handler=_handle_test_step)
@@ -102,12 +105,16 @@ def _handle_run(arguments: argparse.Namespace) -> int:
 
 
 def _handle_test_step(arguments: argparse.Namespace) -> int:
+    from kwola.agent import PolicyMode
     from kwola.orchestration.testing import TestingRunner
 
+    mode = PolicyMode.GREEDY if arguments.greedy_policy else PolicyMode.SCHEDULED
     result = TestingRunner(arguments.run_dir).run(
         random_policy=arguments.random_policy,
+        policy_mode=mode,
         browser=arguments.browser,
         viewport=arguments.viewport,
+        policy_seed=arguments.policy_seed,
     )
     print(result.model_dump_json(indent=2))
     return 0 if result.status == "completed" else 1

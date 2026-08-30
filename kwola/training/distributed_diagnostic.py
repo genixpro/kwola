@@ -3,6 +3,7 @@
 import multiprocessing
 import socket
 from contextlib import closing
+from dataclasses import replace
 from typing import Any
 
 import torch
@@ -40,8 +41,8 @@ def run_two_rank_diagnostic() -> DistributedDiagnosticResult:
 
 
 def _diagnostic_rank(rank: int, world_size: int, init_method: str, results: Any) -> None:
-    # Match production's reward-only heads. Two steps are intentional: DDP reports
-    # an unfinished reduction from unused parameters at the next forward pass.
+    # Two steps are intentional: DDP reports an unfinished reduction from unused
+    # parameters at the next forward pass.
     config = profile_config("rig", "https://example.com", 991)
     settings = DistributedSettings(rank, world_size, rank, init_method)
     with DistributedCoordinator(settings) as coordinator:
@@ -56,6 +57,17 @@ def _diagnostic_rank(rank: int, world_size: int, init_method: str, results: Any)
             seed=config.seed + rank,
             device=coordinator.device,
             impossible_reward=config.policy.rewards.impossible_action,
+        )
+        request = replace(
+            request,
+            compute_auxiliary=True,
+            auxiliary_action_type=torch.zeros(2, dtype=torch.long, device=coordinator.device),
+            auxiliary_action_x=torch.zeros(2, dtype=torch.long, device=coordinator.device),
+            auxiliary_action_y=torch.zeros(2, dtype=torch.long, device=coordinator.device),
+            auxiliary_pixel_masks=torch.ones(2, 64, 64, device=coordinator.device),
+            future_symbol_indexes=request.backbone.recent_symbol_indexes,
+            future_symbol_offsets=request.backbone.recent_symbol_offsets,
+            future_symbol_weights=request.backbone.recent_symbol_weights,
         )
         metrics = optimizer.step(request)
         metrics = optimizer.step(request)

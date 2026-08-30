@@ -81,8 +81,9 @@ def test_training_rank_reduces_and_publishes_rank_zero(
         return RunnerResult(status="completed", step_id="training-00000005", duration_seconds=1)
 
     monkeypatch.setattr(distributed_training, "_publish_result", publish)
+    plan = distributed_training._TrainingPlan(5, 0, tuple(f"trace-{i}" for i in range(100)), 7, 11)
 
-    distributed_training._training_rank(0, 1, (0,), "unused", tmp_path, queue, ())
+    distributed_training._training_rank(0, 1, (0,), "unused", tmp_path, queue, plan, ())
 
     assert coordinator is not None and coordinator.barriers == 1
     assert published == [(5, 3.0)]
@@ -125,7 +126,7 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
     monkeypatch.setattr(distributed_training, "DistributedDataParallel", lambda value, **_v: value)
     optimizer = SimpleNamespace(optimizer=SimpleNamespace())
     monkeypatch.setattr(distributed_training, "ModelOptimizer", lambda *_args: optimizer)
-    received: list[tuple[int, int, int, object]] = []
+    received: list[tuple[int, int, int, object, tuple[str, ...] | None]] = []
 
     def iterations(
         _run: Path,
@@ -137,23 +138,35 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
         training_index: int,
         count: int,
         initial: object,
+        *,
+        trace_ids: tuple[str, ...] | None = None,
     ) -> tuple[OptimizerMetrics, float, float]:
-        received.append((training_step, training_index, count, initial))
+        received.append((training_step, training_index, count, initial, trace_ids))
         return OptimizerMetrics(1.0, 2.0, 3.0), 0.4, 0.2
 
     monkeypatch.setattr(distributed_training, "_rank_iterations", iterations)
     coordinator = SimpleNamespace(
         device=torch.device("cpu"), settings=SimpleNamespace(local_device=0)
     )
+    plan = distributed_training._training_plan(tmp_path)
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        for index in range(12, 20):
+            store.put("traces", f"trace-{index}", {"index": index})
+    monkeypatch.setattr(
+        distributed_training,
+        "_store",
+        lambda *_args, **_values: pytest.fail("rank reread the live replay store"),
+    )
 
     result = distributed_training._rank_step(
         tmp_path,
         coordinator,
+        plan,
         "initial",  # type: ignore[arg-type]
     )
 
     assert result[4:] == (4, 12, 3, 84, 0.4, 0.2)
-    assert received == [(4, 20, 3, "initial")]
+    assert received == [(4, 20, 3, "initial", plan.trace_ids)]
 
 
 class BatchAssembler:
@@ -169,6 +182,34 @@ class BatchAssembler:
         return SimpleNamespace(sample_indexes=sample_indexes)
 
 
+def test_rank_assembler_excludes_traces_appended_after_parent_snapshot(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 3)
+    snapshot = (
+        "testing-00000001-trace-0000",
+        "testing-00000001-trace-0001",
+        "testing-00000003-trace-0000",
+        "testing-00000003-trace-0001",
+    )
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        for trace_id in snapshot:
+            step_id, raw_index = trace_id.rsplit("-trace-", maxsplit=1)
+            store.put("traces", trace_id, {"step_id": step_id, "index": int(raw_index)})
+        assembler = distributed_training._assembler(tmp_path, store, trace_ids=snapshot)
+        store.put(
+            "traces",
+            "testing-00000000-trace-0000",
+            {"step_id": "testing-00000000", "index": 0},
+        )
+        store.put(
+            "traces",
+            "testing-00000001-trace-0002",
+            {"step_id": "testing-00000001", "index": 2},
+        )
+
+        assert assembler.trace_count() == len(snapshot)
+        assert tuple(key for key, _trace in assembler._recorded_traces()) == snapshot
+
+
 def test_shared_batches_progress_and_checkpoint_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -180,7 +221,8 @@ def test_shared_batches_progress_and_checkpoint_publication(
         "share_batch",
         lambda batch: SimpleNamespace(shared=batch.sample_indexes),
     )
-    shared = distributed_training._shared_initial_batches(tmp_path)
+    plan = distributed_training._TrainingPlan(0, 0, ("trace-0",), 1, 0)
+    shared = distributed_training._shared_initial_batches(tmp_path, plan)
     assert [batch.shared for batch in shared] == [(0, 0, 0, 0)]
 
     progress: list[dict[str, object]] = []
@@ -228,7 +270,7 @@ def test_shared_batches_progress_and_checkpoint_publication(
     assert result.status == "completed"
     assert result.artifacts == ("checkpoints/checkpoint-00000001.pt",)
     payload = torch.load(tmp_path / result.artifacts[0], weights_only=True)
-    assert payload["learning_schema_version"] == 2
+    assert payload["learning_schema_version"] == 3
     assert payload["model"]["weight"] == 1
     assert payload["target_model"]["weight"] == 2
     assert payload["optimizer"] == {"state": {}}

@@ -3,7 +3,7 @@
 from .actions import action_catalog
 from .diagnostics import InferenceDiagnostics
 from .exploration import ExplorationProbabilities, ExplorationSchedule
-from .policy import InferencePolicy
+from .policy import InferencePolicy, PolicyMode
 from .random_policy import RandomActionPolicy
 from .rewards import RewardCalculator, RewardSignals
 from .tracenet import TraceNet, TraceNetRequest
@@ -13,6 +13,7 @@ __all__ = [
     "ExplorationSchedule",
     "InferenceDiagnostics",
     "InferencePolicy",
+    "PolicyMode",
     "RandomActionPolicy",
     "RewardCalculator",
     "RewardSignals",

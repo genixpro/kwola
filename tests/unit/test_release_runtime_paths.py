@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import torch
 
+from kwola.agent.policy import PolicyMode
 from kwola.domain.actions import Action, ActionKind, ActionMap, BrowserKind
 from kwola.domain.observations import Observation, Viewport
 from kwola.hooks import HookRegistry
@@ -237,7 +238,6 @@ def test_distributed_diagnostic_validation_and_simulated_rank(
         "ModelOptimizer",
         lambda *_args: SimpleNamespace(step=lambda _request: OptimizerMetrics(1.5, 0.1, 20.0)),
     )
-    monkeypatch.setattr(distributed_diagnostic, "diagnostic_batch", lambda **_values: object())
 
     def gather(gathered: list[torch.Tensor], _loss: torch.Tensor) -> None:
         gathered[0].fill_(1.5)
@@ -377,8 +377,9 @@ def test_testing_actions_session_construction_and_sample_preparation(
             0,
             _observation(),
             [],
-            True,
+            PolicyMode.RANDOM,
             0,
+            None,
             [],
             False,
         )
@@ -472,7 +473,7 @@ def test_single_training_path_checkpoint_load_and_distributed_dispatch(
         training_module.torch,
         "load",
         lambda *_args, **_values: {
-            "learning_schema_version": 2,
+            "learning_schema_version": 3,
             "model": {},
             "target_model": {},
             "optimizer": {},

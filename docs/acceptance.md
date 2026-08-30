@@ -50,12 +50,12 @@ confirmed missing Kros asset, not a browser-action, instrumentation, or learning
 All acceptance runs lived under `/home/bradley/kwola-refactor`. The baseline directory timestamp for
 `/home/bradley/kwola` remained `2026-08-29 21:11:20.449445097 -0400` before and after acceptance.
 
-## Schema-v2 learning release gate
+## Schema-v3 learning release gate
 
 CPU assurance is automated by `.github/workflows/assurance.yml`. Publication remains blocked until
 `therig.local` records a new acceptance run containing both browsers, JavaScript instrumentation, a
-fresh schema-v2 run, new online/target/optimizer checkpoint publication and reload, single-GPU
-training, and two-rank NCCL training concurrent with browser testing. Version-1 runs and checkpoints
+fresh schema-v3 run, new online/target/optimizer checkpoint publication and reload, single-GPU
+training, and two-rank NCCL training concurrent with browser testing. Older runs and checkpoints
 must be rejected with the fresh-run instruction; migration is not an acceptance path. The evidence
 bundle must include complete command output, benchmark output, and a final process scan proving no
 browser, proxy, Babel, or training workers remain.
@@ -65,11 +65,12 @@ action and a two-step task where the terminal reward propagates into the first a
 Unit evidence must also cover exact masked Double-DQN targets, campaign-wide atomic coverage claims,
 instrumentation absence, independent two-stage exploration, replay coverage/shuffling/rank
 disjointness, replay-credit accumulation/consumption and high-water persistence, scheduled update
-caps, validity-preserving next-state crops, zero bootstrap for empty next-action masks,
-mode-independent normalization, tiled inference, conservative-Q margin behavior, varied persistent
-crop augmentation, and strict checkpoint round trips. Training
-telemetry records the present, future, and conservative-Q losses, selected Q, bootstrap target,
-absolute TD error, and gradient norm.
+caps, full-viewport next-state targets, zero bootstrap for empty next-action masks,
+mode-independent normalization, tiled inference, global coordinate and action-map inputs,
+action-conditioned auxiliaries, conservative-Q behavior, and strict checkpoint round trips. Training
+telemetry records value and auxiliary losses, auxiliary quality, selected Q, bootstrap target,
+absolute TD error, target-evaluation time, tile count, and gradient norm. The rig freezes a checkpoint
+and requires fixed-budget greedy coverage not to regress against weighted random.
 
 ## Schema-v2 measured results (2026-08-30)
 
@@ -109,9 +110,9 @@ full-suite integration cases that bind local listening sockets could not execute
 local sandbox. This is local correctness evidence only; it does not replace the required fresh Linux
 rig acceptance run or its two-GPU/browser performance evidence.
 
-The unchanged performance gates are at least 145 samples/second, no more than 1.35 seconds median
-optimizer time, and no more than 5 GiB peak VRAM. The 1.0.0 measurements above are historical
-baseline evidence and do not satisfy the 1.1.0 release gate.
+Schema v3 reports samples/second, median optimizer time, target-evaluation time, tile count, and peak
+VRAM without imposing a throughput minimum. The 1.0.0 measurements above are historical baseline
+evidence and do not satisfy the 1.1.0 release gate.
 
 The later replay-ratio, GroupNorm, equal-default-crop, and tiled-inference changes have local unit and
 static-analysis coverage but do not yet have a fresh Linux two-GPU/browser acceptance measurement.

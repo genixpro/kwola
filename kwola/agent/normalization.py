@@ -1,4 +1,4 @@
-"""Mode-independent spatial normalization with legacy checkpoint-compatible state."""
+"""Mode-independent spatial normalization with stable schema-v3 state."""
 
 from torch import Tensor, nn
 from torch.nn import functional
@@ -7,10 +7,9 @@ from torch.nn import functional
 class SpatialGroupNorm(nn.BatchNorm2d):
     """Apply GroupNorm while retaining BatchNorm parameter and buffer names.
 
-    Existing schema-v2 checkpoints contain ``weight``, ``bias``, and running-statistic
-    buffers for these layers.  Keeping that state layout permits strict loading while
-    removing dependence on crop-specific running statistics.  The running buffers are
-    intentionally ignored by forward passes.
+    Keeping ``weight``, ``bias``, and running-statistic buffer names stable permits
+    strict schema-v3 round trips while removing dependence on crop-specific running
+    statistics. The running buffers are intentionally ignored by forward passes.
     """
 
     def __init__(self, channels: int, maximum_groups: int = 8) -> None:

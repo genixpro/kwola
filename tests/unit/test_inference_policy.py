@@ -1,4 +1,5 @@
 import random
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,7 +9,13 @@ import numpy as np
 import pytest
 import torch
 
-from kwola.agent import ExplorationProbabilities, InferencePolicy, TraceNet, action_catalog
+from kwola.agent import (
+    ExplorationProbabilities,
+    InferencePolicy,
+    PolicyMode,
+    TraceNet,
+    action_catalog,
+)
 from kwola.agent.encoding import ACTION_KINDS, ObservationEncoder, action_masks
 from kwola.config import load_config
 from kwola.domain.actions import Action, ActionKind, ActionMap, ActionTarget
@@ -102,6 +109,27 @@ def test_observation_encoder_restores_temporal_inference_state(tmp_path: Path) -
     assert backbone.recent_symbol_weights.tolist() == pytest.approx([0.9, 1.0])
     assert backbone.recent_actions_vector[0, click_index] == 1
     assert backbone.recent_actions_image[0, click_index].sum() > 0
+    assert backbone.coordinate_image[0, 0, 0, 0] == -1
+    assert backbone.coordinate_image[0, 1, -1, -1] == 1
+    assert bool(backbone.action_map_available_image.all())
+
+
+def test_encoder_distinguishes_unavailable_action_map_from_all_valid_fallback(
+    tmp_path: Path,
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 12)
+    config = load_config(tmp_path)
+    observation = _observation()
+    observation = replace(
+        observation,
+        action_map=ActionMap((), observation.viewport.width, observation.viewport.height, "1"),
+    )
+    request = ObservationEncoder(
+        config.model, None, config.policy.rewards.impossible_action
+    ).encode(observation, torch.device("cpu"))
+
+    assert bool(request.pixel_action_maps.all())
+    assert not bool(request.backbone.action_map_available_image.any())
 
 
 def test_default_inference_symbols_do_not_mix_network_and_branch_namespaces(
@@ -220,6 +248,29 @@ def test_forced_random_always_uses_weighted_policy(
     selected = policy.select(_observation(), action_index=0, test_step_index=0, force_random=True)
 
     assert selected.source == "weighted"
+
+
+def test_greedy_mode_bypasses_both_exploration_draws(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 14)
+    config = load_config(tmp_path)
+    policy = InferencePolicy(tmp_path, config, FixedDrawRandom(0.0))
+    policy._model = object()  # type: ignore[assignment]
+    monkeypatch.setattr(policy, "_evaluate_model", lambda *_args: (object(), {}))
+    monkeypatch.setattr(
+        policy,
+        "_action_from_output",
+        lambda *_args, weighted=False: Action(
+            ActionKind.CLICK, 1, 1, source="weighted" if weighted else "model", channel="click"
+        ),
+    )
+
+    selected = policy.select(
+        _observation(), action_index=0, test_step_index=0, mode=PolicyMode.GREEDY
+    )
+
+    assert selected.source == "model"
 
 
 def test_model_weighted_exploration_samples_from_q_values(tmp_path: Path) -> None:

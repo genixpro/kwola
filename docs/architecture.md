@@ -64,21 +64,21 @@ generated typing strategies, optional double/right clicks, and independent up/do
 Its order defines both TraceNet output channels and recorded action indexes. Inference and sample
 assembly share the legacy screenshot transform: grayscale, aspect-preserving configured downscale,
 dimensions rounded upward to a multiple of eight, and values rounded to two decimals. Current-state
-training crops are seeded and action-centred; next-state crops use a separately seeded random centre.
-Next-state augmentation makes up to eight random attempts to keep at least one valid action visible,
-then uses an action-centred fallback. A trace with no valid action even in that fallback is rejected.
-Images, action masks, reward masks, coordinates, and recent-action features are cropped together.
-Current and next crops have equal default dimensions. Convolutional blocks use mode-independent
-spatial GroupNorm; their legacy BatchNorm-shaped state keeps schema-v2 checkpoints strictly
-loadable, but crop-specific running statistics no longer affect predictions. Inference evaluates
-overlapping training-sized tiles and center-weights their overlap into full-viewport maps.
+training crops are seeded and action-centred. Next-state targets retain the complete processed
+viewport and use the same overlapping tile planner and center-weighted reconstruction as inference.
+Shape-compatible tiles are evaluated together without padding. Global coordinates, action masks,
+action-map availability, reward masks, and recent-action features remain aligned. Convolutional blocks
+use mode-independent spatial GroupNorm.
 
 TraceNet retains separate immediate- and discounted-future reward maps. Their masked sum is the
 action-value map used directly by greedy inference. Training uses masked Double DQN: the online model
 selects the next valid spatial action, the target model evaluates it, terminal transitions receive a
 zero future target, and an empty next-action mask also produces zero bootstrap value. Both reward
-heads train immediately with Smooth L1 loss. Optional cursor, execution-feature, and future-symbol
-auxiliaries remain; the future-symbol target is detached. A conservative margin loss lowers the
+heads train immediately with Smooth L1 loss. Cursor, execution-feature, and future-symbol auxiliaries
+are enabled. Demonstrated regions are pooled; execution and future-symbol heads receive an action
+embedding, while cursor remains spatial-only. Execution uses binary cross entropy, cursor uses
+categorical cross entropy, and the normalized future-symbol target comes from the target network.
+A conservative margin loss lowers the
 highest valid action outside the demonstrated region until it is at least the configured margin below
 the demonstrated Q value, limiting offline-Q extrapolation without raising the demonstrated value.
 Its default weight and margin are both `0.1`; a zero weight disables it. Gradients are clipped and
@@ -117,9 +117,9 @@ data, logs, and checkpoints remain external blobs. Blob and checkpoint writes us
 `fsync`, and atomic rename. Prepared-sample cache records include an explicit version and are rebuilt
 from traces when absent, stale, or corrupt.
 
-Run configuration, manifests, and learning checkpoints use learning schema version 2. A checkpoint
-contains the online model, target model, and optimizer together. Loading is strict; version-1 runs
-and checkpoints are intentionally not migrated and must be replaced by a freshly initialized run.
+Run configuration, manifests, and learning checkpoints use learning schema version 3. A checkpoint
+contains the online model, target model, and optimizer together. Loading is strict; older runs and
+checkpoints are intentionally not migrated and must be replaced by a freshly initialized run.
 
 Instrumentation assigns resources a canonical URL identity, hashes bodies into external blobs, and
 realigns branch indexes between rewritten versions by branch signatures. The action-map JavaScript

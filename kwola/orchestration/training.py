@@ -24,6 +24,7 @@ from kwola.training.assembler_factory import recorded_sample_assembler
 from kwola.training.optimizer import (
     ModelOptimizer,
     OptimizerMetrics,
+    optimizer_metrics_payload,
     summarize_optimizer_metrics,
 )
 from kwola.training.replay import ReplaySampler, require_replay_budget
@@ -124,13 +125,7 @@ class TrainingRunner:
                 "loss": metrics.loss,
                 "optimizer_seconds": metrics.duration_seconds,
                 "samples_per_second": metrics.samples_per_second,
-                "present_loss": metrics.present_loss,
-                "future_loss": metrics.future_loss,
-                "mean_selected_q": metrics.mean_selected_q,
-                "mean_bootstrap_target": metrics.mean_bootstrap_target,
-                "mean_absolute_td_error": metrics.mean_absolute_td_error,
-                "gradient_norm": metrics.gradient_norm,
-                "conservative_q_loss": metrics.conservative_q_loss,
+                **optimizer_metrics_payload(metrics),
             },
         )
 
@@ -284,13 +279,7 @@ class TrainingRunner:
                     "loss": metrics.loss,
                     "optimizer_seconds": metrics.duration_seconds,
                     "samples_per_second": metrics.samples_per_second,
-                    "present_loss": metrics.present_loss,
-                    "future_loss": metrics.future_loss,
-                    "mean_selected_q": metrics.mean_selected_q,
-                    "mean_bootstrap_target": metrics.mean_bootstrap_target,
-                    "mean_absolute_td_error": metrics.mean_absolute_td_error,
-                    "gradient_norm": metrics.gradient_norm,
-                    "conservative_q_loss": metrics.conservative_q_loss,
+                    **optimizer_metrics_payload(metrics),
                     "iterations": iterations,
                     "status": "completed",
                 },

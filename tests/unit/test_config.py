@@ -87,9 +87,12 @@ def test_config_round_trip_is_atomic_and_directory_must_be_empty(tmp_path: Path)
         create_run_config("https://example.com", "testing", run_dir, 123)
 
 
-def test_loading_a_version_one_run_requires_fresh_initialization(tmp_path: Path) -> None:
+@pytest.mark.parametrize("schema_version", (1, 2))
+def test_loading_a_legacy_run_requires_fresh_initialization(
+    tmp_path: Path, schema_version: int
+) -> None:
     config = profile_config("testing", "https://example.com", 1).model_dump(mode="json")
-    config["schema_version"] = 1
+    config["schema_version"] = schema_version
     (tmp_path / "kwola.json").write_text(json.dumps(config), encoding="utf-8")
 
     with pytest.raises(ValueError, match="initialize a fresh"):

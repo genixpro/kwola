@@ -16,8 +16,8 @@ def load_config(run_dir: Path) -> RunConfig:
     path = run_dir / CONFIG_NAME
     with path.open("r", encoding="utf-8") as stream:
         payload = json.load(stream)
-    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
-        raise ValueError("legacy run schema is unsupported; initialize a fresh schema-v2 run")
+    if not isinstance(payload, dict) or payload.get("schema_version") != 3:
+        raise ValueError("legacy run schema is unsupported; initialize a fresh schema-v3 run")
     return RunConfig.model_validate(payload)
 
 

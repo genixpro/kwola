@@ -5,9 +5,11 @@ import torch
 
 from kwola.agent.model_backbone import BackboneInput
 from kwola.agent.normalization import SpatialGroupNorm
-from kwola.agent.tiled_inference import evaluate_tiled
+from kwola.agent.spatial import coordinate_image
+from kwola.agent.tiled_inference import evaluate_tiled, evaluate_tiled_batch
 from kwola.agent.tracenet import TraceNet, TraceNetRequest
 from kwola.config import profile_config
+from kwola.training.batches import diagnostic_batch
 
 
 def inputs(batch: int, actions: int) -> TraceNetRequest:
@@ -25,6 +27,9 @@ def inputs(batch: int, actions: int) -> TraceNetRequest:
     backbone = BackboneInput(
         image=image,
         recent_actions_image=recent_actions_image,
+        action_mask_image=masks,
+        coordinate_image=coordinate_image(64, 64).unsqueeze(0).repeat(batch, 1, 1, 1),
+        action_map_available_image=torch.ones(batch, 1, 64, 64),
         recent_actions_vector=recent_actions_vector,
         recent_symbol_indexes=symbol_indexes,
         recent_symbol_offsets=offsets,
@@ -102,14 +107,27 @@ def test_future_trace_embedding_is_a_detached_auxiliary_target() -> None:
     output = model(request)["decayingFutureSymbolEmbedding"]
 
     assert not output.requires_grad
+    torch.testing.assert_close(output.norm(dim=1), torch.ones(2))
 
 
-def test_reward_only_profile_has_no_trainable_parameters_detached_from_loss() -> None:
+def test_auxiliary_profile_has_no_trainable_parameters_detached_from_complete_loss() -> None:
     config = profile_config("rig", "https://example.com", 1)
     model = TraceNet(config.model, 4)
 
-    outputs = model(inputs(2, 4))
-    (outputs["presentRewards"].mean() + outputs["discountFutureRewards"].mean()).backward()
+    request = inputs(2, 4)
+    request = replace(
+        request,
+        compute_auxiliary=True,
+        auxiliary_action_type=torch.tensor([0, 1]),
+        auxiliary_action_x=torch.tensor([16, 32]),
+        auxiliary_action_y=torch.tensor([16, 32]),
+        auxiliary_pixel_masks=torch.ones(2, 64, 64),
+        future_symbol_indexes=request.backbone.recent_symbol_indexes,
+        future_symbol_offsets=request.backbone.recent_symbol_offsets,
+        future_symbol_weights=request.backbone.recent_symbol_weights,
+    )
+    outputs = model(request)
+    sum(value.mean() for name, value in outputs.items() if name != "stamp").backward()
 
     assert [name for name, parameter in model.named_parameters() if parameter.grad is None] == []
 
@@ -146,3 +164,45 @@ def test_tiled_inference_reconstructs_full_sized_masked_maps() -> None:
     assert torch.all(
         output["actionValues"][:, 0, 0, 0] == torch.finfo(output["actionValues"].dtype).min
     )
+
+
+def test_shape_grouped_tiled_batch_matches_individual_inference() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    model = TraceNet(config.model, 4).eval()
+    requests = tuple(
+        diagnostic_batch(
+            batch_size=1,
+            num_actions=4,
+            edge=64,
+            seed=seed,
+            device=torch.device("cpu"),
+            impossible_reward=-10.0,
+        )
+        for seed in (3, 7)
+    )
+
+    with torch.no_grad():
+        grouped = evaluate_tiled_batch(model, requests, (32, 32))
+        individual = tuple(evaluate_tiled(model, request, (32, 32)) for request in requests)
+
+    for grouped_output, individual_output in zip(grouped, individual, strict=True):
+        torch.testing.assert_close(
+            grouped_output["presentRewards"], individual_output["presentRewards"]
+        )
+        torch.testing.assert_close(
+            grouped_output["discountFutureRewards"], individual_output["discountFutureRewards"]
+        )
+
+
+def test_effect_auxiliaries_are_conditioned_on_action_channel() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    model = TraceNet(config.model, 4)
+    embedding = model.heads.action_embedding
+    assert embedding is not None
+    spatial = torch.zeros(2, model.backbone.merged_features)
+    effects = torch.cat([spatial, embedding(torch.tensor([0, 1]))], dim=1)
+
+    assert model.heads.predicted_execution is not None
+    predictions = model.heads.predicted_execution(effects)
+
+    assert not torch.equal(predictions[0], predictions[1])

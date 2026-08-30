@@ -59,6 +59,16 @@ def test_viewport_rejects_malformed_values() -> None:
         raise AssertionError("malformed viewport was accepted")
 
 
+def test_test_step_rejects_random_and_greedy_together() -> None:
+    parser = build_parser()
+    try:
+        parser.parse_args(["test-step", "run", "--random", "--greedy"])
+    except SystemExit as error:
+        assert error.code == 2
+    else:
+        raise AssertionError("mutually exclusive policy modes were accepted")
+
+
 def test_init_defaults_to_the_rig_profile(tmp_path: Path) -> None:
     run_dir = tmp_path / "rig-run"
 

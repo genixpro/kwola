@@ -2,6 +2,7 @@
 
 import random
 from dataclasses import replace
+from enum import StrEnum
 from pathlib import Path
 
 import torch
@@ -18,6 +19,12 @@ from .exploration import ExplorationSchedule
 from .random_policy import RandomActionPolicy
 from .tiled_inference import evaluate_tiled
 from .tracenet import TraceNet, TraceNetRequest
+
+
+class PolicyMode(StrEnum):
+    SCHEDULED = "scheduled"
+    GREEDY = "greedy"
+    RANDOM = "random"
 
 
 class InferencePolicy:
@@ -53,7 +60,8 @@ class InferencePolicy:
         *,
         action_index: int,
         test_step_index: int,
-        force_random: bool,
+        mode: PolicyMode = PolicyMode.SCHEDULED,
+        force_random: bool | None = None,
         capture_diagnostics: bool = False,
     ) -> Action:
         self._last_diagnostics = None
@@ -66,13 +74,17 @@ class InferencePolicy:
             test_step_index=test_step_index,
         )
         evaluation: tuple[TraceNetRequest, dict[str, torch.Tensor]] | None = None
-        if force_random or self._model is None:
+        if force_random is not None:
+            mode = PolicyMode.RANDOM if force_random else mode
+        if mode is PolicyMode.RANDOM or self._model is None:
             action = self._weighted_random_policy.select(observation.action_map)
-        elif self._random.random() < exploration.random:
+        elif mode is PolicyMode.SCHEDULED and self._random.random() < exploration.random:
             action = self._weighted_random_policy.select(observation.action_map)
         else:
             evaluation = self._evaluate_model(observation, action_index, capture_diagnostics)
-            weighted = self._random.random() < exploration.weighted_random
+            weighted = (
+                mode is PolicyMode.SCHEDULED and self._random.random() < exploration.weighted_random
+            )
             action = self._action_from_output(observation, evaluation[1], weighted=weighted)
         if capture_diagnostics:
             if evaluation is None:

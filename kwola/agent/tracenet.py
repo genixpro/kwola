@@ -22,6 +22,7 @@ class TraceNetRequest:
     auxiliary_action_type: Tensor | None = None
     auxiliary_action_x: Tensor | None = None
     auxiliary_action_y: Tensor | None = None
+    auxiliary_pixel_masks: Tensor | None = None
     future_symbol_indexes: Tensor | None = None
     future_symbol_offsets: Tensor | None = None
     future_symbol_weights: Tensor | None = None
@@ -72,11 +73,19 @@ class TraceNet(nn.Module):
             return
         assert request.future_symbol_offsets is not None
         assert request.future_symbol_weights is not None
-        output["decayingFutureSymbolEmbedding"] = self.backbone.recent_symbols(
+        output["decayingFutureSymbolEmbedding"] = self.future_symbol_embedding(request).detach()
+
+    def future_symbol_embedding(self, request: TraceNetRequest) -> Tensor:
+        if request.future_symbol_indexes is None:
+            raise ValueError("future symbol indexes are required")
+        assert request.future_symbol_offsets is not None
+        assert request.future_symbol_weights is not None
+        embedding = self.backbone.recent_symbols(
             request.future_symbol_indexes,
             request.future_symbol_offsets,
             per_sample_weights=request.future_symbol_weights,
-        ).detach()
+        )
+        return nn.functional.normalize(embedding, dim=1)
 
     def _auxiliary(
         self,
@@ -93,18 +102,35 @@ class TraceNet(nn.Module):
         if not request.compute_auxiliary or not any(auxiliary_heads):
             return
         indexes = self._action_indexes(request, total_reward)
-        selected = [
-            features.merged[index, :, y // 8, x // 8].unsqueeze(0)
-            for index, (_action, x, y) in enumerate(indexes)
-        ]
-        joined = torch.cat(selected, dim=0)
-        for name, head in (
-            ("predictedTraces", self.heads.predicted_trace),
-            ("predictedExecutionFeatures", self.heads.predicted_execution),
-            ("predictedCursor", self.heads.predicted_cursor),
-        ):
-            if head is not None:
-                output[name] = head(joined)
+        actions = torch.tensor(
+            [action for action, _x, _y in indexes],
+            dtype=torch.long,
+            device=features.merged.device,
+        )
+        if request.auxiliary_pixel_masks is not None:
+            masks = nn.functional.interpolate(
+                request.auxiliary_pixel_masks[:, None].type_as(features.merged),
+                size=features.merged.shape[-2:],
+                mode="area",
+            )
+            counts = masks.sum((2, 3)).clamp_min(torch.finfo(features.merged.dtype).eps)
+            joined = (features.merged * masks).sum((2, 3)) / counts
+        else:
+            selected = [
+                features.merged[index, :, y // 8, x // 8].unsqueeze(0)
+                for index, (_action, x, y) in enumerate(indexes)
+            ]
+            joined = torch.cat(selected, dim=0)
+        if self.heads.action_embedding is None:
+            effects = joined
+        else:
+            effects = torch.cat([joined, self.heads.action_embedding(actions)], dim=1)
+        if self.heads.predicted_trace is not None:
+            output["predictedTraces"] = self.heads.predicted_trace(effects)
+        if self.heads.predicted_execution is not None:
+            output["predictedExecutionFeatures"] = self.heads.predicted_execution(effects)
+        if self.heads.predicted_cursor is not None:
+            output["predictedCursor"] = self.heads.predicted_cursor(joined)
 
     def _action_indexes(
         self, request: TraceNetRequest, total_reward: Tensor | None

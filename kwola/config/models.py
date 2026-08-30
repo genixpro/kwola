@@ -237,6 +237,7 @@ class ModelConfig(StrictModel):
     additional_stamp_edge: int = Field(default=2, ge=1)
     symbol_dictionary_size: int = Field(default=25_000, ge=1)
     symbol_embedding_size: int = Field(default=32, ge=1)
+    auxiliary_action_embedding_size: int = Field(default=16, ge=1)
     enable_cursor_prediction: bool = True
     enable_execution_feature_prediction: bool = True
     enable_trace_prediction: bool = True
@@ -254,9 +255,9 @@ class ModelConfig(StrictModel):
 
 
 class LossConfig(StrictModel):
-    cursor_prediction: float = Field(default=1.0, ge=0)
-    execution_feature: float = Field(default=1.0, ge=0)
-    execution_trace: float = Field(default=1.0, ge=0)
+    cursor_prediction: float = Field(default=0.10, ge=0)
+    execution_feature: float = Field(default=0.25, ge=0)
+    execution_trace: float = Field(default=0.25, ge=0)
     discounted_future_reward: float = Field(default=8.0, ge=0)
     present_reward: float = Field(default=16.0, ge=0)
     conservative_q: float = Field(default=0.1, ge=0)
@@ -359,7 +360,7 @@ class OrchestrationConfig(StrictModel):
 
 
 class RunConfig(StrictModel):
-    schema_version: int = Field(default=2, ge=2, le=2)
+    schema_version: int = Field(default=3, ge=3, le=3)
     target: AnyHttpUrl
     profile: ProfileName
     seed: int = Field(ge=0, le=2**63 - 1)

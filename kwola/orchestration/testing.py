@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from kwola.agent import InferenceDiagnostics, InferencePolicy, action_catalog
+from kwola.agent import InferenceDiagnostics, InferencePolicy, PolicyMode, action_catalog
 from kwola.browser import (
     ActionExecutor,
     ActionMapExtractor,
@@ -54,15 +54,23 @@ class TestingRunner:
         self,
         *,
         random_policy: bool = False,
+        policy_mode: PolicyMode = PolicyMode.SCHEDULED,
         browser: BrowserKind | None = None,
         viewport: tuple[int, int] | None = None,
         environment_index: int = 0,
+        policy_seed: int | None = None,
     ) -> RunnerResult:
         started = self._clock()
         result: RunnerResult
         primary_error: BaseException | None = None
         try:
             self._dispatch(LifecycleEventName.RUN_STARTED)
+            if random_policy:
+                if policy_mode is not PolicyMode.SCHEDULED:
+                    raise ValueError(
+                        "random_policy cannot be combined with an explicit policy mode"
+                    )
+                policy_mode = PolicyMode.RANDOM
             browser_kind = browser or self._config.browser.enabled[0]
             if browser_kind not in self._config.browser.enabled:
                 raise ValueError(f"browser {browser_kind} is not enabled for this run")
@@ -72,8 +80,9 @@ class TestingRunner:
                     started,
                     browser_kind,
                     self._viewport(viewport),
-                    random_policy,
+                    policy_mode,
                     environment_index,
+                    policy_seed,
                 )
         except BaseException as error:
             primary_error = error
@@ -88,8 +97,9 @@ class TestingRunner:
         started: float,
         browser_kind: BrowserKind,
         viewport: ViewportConfig,
-        random_policy: bool,
+        policy_mode: PolicyMode,
         environment_index: int,
+        policy_seed: int | None,
     ) -> RunnerResult:
         step_index = _reserve_step_index(store)
         step_id = f"testing-{step_index:08d}"
@@ -107,13 +117,14 @@ class TestingRunner:
                 step_index,
                 observation,
                 artifacts,
-                random_policy,
+                policy_mode,
                 environment_index,
+                policy_seed,
                 diagnostics,
                 _debug_video_due(self._config, step_index),
             )
             best_fitness = max(fitness) if fitness else None
-            _complete_step(store, step_id, browser_kind, rewards, random_policy, best_fitness)
+            _complete_step(store, step_id, browser_kind, rewards, policy_mode, best_fitness)
             metrics: dict[str, int | float] = {
                 "traces": len(rewards),
                 "reward": sum(rewards),
@@ -155,16 +166,18 @@ class TestingRunner:
         step_index: int,
         observation: Observation,
         artifacts: list[str],
-        random_policy: bool,
+        policy_mode: PolicyMode,
         environment_index: int,
+        policy_seed: int | None,
         diagnostics: list[InferenceDiagnostics | None],
         capture_diagnostics: bool,
     ) -> tuple[list[float], list[float]]:
-        policy = InferencePolicy(
-            self._run_dir,
-            self._config,
-            random.Random(self._config.seed + step_index + environment_index * 1_000_003),
+        seed = (
+            policy_seed
+            if policy_seed is not None
+            else self._config.seed + step_index + environment_index * 1_000_003
         )
+        policy = InferencePolicy(self._run_dir, self._config, random.Random(seed))
         recorder = TraceRecorder(self._run_dir, self._config, store, artifacts)
         novelty = NoveltyState.initial(observation)
         recorder.claim_initial(observation)
@@ -175,7 +188,7 @@ class TestingRunner:
                 observation,
                 action_index=trace_index,
                 test_step_index=step_index,
-                force_random=random_policy,
+                mode=policy_mode,
                 capture_diagnostics=capture_diagnostics,
             )
             if capture_diagnostics:
@@ -349,7 +362,7 @@ def _complete_step(
     step_id: str,
     browser: BrowserKind,
     rewards: list[float],
-    random_policy: bool,
+    policy_mode: PolicyMode,
     application_fitness: float | None,
 ) -> None:
     def complete(current: dict[str, Any] | None) -> dict[str, Any]:
@@ -364,7 +377,8 @@ def _complete_step(
         step_id,
         {
             "browser": browser.value,
-            "random": random_policy,
+            "random": policy_mode is PolicyMode.RANDOM,
+            "policy_mode": policy_mode.value,
             "trace_count": len(rewards),
             "reward": sum(rewards),
             "application_fitness": application_fitness,

@@ -57,6 +57,20 @@ def cached_cropped_action_masks(
     return action_masks(trace, size, channels, crop=crop, dtype=torch.uint8)
 
 
+def action_map_is_available(
+    trace: Mapping[str, Any], channels: tuple[ActionChannel, ...] | None
+) -> bool:
+    """Return whether discovery supplied at least one configured actionable target."""
+    targets = trace.get("action_targets")
+    if not isinstance(targets, list):
+        return False
+    return any(
+        _target_supports(target, channel)
+        for target in targets
+        for channel in (channels or _generic_channels())
+    )
+
+
 def _paint_target(
     masks: Tensor,
     target: Mapping[str, Any],
