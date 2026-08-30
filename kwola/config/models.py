@@ -139,17 +139,24 @@ class ModelConfig(StrictModel):
     layers: tuple[ConvolutionLayerConfig, ...]
     pixel_features: int = Field(ge=1)
     recent_action_features: int = Field(default=16, ge=1)
+    recent_action_history: int = Field(default=5, ge=1)
     additional_stamp_depth: int = Field(default=5, ge=1)
+    additional_stamp_edge: int = Field(default=2, ge=1)
     symbol_dictionary_size: int = Field(default=25_000, ge=1)
     symbol_embedding_size: int = Field(default=32, ge=1)
     enable_cursor_prediction: bool = True
     enable_execution_feature_prediction: bool = True
     enable_trace_prediction: bool = True
+    prediction_head_kernel_size: int = Field(default=3, ge=1)
+    prediction_head_stride: int = Field(default=1, ge=1)
+    prediction_head_padding: int = Field(default=1, ge=0)
 
     @model_validator(mode="after")
     def topology_has_five_layers(self) -> Self:
         if len(self.layers) != 5:
             raise ValueError("TraceNet requires exactly five convolutional layers")
+        if self.layers[3].kernels != self.pixel_features:
+            raise ValueError("TraceNet layer four kernels must match pixel_features")
         return self
 
 
@@ -167,7 +174,11 @@ class LossConfig(StrictModel):
 class TrainingConfig(StrictModel):
     batch_size: int = Field(default=4, ge=1)
     batches_per_iteration: int = Field(default=8, ge=1)
-    learning_rate: float = Field(default=1e-4, gt=0)
+    learning_rate: float = Field(default=1e-3, gt=0)
+    optimizer: Literal["adam", "adamax"] = "adamax"
+    gradient_beta: float = Field(default=0.97, gt=0, lt=1)
+    squared_gradient_beta: float = Field(default=0.999, gt=0, lt=1)
+    weight_decay: float = Field(default=0.0, ge=0)
     device_indices: tuple[int, ...] = ()
     world_size: int = Field(default=1, ge=1)
     sample_cache_workers: int = Field(default=4, ge=0)

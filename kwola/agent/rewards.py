@@ -67,5 +67,5 @@ class RewardCalculator:
         prevalence = signals.code_prevalence_log_normalized_z_score
         if prevalence is None:
             return config.new_code_executed
-        adjusted = config.code_prevalence_exponential_base ** -prevalence
+        adjusted = float(config.code_prevalence_exponential_base**-prevalence)
         return (adjusted + 1) * config.new_code_executed * 0.5

@@ -4,7 +4,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, Self
 
-import lmdb
+import lmdb  # type: ignore[import-untyped]
 
 from .codec import BinaryCodec, CodecError
 
@@ -66,7 +66,7 @@ class LmdbRunStore:
         if self._readonly:
             raise PermissionError("run store is read-only")
         with self._environment.begin(write=True) as transaction:
-            return transaction.delete(self._key(collection, key))
+            return bool(transaction.delete(self._key(collection, key)))
 
     def scan(self, collection: str) -> Iterator[tuple[str, dict[str, Any]]]:
         prefix = self._prefix(collection)

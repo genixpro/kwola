@@ -76,7 +76,7 @@ class WorkerSupervisor:
             raise ValueError("control messages cannot exceed 1 MiB; pass an artifact reference")
         self._results = self._context.Queue()
         self._logs = self._context.Queue()
-        self._process = self._context.Process(
+        self._process = self._context.Process(  # type: ignore[attr-defined]
             target=_worker_entry,
             args=(self._handler, command.model_dump_json(), self._results, self._logs),
             name=f"kwola-{command.name}-{command.command_id}",

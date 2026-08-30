@@ -1,0 +1,15 @@
+"""Validated public runner results."""
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class RunnerResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    status: Literal["completed", "failed", "cancelled"]
+    step_id: str
+    duration_seconds: float = Field(ge=0)
+    artifacts: tuple[str, ...] = ()
+    metrics: dict[str, float | int] = Field(default_factory=dict)
+    error: str | None = None

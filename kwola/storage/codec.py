@@ -4,7 +4,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any
 
-import msgpack
+import msgpack  # type: ignore[import-untyped]
 import zstandard
 
 MAGIC = b"KWDB"
