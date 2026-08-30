@@ -5,6 +5,9 @@ import numpy as np
 import torch
 
 from kwola.storage import AtomicBlobStore, LmdbRunStore
+from kwola.training.action_masks import action_masks
+from kwola.training.geometry import Crop, process_screenshot
+from kwola.training.image_cache import DecodedImageCache
 from kwola.training.sample_features import _flood_reward, _paint_action_circle
 from kwola.training.samples import ACTION_KINDS, RecordedSampleAssembler
 
@@ -94,6 +97,58 @@ def test_in_place_flood_reward_matches_copy_per_seed_calculation() -> None:
     expected = _legacy_flood_reward(image, allowed, 47, 31)
     actual = _flood_reward(image, allowed, 47, 31)
     np.testing.assert_array_equal(actual, expected)
+
+
+def test_crop_local_action_masks_match_full_frame_slice() -> None:
+    trace = _trace(0, "unused.png")
+    trace["viewport"] = [1920, 1080]
+    trace["action_targets"] = [
+        {"bounds": [100, 80, 400, 300], "click": True},
+        {"bounds": [1500, 700, 1800, 900], "type": True},
+    ]
+    crop = Crop(128, 64, 448, 384, 1920, 1080)
+
+    full = action_masks(trace, (1920, 1080), None)
+    local = action_masks(trace, (1920, 1080), None, crop=crop)
+
+    torch.testing.assert_close(local, full[:, crop.top : crop.bottom, crop.left : crop.right])
+
+
+def test_crop_local_action_masks_preserve_supported_target_fallback() -> None:
+    crop = Crop(0, 0, 320, 320, 1920, 1080)
+    outside = _trace(0, "unused.png")
+    outside["viewport"] = [1920, 1080]
+    outside["action_targets"] = [
+        {"bounds": [1500, 700, 1800, 900], "click": True},
+    ]
+    unsupported = _trace(0, "unused.png")
+    unsupported["viewport"] = [1920, 1080]
+    unsupported["action_targets"] = [
+        {"bounds": [1500, 700, 1800, 900]},
+    ]
+
+    assert not bool(action_masks(outside, (1920, 1080), None, crop=crop).any())
+    assert bool(action_masks(unsupported, (1920, 1080), None, crop=crop).all())
+
+
+def test_decoded_image_cache_matches_live_grayscale_encoding(tmp_path: Path) -> None:
+    source = np.zeros((40, 64, 3), dtype=np.uint8)
+    source[:, :, 0] = 250
+    source[10:30, 20:50, 1] = 180
+    encoded_ok, encoded = cv2.imencode(".png", source)
+    assert encoded_ok
+    path = tmp_path / "color.png"
+    path.write_bytes(encoded.tobytes())
+    decoded = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+    assert decoded is not None
+
+    cache_dir = tmp_path / "cache"
+    actual = DecodedImageCache(1, 0.3, cache_dir).decode(path, None)
+
+    np.testing.assert_array_equal(actual, process_screenshot(decoded, 0.3))
+    path.unlink()
+    persisted = DecodedImageCache(1, 0.3, cache_dir).decode(path, None)
+    np.testing.assert_array_equal(persisted, actual)
 
 
 def _legacy_paint_action_circle(

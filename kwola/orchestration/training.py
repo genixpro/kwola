@@ -164,6 +164,9 @@ class TrainingRunner:
                 self._config.training.crop_random_y,
             ),
             decoded_image_cache_size=self._config.training.decoded_image_cache_size,
+            decoded_image_cache_directory=(
+                self._run_dir / self._config.storage.cache_directory / "decoded-images"
+            ),
             enable_trace_prediction=self._config.model.enable_trace_prediction,
             enable_execution_feature_prediction=(
                 self._config.model.enable_execution_feature_prediction

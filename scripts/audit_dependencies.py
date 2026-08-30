@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import math
 import sys
 import urllib.error
 import urllib.request
@@ -26,6 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--python-json", type=Path, required=True)
     parser.add_argument("--npm-json", type=Path, required=True)
     parser.add_argument("--exceptions", type=Path, required=True)
+    parser.add_argument(
+        "--require-no-exceptions",
+        action="store_true",
+        help="fail when any active exception exists, even when no finding matches it",
+    )
     arguments = parser.parse_args(argv)
     try:
         exceptions = _load_exceptions(arguments.exceptions)
@@ -38,6 +44,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     failures = []
+    exception_gate_failed = arguments.require_no_exceptions and bool(exceptions)
+    if exception_gate_failed:
+        print(f"FAIL release gate has {len(exceptions)} active dependency audit exception(s)")
     for finding in findings:
         if (finding.advisory_id, finding.package) in exceptions:
             print(
@@ -58,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             )
     if not findings:
         print("PASS no dependency advisories reported")
-    return 1 if failures else 0
+    return 1 if failures or exception_gate_failed else 0
 
 
 def _load_json(path: Path) -> Any:
@@ -135,8 +144,11 @@ def _severity_from_payload(payload: dict[str, Any]) -> str | None:
         return "moderate" if severity == "medium" else severity
     for score in payload.get("severity", []):
         try:
-            numeric = float(str(score.get("score", "")))
-        except ValueError:
+            raw_score = str(score.get("score", ""))
+            numeric = (
+                _cvss_v3_score(raw_score) if raw_score.startswith("CVSS:3.") else float(raw_score)
+            )
+        except (KeyError, ValueError):
             continue
         if numeric >= 9:
             return "critical"
@@ -146,6 +158,29 @@ def _severity_from_payload(payload: dict[str, Any]) -> str | None:
             return "moderate"
         return "low"
     return None
+
+
+def _cvss_v3_score(vector: str) -> float:
+    metrics = dict(field.split(":", maxsplit=1) for field in vector.split("/")[1:])
+    scope_changed = metrics["S"] == "C"
+    attack_vector = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}[metrics["AV"]]
+    attack_complexity = {"L": 0.77, "H": 0.44}[metrics["AC"]]
+    privileges = (
+        {"N": 0.85, "L": 0.68, "H": 0.5} if scope_changed else {"N": 0.85, "L": 0.62, "H": 0.27}
+    )[metrics["PR"]]
+    interaction = {"N": 0.85, "R": 0.62}[metrics["UI"]]
+    impact_values = {"H": 0.56, "L": 0.22, "N": 0.0}
+    impact_subscore = 1 - math.prod(1 - impact_values[metrics[name]] for name in ("C", "I", "A"))
+    impact = (
+        7.52 * (impact_subscore - 0.029) - 3.25 * (impact_subscore - 0.02) ** 15
+        if scope_changed
+        else 6.42 * impact_subscore
+    )
+    if impact <= 0:
+        return 0.0
+    exploitability = 8.22 * attack_vector * attack_complexity * privileges * interaction
+    base = min(10.0, (1.08 if scope_changed else 1.0) * (impact + exploitability))
+    return math.ceil(base * 10) / 10
 
 
 def _npm_findings(payload: Any) -> list[Finding]:

@@ -2,6 +2,7 @@
 
 import multiprocessing
 import queue
+import threading
 import time
 import traceback
 from collections.abc import Callable
@@ -69,7 +70,12 @@ class WorkerSupervisor:
     def __exit__(self, *_: object) -> None:
         self.cancel()
 
-    def run(self, command: WorkerCommand, timeout_seconds: float) -> WorkerResult:
+    def run(
+        self,
+        command: WorkerCommand,
+        timeout_seconds: float,
+        cancel_event: threading.Event | None = None,
+    ) -> WorkerResult:
         if self._process is not None:
             raise RuntimeError("supervisor already has an active worker")
         if len(command.model_dump_json()) > 1024 * 1024:
@@ -83,25 +89,35 @@ class WorkerSupervisor:
         )
         self._process.start()
         try:
-            return self._wait(command, timeout_seconds)
+            return self._wait(command, timeout_seconds, cancel_event)
         finally:
+            self._finish_process()
             self._drain_logs()
             self._cleanup_queues()
             self._process = None
 
     def cancel(self) -> None:
         process = self._process
-        if process is None or not process.is_alive():
+        if process is None:
             return
-        process.terminate()
-        process.join(self._graceful_shutdown_seconds)
+        if process.is_alive():
+            process.terminate()
+            process.join(self._graceful_shutdown_seconds)
         if process.is_alive():
             process.kill()
-            process.join()
+        process.join()
 
     def logs(self) -> tuple[str, ...]:
         self._drain_logs()
         return tuple(self._collected_logs)
+
+    def _finish_process(self) -> None:
+        process = self._process
+        if process is None:
+            return
+        process.join(self._graceful_shutdown_seconds)
+        if process.is_alive():
+            self.cancel()
 
     def _drain_logs(self) -> None:
         if self._logs is None:
@@ -112,11 +128,24 @@ class WorkerSupervisor:
             except queue.Empty:
                 return
 
-    def _wait(self, command: WorkerCommand, timeout_seconds: float) -> WorkerResult:
+    def _wait(
+        self,
+        command: WorkerCommand,
+        timeout_seconds: float,
+        cancel_event: threading.Event | None,
+    ) -> WorkerResult:
         assert self._process is not None
         assert self._results is not None
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                self.cancel()
+                return WorkerResult(
+                    command_id=command.command_id,
+                    status="cancelled",
+                    error_type="WorkerCancelled",
+                    error_message="worker cancelled by experiment shutdown",
+                )
             try:
                 return WorkerResult.model_validate_json(self._results.get(timeout=0.05))
             except queue.Empty:

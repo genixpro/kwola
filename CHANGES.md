@@ -28,6 +28,13 @@
 - Pull requests and pushes now run locked Python 3.12/Node 24 installs, both supported browsers,
   formatting, linting, strict typing, the full branch-coverage suite, dependency policy audits, and
   fresh wheel/sdist smoke installs.
+- Browser workers now retry transient failures independently with bounded exponential backoff and
+  cancel every active worker after the configured consecutive-failure limit. `kwola status` reports
+  retry health and recovery per browser slot.
+- Adaptive training now consumes the median duration of successful browser steps completed during
+  each training window. Schedule adjustments, retries, recoveries, and terminal failures are durable
+  pipeline telemetry events.
+- Distributed training records the configured world size instead of assuming two ranks.
 
 ### Rollback
 

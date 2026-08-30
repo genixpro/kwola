@@ -55,6 +55,7 @@ class TraceRecorder:
         self._store = store
         self._artifacts = artifacts
         self._blobs = AtomicBlobStore(run_dir / config.storage.blobs_directory)
+        self._previous_after: tuple[str, str] | None = None
 
     def record(
         self,
@@ -94,11 +95,19 @@ class TraceRecorder:
     def _screenshots(
         self, trace_id: str, before: Observation, after: Observation
     ) -> tuple[str, str]:
+        before_digest = hashlib.sha256(before.screenshot).hexdigest()
+        if self._previous_after is not None and self._previous_after[0] == before_digest:
+            before_relative = self._previous_after[1]
+        else:
+            before_path = self._blobs.write(
+                "screenshots", f"{trace_id}-before.png", before.screenshot
+            )
+            before_relative = str(before_path.relative_to(self._run_dir))
         after_path = self._blobs.write("screenshots", f"{trace_id}.png", after.screenshot)
-        before_path = self._blobs.write("screenshots", f"{trace_id}-before.png", before.screenshot)
         after_relative = str(after_path.relative_to(self._run_dir))
+        self._previous_after = (hashlib.sha256(after.screenshot).hexdigest(), after_relative)
         self._artifacts.append(after_relative)
-        return str(before_path.relative_to(self._run_dir)), after_relative
+        return before_relative, after_relative
 
     def _html(
         self, trace_id: str, values: tuple[str | None, str | None]

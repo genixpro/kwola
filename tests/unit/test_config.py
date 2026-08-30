@@ -110,3 +110,14 @@ def test_all_cross_field_constraints_are_actionable(mutation: object, message: s
     mutation(data)
     with pytest.raises(ValidationError, match=message):
         type(config).model_validate(data)
+
+
+def test_browser_retry_maximum_cannot_be_below_base_delay() -> None:
+    config = profile_config("testing", "https://example.com", 1).model_dump()
+    config["orchestration"].update(
+        browser_retry_base_seconds=5.0,
+        browser_retry_max_seconds=4.0,
+    )
+
+    with pytest.raises(ValidationError, match="retry maximum"):
+        type(profile_config("testing", "https://example.com", 1)).model_validate(config)

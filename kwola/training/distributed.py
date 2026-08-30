@@ -393,7 +393,7 @@ def _record_step(
                 "checkpoint_seconds": checkpoint_seconds,
                 "iterations": iterations,
                 "status": "completed",
-                "ranks": 2,
+                "ranks": config.training.world_size,
             },
         )
 
@@ -416,6 +416,7 @@ def _assembler(run_dir: Path, store: LmdbRunStore) -> RecordedSampleAssembler:
         next_crop_size=(config.training.next_crop_width, config.training.next_crop_height),
         crop_random=(config.training.crop_random_x, config.training.crop_random_y),
         decoded_image_cache_size=config.training.decoded_image_cache_size,
+        decoded_image_cache_directory=(run_dir / config.storage.cache_directory / "decoded-images"),
         freeze_records=True,
         enable_trace_prediction=config.model.enable_trace_prediction,
         enable_execution_feature_prediction=config.model.enable_execution_feature_prediction,

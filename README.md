@@ -64,6 +64,22 @@ uv run python scripts/audit_dependencies.py --python-json pip-audit.json \
   --npm-json npm-audit.json --exceptions security/advisory-exceptions.json
 ```
 
+Release acceptance additionally passes `--require-no-exceptions` to the dependency policy and runs
+the complete gate on the Linux two-GPU host without modifying the source 1.0 run:
+
+```sh
+uv run python scripts/run_rig_acceptance.py \
+  --legacy-run-dir /path/to/kwola-1.0-run \
+  --evidence-dir /path/to/new-empty-evidence-directory \
+  --kros1-url http://127.0.0.1:3001/ \
+  --kros3-url http://127.0.0.1:3003/
+```
+
+The runner records command logs, environment versions, metrics, and artifact hashes; verifies both
+browsers, instrumentation, checkpoint compatibility/publication, single-GPU and concurrent two-rank
+training; enforces the benchmark and zero-exception gates; and rejects leaked runtime processes.
+Only update the acceptance evidence document after this complete command passes.
+
 The architecture tests enforce limits of 500 lines per module, 300 lines per class, and 80 lines per
 ordinary method. Domain modules cannot import browser, tensor, storage, process, or reporting
 infrastructure.

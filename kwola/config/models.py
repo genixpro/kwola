@@ -298,9 +298,18 @@ class ReportingConfig(StrictModel):
 class OrchestrationConfig(StrictModel):
     browser_workers: int = Field(default=1, ge=1, le=64)
     browser_cpu_threads: int = Field(default=1, ge=1, le=32)
+    browser_max_consecutive_failures: int = Field(default=5, ge=1)
+    browser_retry_base_seconds: float = Field(default=1.0, gt=0)
+    browser_retry_max_seconds: float = Field(default=60.0, gt=0)
     worker_timeout_seconds: float = Field(default=3600.0, gt=0)
     telemetry_interval_seconds: float = Field(default=5.0, gt=0)
     minimum_traces_before_training: int = Field(default=5, ge=1)
+
+    @model_validator(mode="after")
+    def retry_delays_are_consistent(self) -> Self:
+        if self.browser_retry_max_seconds < self.browser_retry_base_seconds:
+            raise ValueError("browser retry maximum must be at least the base delay")
+        return self
 
 
 class RunConfig(StrictModel):

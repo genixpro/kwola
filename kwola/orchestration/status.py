@@ -38,6 +38,9 @@ def pipeline_status(run_dir: Path) -> dict[str, Any]:
         "elapsed_seconds": elapsed,
         "configured_browser_workers": config.orchestration.browser_workers,
         "in_flight": in_flight,
+        "browser_worker_health": _browser_worker_health(
+            events, config.orchestration.browser_workers
+        ),
         "testing_steps": len(testing),
         "traces": traces,
         "trace_rate_per_second": traces / elapsed,
@@ -58,6 +61,45 @@ def pipeline_status(run_dir: Path) -> dict[str, Any]:
         "recent_resource_averages": _resource_averages(events),
         "latest_training_progress": progress[-1] if progress else None,
     }
+
+
+def _browser_worker_health(
+    events: list[dict[str, Any]], worker_count: int
+) -> dict[str, dict[str, Any]]:
+    health: dict[str, dict[str, Any]] = {
+        str(slot): {
+            "consecutive_failures": 0,
+            "retry_delay_seconds": 0.0,
+            "last_error": None,
+        }
+        for slot in range(worker_count)
+    }
+    for row in events:
+        if row.get("event") == "pipeline_started":
+            for state in health.values():
+                state.update(
+                    consecutive_failures=0,
+                    retry_delay_seconds=0.0,
+                    last_error=None,
+                )
+            continue
+        slot = row.get("slot")
+        if not isinstance(slot, int) or str(slot) not in health:
+            continue
+        state = health[str(slot)]
+        if row.get("event") == "worker_retry_scheduled":
+            state["consecutive_failures"] = int(row.get("consecutive_failures", 0))
+            state["retry_delay_seconds"] = float(row.get("delay_seconds", 0))
+            error_type = row.get("error_type") or "WorkerFailure"
+            error_message = row.get("error_message") or "failed"
+            state["last_error"] = f"{error_type}: {error_message}"
+        elif row.get("event") == "worker_recovered":
+            state.update(
+                consecutive_failures=0,
+                retry_delay_seconds=0.0,
+                last_error=None,
+            )
+    return health
 
 
 def _in_flight(events: list[dict[str, Any]]) -> dict[str, int]:

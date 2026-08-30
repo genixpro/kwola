@@ -37,6 +37,17 @@ next CPU batch on a prefetch thread while the current batch computes. Gradients 
 DDP. After a final barrier, only rank 0 writes the training record and atomically publishes a
 checkpoint. Whole traces and image batches never travel through control queues or pickle files.
 
+Each browser slot tracks consecutive worker failures independently. A failed slot retries with
+exponential backoff from `browser_retry_base_seconds` up to `browser_retry_max_seconds`; a successful
+step resets its counter. The experiment fails on `browser_max_consecutive_failures` (five by default)
+and cancels every active supervisor. Training-worker failures remain immediately fatal. Retry,
+recovery, terminal-failure, and shutdown events are written to pipeline telemetry.
+
+While a training worker is active, the scheduler collects durations from successful browser steps.
+When training completes, its duration is compared with the median browser duration from that exact
+window. The next training iteration count moves by `batch_iteration_adjustment` toward the configured
+minimum or maximum; a window with no successful browser completion leaves the schedule unchanged.
+
 ## Inference and training geometry
 
 The action catalog is stable and sorted: click/clear, explicit custom typing strings, configured
@@ -100,4 +111,5 @@ teardown. Browser and proxy lifecycles are context-managed and idempotently clos
 The pipeline telemetry stream records worker submission/completion and periodic host, process-tree,
 memory, and NVIDIA GPU samples. Rank zero emits progress during long training steps with separate
 assembly, host-to-device transfer, optimizer, memory, and end-to-end rates. These append-only records
-remain readable while a run is active through `kwola status`.
+remain readable while a run is active through `kwola status`, including per-slot retry counts,
+backoff delay, and the latest worker error.

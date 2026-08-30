@@ -14,6 +14,15 @@ def test_telemetry_is_durable_and_status_aggregates_pipeline_rates(tmp_path: Pat
     with TelemetryWriter(tmp_path, interval_seconds=60) as telemetry:
         telemetry.record("worker_submitted", worker="testing", command_id="testing-1")
         telemetry.record(
+            "worker_retry_scheduled",
+            worker="testing",
+            slot=0,
+            consecutive_failures=2,
+            delay_seconds=2.0,
+            error_type="TimeoutError",
+            error_message="page timeout",
+        )
+        telemetry.record(
             "resources",
             cpu_percent=50.0,
             gpus=[{"index": 0, "gpu_percent": 80.0}],
@@ -44,6 +53,13 @@ def test_telemetry_is_durable_and_status_aggregates_pipeline_rates(tmp_path: Pat
     status = pipeline_status(tmp_path)
 
     assert status["in_flight"] == {"testing": 1}
+    assert status["browser_worker_health"] == {
+        "0": {
+            "consecutive_failures": 2,
+            "retry_delay_seconds": 2.0,
+            "last_error": "TimeoutError: page timeout",
+        }
+    }
     assert status["traces"] == 1
     assert status["training_iterations"] == 10
     assert status["optimizer_sample_rate_per_second"] == 20.0
@@ -77,3 +93,24 @@ def test_status_cli_prints_the_live_payload(tmp_path: Path, capsys: object) -> N
     assert main(["status", str(tmp_path)]) == 0
     output = capsys.readouterr().out  # type: ignore[attr-defined]
     assert json.loads(output)["training_steps"] == 0
+
+
+def test_status_clears_browser_failure_health_after_recovery(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 7)
+    with TelemetryWriter(tmp_path, interval_seconds=60) as telemetry:
+        telemetry.record(
+            "worker_retry_scheduled",
+            worker="testing",
+            slot=0,
+            consecutive_failures=1,
+            delay_seconds=1.0,
+            error_type="RuntimeError",
+            error_message="temporary",
+        )
+        telemetry.record("worker_recovered", worker="testing", slot=0, failures=1)
+
+    assert pipeline_status(tmp_path)["browser_worker_health"]["0"] == {
+        "consecutive_failures": 0,
+        "retry_delay_seconds": 0.0,
+        "last_error": None,
+    }

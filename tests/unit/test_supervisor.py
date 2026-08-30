@@ -1,5 +1,6 @@
 import multiprocessing
 import os
+import threading
 import time
 
 import pytest
@@ -123,3 +124,17 @@ def test_supervisor_forces_termination_after_grace_period() -> None:
     supervisor._process = process  # type: ignore[assignment]
     supervisor.cancel()
     assert process.killed
+
+
+def test_supervisor_cancellation_returns_typed_result_and_stops_worker() -> None:
+    cancelled = threading.Event()
+    cancelled.set()
+    with WorkerSupervisor(slow_worker, graceful_shutdown_seconds=0.01) as supervisor:
+        result = supervisor.run(
+            WorkerCommand(command_id="7", name="slow", parameters={"delay": 2}),
+            timeout_seconds=5,
+            cancel_event=cancelled,
+        )
+
+    assert result.status == "cancelled"
+    assert result.error_type == "WorkerCancelled"

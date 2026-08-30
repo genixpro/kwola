@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.mark.parametrize("browser", (BrowserKind.CHROMIUM, BrowserKind.FIREFOX))
 def test_kros_action_executor_contract(browser: BrowserKind) -> None:
-    target = "http://127.0.0.1:3001/"
+    target = os.environ.get("KWOLA_KROS1_URL", "http://127.0.0.1:3001/")
     browser_config = profile_config("testing", target, 71).browser
     adapter = PlaywrightBrowserAdapter(
         browser_config,

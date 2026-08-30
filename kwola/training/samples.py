@@ -92,6 +92,7 @@ class RecordedSampleAssembler:
         next_crop_size: tuple[int, int] | None = None,
         crop_random: tuple[int, int] = (0, 0),
         decoded_image_cache_size: int = 0,
+        decoded_image_cache_directory: Path | None = None,
         freeze_records: bool = False,
         enable_trace_prediction: bool = True,
         enable_execution_feature_prediction: bool = True,
@@ -111,7 +112,9 @@ class RecordedSampleAssembler:
         self._crop_size = crop_size
         self._next_crop_size = next_crop_size
         self._crop_random = crop_random
-        self._images = DecodedImageCache(decoded_image_cache_size, image_downscale_ratio)
+        self._images = DecodedImageCache(
+            decoded_image_cache_size, image_downscale_ratio, decoded_image_cache_directory
+        )
         self._freeze_records = freeze_records
         self._trace_snapshot: list[tuple[str, dict[str, Any]]] | None = None
         self._trace_index: TraceIndex | None = None
@@ -250,7 +253,8 @@ class RecordedSampleAssembler:
                     item.trace,
                     (item.crop.image_width, item.crop.image_height),
                     self._channels,
-                )[:, item.crop.top : item.crop.bottom, item.crop.left : item.crop.right]
+                    crop=item.crop,
+                )
                 for item in selected
             ]
         ).to(device)
