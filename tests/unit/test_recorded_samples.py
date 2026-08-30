@@ -18,7 +18,7 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
         for index in range(2):
             store.put(
                 "traces",
-                f"trace-{index}",
+                f"testing-0-trace-{index:04d}",
                 _trace(index, str(path.relative_to(tmp_path))),
             )
         assembler = RecordedSampleAssembler(
@@ -28,7 +28,10 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
             discount_rate=0.85,
             max_discounted_reward=10.0,
             cache_version=3,
+            decoded_image_cache_size=4,
+            freeze_records=True,
         )
+        assert assembler.prepare_step("testing-0") == 2
         batch = assembler.assemble(
             batch_size=2,
             edge=64,
@@ -41,8 +44,16 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
         assert batch.present_rewards.tolist() == [0.5, 1.5]
         assert store.get("sample_cache", "testing-0") == {
             "cache_version": 3,
-            "payload": {"trace_ids": ["trace-0", "trace-1"]},
+            "payload": {"trace_ids": ["testing-0-trace-0000", "testing-0-trace-0001"]},
         }
+        path.unlink()
+        cached = assembler.assemble(
+            batch_size=2,
+            edge=64,
+            device=torch.device("cpu"),
+            impossible_reward=-10.0,
+        )
+        assert cached.sample_ids == batch.sample_ids
 
 
 def _trace(index: int, screenshot: str) -> dict[str, object]:

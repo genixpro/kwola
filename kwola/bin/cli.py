@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     _run_dir_parser(subcommands, "report", "Generate reports for a run")
     _doctor_parser(subcommands)
     _run_dir_parser(subcommands, "benchmark", "Benchmark model training for a run")
+    _run_dir_parser(subcommands, "status", "Show live pipeline throughput for a run")
     _proxy_parser(subcommands)
     return parser
 
@@ -30,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _init_parser(subcommands: Any) -> None:
     command = subcommands.add_parser("init", help="Create a fresh run")
     command.add_argument("url")
-    command.add_argument("--profile", choices=("testing", "standard"), required=True)
+    command.add_argument("--profile", choices=("testing", "standard", "rig"), default="rig")
     command.add_argument("--run-dir", type=Path, required=True)
     command.add_argument("--seed", type=int, default=0)
     command.set_defaults(handler=_handle_init)
@@ -61,7 +62,8 @@ def _train_step_parser(subcommands: Any) -> None:
 def _run_dir_parser(subcommands: Any, name: str, help_text: str) -> None:
     command = subcommands.add_parser(name, help=help_text)
     command.add_argument("run_dir", type=Path)
-    command.set_defaults(handler=_handle_report if name == "report" else _handle_benchmark)
+    handlers = {"report": _handle_report, "benchmark": _handle_benchmark, "status": _handle_status}
+    command.set_defaults(handler=handlers[name])
 
 
 def _doctor_parser(subcommands: Any) -> None:
@@ -140,6 +142,13 @@ def _handle_benchmark(arguments: argparse.Namespace) -> int:
     result = run_benchmark(arguments.run_dir)
     print(result.model_dump_json(indent=2))
     return 0 if result.passed else 1
+
+
+def _handle_status(arguments: argparse.Namespace) -> int:
+    from kwola.orchestration.status import pipeline_status
+
+    print(json.dumps(pipeline_status(arguments.run_dir), indent=2))
+    return 0
 
 
 def _handle_proxy_install_cert(arguments: argparse.Namespace) -> int:

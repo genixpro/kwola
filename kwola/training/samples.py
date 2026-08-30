@@ -1,6 +1,7 @@
 """Deterministic reconstruction of training tensors from recorded traces."""
 
 import random
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -60,6 +61,36 @@ class _PreparedSample:
     crop: Crop
 
 
+class _DecodedImageCache:
+    def __init__(self, capacity: int, downscale_ratio: float) -> None:
+        self._capacity = capacity
+        self._downscale_ratio = downscale_ratio
+        self._values: OrderedDict[tuple[str, int | None], NDArray[np.float32]] = OrderedDict()
+
+    def decode(self, path: Path, edge: int | None) -> NDArray[np.float32]:
+        key = (str(path), edge)
+        cached = self._values.get(key)
+        if cached is not None:
+            self._values.move_to_end(key)
+            return cached
+        encoded = np.frombuffer(path.read_bytes(), dtype=np.uint8)
+        decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        if decoded is None:
+            raise ValueError(f"invalid screenshot blob: {path}")
+        decoded_uint8 = cast(NDArray[np.uint8], decoded)
+        if edge is None:
+            image = process_screenshot(decoded_uint8, self._downscale_ratio)
+        else:
+            resized = cv2.resize(decoded_uint8, (edge, edge), interpolation=cv2.INTER_AREA)
+            image = cast(NDArray[np.float32], resized[:, :, 0].astype(np.float32) / 255.0)
+        if self._capacity:
+            self._values[key] = image
+            self._values.move_to_end(key)
+            while len(self._values) > self._capacity:
+                self._values.popitem(last=False)
+        return image
+
+
 class RecordedSampleAssembler:
     def __init__(
         self,
@@ -78,6 +109,8 @@ class RecordedSampleAssembler:
         crop_size: tuple[int, int] | None = None,
         next_crop_size: tuple[int, int] | None = None,
         crop_random: tuple[int, int] = (0, 0),
+        decoded_image_cache_size: int = 0,
+        freeze_records: bool = False,
         source: random.Random | None = None,
     ) -> None:
         self._run_dir = run_dir
@@ -90,10 +123,12 @@ class RecordedSampleAssembler:
         self._recent_action_history = recent_action_history
         self._recent_action_radius = recent_action_radius
         self._recent_action_decay = recent_action_decay
-        self._image_downscale_ratio = image_downscale_ratio
         self._crop_size = crop_size
         self._next_crop_size = next_crop_size
         self._crop_random = crop_random
+        self._images = _DecodedImageCache(decoded_image_cache_size, image_downscale_ratio)
+        self._freeze_records = freeze_records
+        self._trace_snapshot: list[tuple[str, dict[str, Any]]] | None = None
         self._random = source or random.Random(0)
 
     def assemble(
@@ -114,10 +149,25 @@ class RecordedSampleAssembler:
 
     def prepare_cache(self, workers: int = 0) -> int:
         traces = self._recorded_traces()
+        self._validate_screenshots(traces, workers)
+        return len(traces)
+
+    def prepare_step(self, step_id: str, workers: int = 0) -> int:
+        traces = list(self._store.scan_prefix("traces", f"{step_id}-trace-"))
+        trace_ids = tuple(key for key, _trace in traces)
+        self._cache.get_or_rebuild(step_id, partial(_cache_payload, trace_ids))
+        self._validate_screenshots(traces, workers)
+        return len(traces)
+
+    def _validate_screenshots(
+        self, traces: Sequence[tuple[str, dict[str, Any]]], workers: int
+    ) -> None:
         if workers > 0:
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 tuple(executor.map(self._validate_screenshot, (trace for _key, trace in traces)))
-        return len(traces)
+            return
+        for _key, trace in traces:
+            self._validate_screenshot(trace)
 
     def _validate_screenshot(self, trace: Mapping[str, Any]) -> None:
         path = self._run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
@@ -125,6 +175,8 @@ class RecordedSampleAssembler:
             raise ValueError(f"missing or empty screenshot blob: {path}")
 
     def _recorded_traces(self) -> list[tuple[str, dict[str, Any]]]:
+        if self._trace_snapshot is not None:
+            return self._trace_snapshot
         traces = sorted(self._store.scan("traces"), key=_trace_order)
         groups: dict[str, list[str]] = {}
         by_id = dict(traces)
@@ -140,6 +192,8 @@ class RecordedSampleAssembler:
                 self._cache.invalidate(step_id)
                 cached_ids = trace_ids
             prepared.extend((key, by_id[key]) for key in cached_ids)
+        if self._freeze_records:
+            self._trace_snapshot = prepared
         return prepared
 
     def _batch(
@@ -242,23 +296,12 @@ class RecordedSampleAssembler:
             future_symbol_weights=weights if auxiliary else None,
         )
 
-    def _decode_image(self, trace: Mapping[str, Any], edge: int | None) -> NDArray[np.float32]:
-        path = self._run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
-        encoded = np.frombuffer(path.read_bytes(), dtype=np.uint8)
-        decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-        if decoded is None:
-            raise ValueError(f"invalid screenshot blob: {path}")
-        decoded_uint8 = cast(NDArray[np.uint8], decoded)
-        if edge is not None:
-            resized = cv2.resize(decoded_uint8, (edge, edge), interpolation=cv2.INTER_AREA)
-            return cast(NDArray[np.float32], resized[:, :, 0].astype(np.float32) / 255.0)
-        return process_screenshot(decoded_uint8, self._image_downscale_ratio)
-
     def _prepare(
         self, item: tuple[str, dict[str, Any]], edge: int | None, *, current: bool
     ) -> _PreparedSample:
         key, trace = item
-        image = self._decode_image(trace, edge)
+        path = self._run_dir / str(trace.get("screenshot_before", trace["screenshot"]))
+        image = self._images.decode(path, edge)
         desired = self._crop_size if current else self._next_crop_size
         if edge is not None:
             desired = (edge, edge)

@@ -4,6 +4,7 @@ import random
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 from kwola.agent import InferencePolicy, action_catalog
 from kwola.browser import (
@@ -19,12 +20,8 @@ from kwola.browser.screenshots import ScreenshotService
 from kwola.config import load_config
 from kwola.config.models import ViewportConfig
 from kwola.domain.actions import BrowserKind
-from kwola.hooks import (
-    HookRegistry,
-    LifecycleEvent,
-    LifecycleEventName,
-    testing_core_hooks,
-)
+from kwola.domain.observations import Observation
+from kwola.hooks import HookRegistry, LifecycleEventName, testing_core_hooks
 from kwola.instrumentation import (
     BranchTraceCollector,
     InstrumentationAddon,
@@ -35,6 +32,7 @@ from kwola.instrumentation import (
 from kwola.storage import AtomicBlobStore, LmdbRunStore
 from kwola.training.samples import RecordedSampleAssembler
 
+from .lifecycle import RunnerLifecycle
 from .results import RunnerResult
 from .trace_recorder import NoveltyState, TraceRecorder
 
@@ -50,6 +48,7 @@ class TestingRunner:
         self._clock = clock
         self._config = load_config(run_dir)
         self._hooks = hooks or HookRegistry(testing_core_hooks(run_dir, self._config))
+        self._lifecycle = RunnerLifecycle(self._hooks, run_dir.name, clock)
 
     def run(
         self,
@@ -57,24 +56,31 @@ class TestingRunner:
         random_policy: bool = False,
         browser: BrowserKind | None = None,
         viewport: tuple[int, int] | None = None,
+        environment_index: int = 0,
     ) -> RunnerResult:
         started = self._clock()
-        self._dispatch(LifecycleEventName.RUN_STARTED)
+        result: RunnerResult
+        primary_error: BaseException | None = None
         try:
+            self._dispatch(LifecycleEventName.RUN_STARTED)
             browser_kind = browser or self._config.browser.enabled[0]
             if browser_kind not in self._config.browser.enabled:
                 raise ValueError(f"browser {browser_kind} is not enabled for this run")
             with self._store() as store:
-                return self._run_step(
+                result = self._run_step(
                     store,
                     started,
                     browser_kind,
                     self._viewport(viewport),
                     random_policy,
+                    environment_index,
                 )
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            self._dispatch(LifecycleEventName.RUN_FINISHED)
-            self._hooks.close()
+            self._lifecycle.finish(primary_error)
+        return result.model_copy(update={"warnings": self._lifecycle.warnings})
 
     def _run_step(
         self,
@@ -83,61 +89,26 @@ class TestingRunner:
         browser_kind: BrowserKind,
         viewport: ViewportConfig,
         random_policy: bool,
+        environment_index: int,
     ) -> RunnerResult:
-        step_index = self._step_index(store)
+        step_index = _reserve_step_index(store)
         step_id = f"testing-{step_index:08d}"
         session = self._session(browser_kind, viewport, store)
         artifacts: list[str] = []
+        primary_error: BaseException | None = None
         try:
             observation = session.start(str(self._config.target))
             self._dispatch(LifecycleEventName.SESSION_STARTED, step_id)
-            policy = InferencePolicy(
-                self._run_dir,
-                self._config,
-                random.Random(self._config.seed + step_index),
+            rewards = self._actions(
+                session,
+                store,
+                step_id,
+                step_index,
+                observation,
+                artifacts,
+                random_policy,
+                environment_index,
             )
-            recorder = TraceRecorder(self._run_dir, self._config, store, artifacts)
-            novelty = NoveltyState.initial(observation)
-            rewards = []
-            for trace_index in range(self._config.policy.testing_sequence_length):
-                action = policy.select(
-                    observation,
-                    action_index=trace_index,
-                    test_step_index=step_index,
-                    force_random=random_policy,
-                )
-                trace_id = f"{step_id}-trace-{trace_index:04d}"
-                self._dispatch(LifecycleEventName.BEFORE_ACTION, trace_id)
-                before = observation
-                cursor = session.cursor_at(action.x, action.y)
-                before_html = self._html(session)
-                observation = session.execute(action)
-                after_html = self._html(session)
-                self._dispatch(
-                    LifecycleEventName.AFTER_ACTION,
-                    trace_id,
-                    (
-                        ("store", store),
-                        ("console_messages", len(observation.console_messages)),
-                        ("network_symbols", len(observation.network_symbols)),
-                    ),
-                )
-                reward = recorder.record(
-                    step_id,
-                    trace_index,
-                    action,
-                    before,
-                    observation,
-                    novelty,
-                    cursor,
-                    (before_html, after_html),
-                )
-                self._dispatch(
-                    LifecycleEventName.TRACE_RECORDED,
-                    trace_id,
-                    (("store", store), ("reward", reward)),
-                )
-                rewards.append(reward)
             self._complete_step(store, step_id, browser_kind, rewards, random_policy)
             return RunnerResult(
                 status="completed",
@@ -146,16 +117,84 @@ class TestingRunner:
                 artifacts=tuple(artifacts),
                 metrics={"traces": len(rewards), "reward": sum(rewards)},
             )
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            session.close()
-            self._dispatch(
+            try:
+                session.close()
+            except Exception:
+                if primary_error is None:
+                    raise
+            self._lifecycle.dispatch_preserving(
                 LifecycleEventName.SESSION_FINISHED,
+                primary_error,
                 step_id,
                 (
                     ("store", store),
-                    ("prepare_samples", lambda: self._prepare_samples(store)),
+                    ("prepare_samples", lambda: self._prepare_samples(store, step_id)),
                 ),
             )
+
+    def _actions(
+        self,
+        session: BrowserSessionCoordinator,
+        store: LmdbRunStore,
+        step_id: str,
+        step_index: int,
+        observation: Observation,
+        artifacts: list[str],
+        random_policy: bool,
+        environment_index: int,
+    ) -> list[float]:
+        policy = InferencePolicy(
+            self._run_dir,
+            self._config,
+            random.Random(self._config.seed + step_index + environment_index * 1_000_003),
+        )
+        recorder = TraceRecorder(self._run_dir, self._config, store, artifacts)
+        novelty = NoveltyState.initial(observation)
+        rewards = []
+        for trace_index in range(self._config.policy.testing_sequence_length):
+            action = policy.select(
+                observation,
+                action_index=trace_index,
+                test_step_index=step_index,
+                force_random=random_policy,
+            )
+            trace_id = f"{step_id}-trace-{trace_index:04d}"
+            self._dispatch(LifecycleEventName.BEFORE_ACTION, trace_id)
+            before = observation
+            cursor = session.cursor_at(action.x, action.y)
+            before_html = self._html(session)
+            observation = session.execute(action)
+            after_html = self._html(session)
+            self._dispatch(
+                LifecycleEventName.AFTER_ACTION,
+                trace_id,
+                (
+                    ("store", store),
+                    ("console_messages", len(observation.console_messages)),
+                    ("network_symbols", len(observation.network_symbols)),
+                ),
+            )
+            reward = recorder.record(
+                step_id,
+                trace_index,
+                action,
+                before,
+                observation,
+                novelty,
+                cursor,
+                (before_html, after_html),
+            )
+            self._dispatch(
+                LifecycleEventName.TRACE_RECORDED,
+                trace_id,
+                (("store", store), ("reward", reward)),
+            )
+            rewards.append(reward)
+        return rewards
 
     def _session(
         self,
@@ -165,7 +204,9 @@ class TestingRunner:
     ) -> BrowserSessionCoordinator:
         telemetry = TelemetryBuffer()
         navigation = NavigationPolicy(
-            str(self._config.target), self._config.browser.prevent_offsite_navigation
+            str(self._config.target),
+            self._config.browser.prevent_offsite_navigation,
+            tuple(str(origin) for origin in self._config.browser.allowed_navigation_origins),
         )
         extractor = ActionMapExtractor(navigation)
         executor = ActionExecutor()
@@ -179,6 +220,7 @@ class TestingRunner:
             browser,
             viewport,
             telemetry,
+            navigation,
             proxy.server if proxy else None,
             capture_console=self._config.instrumentation.capture_console,
             capture_network=self._config.instrumentation.capture_network,
@@ -228,7 +270,7 @@ class TestingRunner:
             compression_level=self._config.storage.codec_compression_level,
         )
 
-    def _prepare_samples(self, store: LmdbRunStore) -> None:
+    def _prepare_samples(self, store: LmdbRunStore, step_id: str) -> None:
         config = self._config
         assembler = RecordedSampleAssembler(
             self._run_dir,
@@ -245,8 +287,9 @@ class TestingRunner:
             crop_size=(config.training.crop_width, config.training.crop_height),
             next_crop_size=(config.training.next_crop_width, config.training.next_crop_height),
             crop_random=(config.training.crop_random_x, config.training.crop_random_y),
+            decoded_image_cache_size=config.training.decoded_image_cache_size,
         )
-        assembler.prepare_cache(config.training.sample_cache_workers)
+        assembler.prepare_step(step_id, config.training.sample_cache_workers)
 
     def _viewport(self, override: tuple[int, int] | None) -> ViewportConfig:
         if override is None:
@@ -259,20 +302,7 @@ class TestingRunner:
         subject_id: str | None = None,
         payload: tuple[tuple[str, object], ...] = (),
     ) -> None:
-        self._hooks.dispatch(
-            LifecycleEvent(
-                name=name,
-                occurred_at=self._clock(),
-                run_id=self._run_dir.name,
-                subject_id=subject_id,
-                payload=payload,
-            )
-        )
-
-    @staticmethod
-    def _step_index(store: LmdbRunStore) -> int:
-        state = store.get("run", "state") or {}
-        return int(state.get("testing_steps", 0))
+        self._lifecycle.dispatch(name, subject_id, payload)
 
     @staticmethod
     def _complete_step(
@@ -282,9 +312,15 @@ class TestingRunner:
         rewards: list[float],
         random_policy: bool,
     ) -> None:
-        state = store.get("run", "state") or {}
-        state["testing_steps"] = int(state.get("testing_steps", 0)) + 1
-        store.put("run", "state", state)
+        def complete(current: dict[str, Any] | None) -> dict[str, Any]:
+            state = dict(current or {})
+            completed = int(step_id.rsplit("-", maxsplit=1)[1]) + 1
+            state["testing_steps"] = max(
+                int(cast(int | str, state.get("testing_steps", 0))), completed
+            )
+            return state
+
+        store.update("run", "state", complete)
         store.put(
             "testing_steps",
             step_id,
@@ -295,3 +331,14 @@ class TestingRunner:
                 "reward": sum(rewards),
             },
         )
+
+
+def _reserve_step_index(store: LmdbRunStore) -> int:
+    def reserve(current: dict[str, Any] | None) -> dict[str, Any]:
+        state = dict(current or {})
+        index = int(cast(int | str, state.get("next_testing_step", state.get("testing_steps", 0))))
+        state["next_testing_step"] = index + 1
+        return state
+
+    state = store.update("run", "state", reserve)
+    return int(state["next_testing_step"]) - 1

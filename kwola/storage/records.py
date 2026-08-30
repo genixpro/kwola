@@ -1,6 +1,6 @@
 """LMDB-backed indexed records."""
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Self
 
@@ -77,6 +77,28 @@ class LmdbRunStore:
         except CodecError as error:
             raise RecordCorruptionError(f"corrupt {collection} record {key}: {error}") from error
 
+    def update(
+        self,
+        collection: str,
+        key: str,
+        transform: Callable[[dict[str, Any] | None], Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Atomically read, transform, and replace one record across processes."""
+        if self._readonly:
+            raise PermissionError("run store is read-only")
+        encoded_key = self._key(collection, key)
+        try:
+            with self._environment.begin(write=True) as transaction:
+                payload = transaction.get(encoded_key)
+                current = self._codec.decode(bytes(payload)) if payload is not None else None
+                updated = dict(transform(current))
+                transaction.put(encoded_key, self._codec.encode(updated), overwrite=True)
+                return updated
+        except lmdb.MapFullError as error:
+            raise StorageFullError("run database has exhausted its configured map size") from error
+        except CodecError as error:
+            raise RecordCorruptionError(f"corrupt {collection} record {key}: {error}") from error
+
     def delete(self, collection: str, key: str) -> bool:
         if self._readonly:
             raise PermissionError("run store is read-only")
@@ -84,7 +106,13 @@ class LmdbRunStore:
             return bool(transaction.delete(self._key(collection, key)))
 
     def scan(self, collection: str) -> Iterator[tuple[str, dict[str, Any]]]:
-        prefix = self._prefix(collection)
+        yield from self.scan_prefix(collection, "")
+
+    def scan_prefix(self, collection: str, key_prefix: str) -> Iterator[tuple[str, dict[str, Any]]]:
+        collection_prefix = self._prefix(collection)
+        if "\0" in key_prefix:
+            raise ValueError("invalid record key prefix")
+        prefix = collection_prefix + key_prefix.encode("utf-8")
         with self._environment.begin() as transaction:
             cursor = transaction.cursor()
             if not cursor.set_range(prefix):
@@ -92,7 +120,7 @@ class LmdbRunStore:
             for raw_key, payload in cursor:
                 if not raw_key.startswith(prefix):
                     break
-                key = raw_key[len(prefix) :].decode("utf-8")
+                key = raw_key[len(collection_prefix) :].decode("utf-8")
                 try:
                     yield key, self._codec.decode(bytes(payload))
                 except CodecError as error:

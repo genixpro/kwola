@@ -1,0 +1,37 @@
+[
+  {
+    "advisory_id": "PYSEC-2026-3552",
+    "package": "cryptography",
+    "rationale": "mitmproxy 12.2.3 constrains cryptography below the first fixed release",
+    "owner": "Kwola maintainers",
+    "expires": "2026-09-30"
+  },
+  {
+    "advisory_id": "PYSEC-2026-3553",
+    "package": "cryptography",
+    "rationale": "mitmproxy 12.2.3 constrains cryptography below the first fixed release",
+    "owner": "Kwola maintainers",
+    "expires": "2026-09-30"
+  },
+  {
+    "advisory_id": "PYSEC-2026-3625",
+    "package": "msgpack",
+    "rationale": "mitmproxy 12.2.3 constrains msgpack below the first fixed release",
+    "owner": "Kwola maintainers",
+    "expires": "2026-09-30"
+  },
+  {
+    "advisory_id": "PYSEC-2026-3387",
+    "package": "tornado",
+    "rationale": "mitmproxy 12.2.3 constrains tornado below the first fixed release",
+    "owner": "Kwola maintainers",
+    "expires": "2026-09-30"
+  },
+  {
+    "advisory_id": "PYSEC-2026-3389",
+    "package": "tornado",
+    "rationale": "mitmproxy 12.2.3 constrains tornado below the first fixed release",
+    "owner": "Kwola maintainers",
+    "expires": "2026-09-30"
+  }
+]

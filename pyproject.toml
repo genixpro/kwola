@@ -4,26 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kwola"
-version = "1.0.0"
+version = "1.1.0"
 description = "AI powered software testing"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "playwright==1.62.0",
-  "torch==2.7.0+cu126 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-  "torch==2.7.0 ; sys_platform != 'linux' or platform_machine != 'x86_64'",
-  "mitmproxy==11.0.2", "numpy==2.2.3", "opencv-python==4.11.0.86", "matplotlib==3.10.1",
-  "lmdb>=1.6,<2", "msgpack>=1.1,<2", "pydantic>=2.11,<3", "zstandard>=0.23,<1",
+  "torch==2.13.0",
+  "mitmproxy==12.2.3", "numpy==2.5.2", "opencv-python==5.0.0.93", "matplotlib==3.11.1",
+  "lmdb==1.8.1", "msgpack==1.1.2", "pydantic==2.11.10", "zstandard==0.25.0",
 ]
 
 [dependency-groups]
 dev = [
-  "coverage[toml]>=7.8,<8",
-  "mypy>=1.15,<2",
-  "pytest>=8.3,<9",
-  "pytest-cov>=6.1,<7",
-  "ruff>=0.11,<1",
+  "coverage[toml]==7.16.0",
+  "mypy==1.20.2",
+  "pip-audit==2.10.1",
+  "pytest==9.0.3",
+  "pytest-cov==7.0.0",
+  "ruff==0.16.5",
 ]
 
 [project.scripts]
@@ -42,32 +42,9 @@ testpaths = ["tests"]
 [tool.coverage.run]
 branch = true
 source = ["kwola"]
-omit = [
-  "kwola/bin/*",
-  "kwola/browser/adapter.py",
-  "kwola/browser/autologin.py",
-  "kwola/browser/executor.py",
-  "kwola/browser/network.py",
-  "kwola/browser/screenshots.py",
-  "kwola/browser/session.py",
-  "kwola/domain/protocols.py",
-  "kwola/instrumentation/addon.py",
-  "kwola/instrumentation/certificates.py",
-  "kwola/instrumentation/proxy.py",
-  "kwola/orchestration/doctor.py",
-  "kwola/orchestration/experiment.py",
-  "kwola/orchestration/results.py",
-  "kwola/orchestration/testing.py",
-  "kwola/orchestration/training.py",
-  "kwola/reporting/*",
-  "kwola/training/benchmark.py",
-  "kwola/training/ddp.py",
-  "kwola/training/distributed.py",
-  "kwola/training/distributed_diagnostic.py",
-]
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 70
 show_missing = true
 
 [tool.ruff]
@@ -82,14 +59,3 @@ mccabe.max-complexity = 10
 python_version = "3.12"
 strict = true
 packages = ["kwola"]
-
-[tool.uv]
-index-url = "https://pypi.org/simple"
-
-[[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]

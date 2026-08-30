@@ -28,6 +28,7 @@ def test_kros_action_executor_contract(browser: BrowserKind) -> None:
         browser,
         ViewportConfig(width=1024, height=768),
         TelemetryBuffer(),
+        NavigationPolicy(target, prevent_offsite=True),
     )
     extractor = ActionMapExtractor(NavigationPolicy(target, prevent_offsite=True))
     executor = ActionExecutor()

@@ -8,6 +8,8 @@ from kwola.hooks import (
     LifecycleEvent,
     LifecycleEventName,
 )
+from kwola.orchestration.lifecycle import RunnerLifecycle
+from kwola.orchestration.results import RunnerResult
 
 
 @dataclass
@@ -17,6 +19,7 @@ class RecordingHook:
     fatal: bool
     output: list[str]
     fails: bool = False
+    close_fails: bool = False
     events: frozenset[LifecycleEventName] = field(
         default_factory=lambda: frozenset({LifecycleEventName.RUN_STARTED})
     )
@@ -28,6 +31,8 @@ class RecordingHook:
 
     def close(self) -> None:
         self.output.append(f"close:{self.name}")
+        if self.close_fails:
+            raise RuntimeError("close broken")
 
 
 def event() -> LifecycleEvent:
@@ -84,3 +89,53 @@ def test_duplicate_hook_names_are_rejected() -> None:
                 RecordingHook("same", 2, True, []),
             )
         )
+
+
+def test_runner_warnings_are_serialized_logged_and_closed_in_reverse(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    output: list[str] = []
+    registry = HookRegistry(
+        (
+            RecordingHook("first", 1, False, output, fails=True),
+            RecordingHook("second", 2, False, output, close_fails=True),
+        )
+    )
+    lifecycle = RunnerLifecycle(registry, "run-1", lambda: 1.0)
+
+    lifecycle.dispatch(LifecycleEventName.RUN_STARTED)
+    lifecycle.finish(None)
+    result = RunnerResult(
+        status="completed",
+        step_id="step-1",
+        duration_seconds=1,
+        warnings=lifecycle.warnings,
+    )
+
+    payload = result.model_dump(mode="json")
+    assert [warning["hook"] for warning in payload["warnings"]] == ["first", "second"]
+    assert payload["warnings"][0]["event"] == "run_started"
+    assert payload["warnings"][1]["event"] == "shutdown"
+    assert output[-2:] == ["close:second", "close:first"]
+    assert "runner hook first failed" in caplog.text
+
+
+def test_cleanup_hook_failure_does_not_hide_primary_exception() -> None:
+    registry = HookRegistry(
+        (
+            RecordingHook(
+                "finish",
+                1,
+                True,
+                [],
+                fails=True,
+                events=frozenset({LifecycleEventName.RUN_FINISHED}),
+            ),
+        )
+    )
+    lifecycle = RunnerLifecycle(registry, "run-1", lambda: 1.0)
+    primary = ValueError("primary")
+
+    lifecycle.finish(primary)
+
+    assert lifecycle.warnings[0].hook == "finish"

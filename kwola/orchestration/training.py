@@ -4,21 +4,25 @@ import copy
 import random
 import time
 from pathlib import Path
+from typing import Any
 
 import torch
 
 from kwola.agent import TraceNet, action_catalog
 from kwola.config import load_config
-from kwola.hooks import (
-    HookRegistry,
-    LifecycleEvent,
-    LifecycleEventName,
-    training_core_hooks,
+from kwola.hooks import HookRegistry, LifecycleEventName, training_core_hooks
+from kwola.storage import (
+    CheckpointMetadata,
+    CheckpointPublisher,
+    LmdbRunStore,
+    RunManifest,
+    load_manifest,
+    verify_checkpoint,
 )
-from kwola.storage import CheckpointPublisher, LmdbRunStore, RunManifest, load_manifest
 from kwola.training.optimizer import ModelOptimizer, OptimizerMetrics
 from kwola.training.samples import RecordedSampleAssembler, TrainingBatch
 
+from .lifecycle import RunnerLifecycle
 from .results import RunnerResult
 
 
@@ -27,10 +31,13 @@ class TrainingRunner:
         self._run_dir = run_dir
         self._config = load_config(run_dir)
         self._hooks = hooks or HookRegistry(training_core_hooks(run_dir, self._config))
+        self._lifecycle = RunnerLifecycle(self._hooks, run_dir.name, time.time)
 
     def run(self, gpu: int | None = None) -> RunnerResult:
-        self._dispatch(LifecycleEventName.RUN_STARTED)
+        result: RunnerResult
+        primary_error: BaseException | None = None
         try:
+            self._dispatch(LifecycleEventName.RUN_STARTED)
             if gpu is None and self._config.training.world_size > 1:
                 from kwola.training.distributed import run_distributed_training
 
@@ -42,10 +49,12 @@ class TrainingRunner:
                 result.step_id,
                 tuple(result.metrics.items()),
             )
-            return result
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
-            self._dispatch(LifecycleEventName.RUN_FINISHED)
-            self._hooks.close()
+            self._lifecycle.finish(primary_error)
+        return result.model_copy(update={"warnings": self._lifecycle.warnings})
 
     def _run_single(self, gpu: int | None) -> RunnerResult:
         started = time.perf_counter()
@@ -63,8 +72,7 @@ class TrainingRunner:
         ).to(device)
         optimizer = ModelOptimizer(model, self._config.training)
         manifest = load_manifest(self._run_dir)
-        checkpoint_file = manifest.checkpoint.file if manifest.checkpoint else None
-        self._load_checkpoint(model, optimizer, checkpoint_file)
+        self._load_checkpoint(model, optimizer, manifest.checkpoint)
         target_model = copy.deepcopy(model).to(device).eval()
         metrics = self._iterations(
             optimizer, model, target_model, device, training_index, iteration_count
@@ -155,6 +163,7 @@ class TrainingRunner:
                 self._config.training.crop_random_x,
                 self._config.training.crop_random_y,
             ),
+            decoded_image_cache_size=self._config.training.decoded_image_cache_size,
             source=random.Random(self._config.seed),
         )
 
@@ -182,12 +191,13 @@ class TrainingRunner:
         return checkpoint
 
     def _load_checkpoint(
-        self, model: TraceNet, optimizer: ModelOptimizer, relative_path: str | None
+        self, model: TraceNet, optimizer: ModelOptimizer, metadata: CheckpointMetadata | None
     ) -> None:
-        if relative_path is None:
+        if metadata is None:
             return
         device = next(model.parameters()).device
-        payload = torch.load(self._run_dir / relative_path, map_location=device)
+        checkpoint = verify_checkpoint(self._run_dir, metadata)
+        payload = torch.load(checkpoint, map_location=device, weights_only=True)
         model.load_state_dict(payload["model"])
         optimizer.optimizer.load_state_dict(payload["optimizer"])
 
@@ -207,10 +217,14 @@ class TrainingRunner:
 
     def _record(self, step_id: str, loss: float, duration: float, iterations: int) -> None:
         with self._store() as store:
-            state = store.get("run", "state") or {}
-            state["training_steps"] = int(state.get("training_steps", 0)) + 1
-            state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
-            store.put("run", "state", state)
+
+            def complete(current: dict[str, Any] | None) -> dict[str, Any]:
+                state = dict(current or {})
+                state["training_steps"] = int(state.get("training_steps", 0)) + 1
+                state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
+                return state
+
+            store.update("run", "state", complete)
             store.put(
                 "training_steps",
                 step_id,
@@ -235,12 +249,4 @@ class TrainingRunner:
         subject_id: str | None = None,
         payload: tuple[tuple[str, object], ...] = (),
     ) -> None:
-        self._hooks.dispatch(
-            LifecycleEvent(
-                name=name,
-                occurred_at=time.time(),
-                run_id=self._run_dir.name,
-                subject_id=subject_id,
-                payload=payload,
-            )
-        )
+        self._lifecycle.dispatch(name, subject_id, payload)

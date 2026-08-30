@@ -17,12 +17,20 @@ from torch.nn.parallel import DistributedDataParallel
 from kwola.agent import TraceNet, action_catalog
 from kwola.config import load_config
 from kwola.orchestration.results import RunnerResult
-from kwola.storage import CheckpointPublisher, LmdbRunStore, load_manifest
+from kwola.storage import (
+    CheckpointMetadata,
+    CheckpointPublisher,
+    LmdbRunStore,
+    load_manifest,
+    verify_checkpoint,
+)
 
+from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
 from .optimizer import ModelOptimizer, OptimizerMetrics
 from .samples import RecordedSampleAssembler, TrainingBatch
 from .spool import batch_to_device, share_batch
+from .telemetry import record_training_progress
 
 
 def run_distributed_training(run_dir: Path) -> RunnerResult:
@@ -56,10 +64,8 @@ def run_distributed_training(run_dir: Path) -> RunnerResult:
 
 
 def _prepare_cache(run_dir: Path) -> None:
-    with _store(run_dir) as store:
-        assembler = _assembler(run_dir, store)
-        config = load_config(run_dir)
-        if assembler.prepare_cache(config.training.sample_cache_workers) == 0:
+    with _store(run_dir, readonly=True) as store:
+        if not any(True for _ in store.scan("traces")):
             raise RuntimeError("training requires at least one recorded browser trace")
 
 
@@ -89,11 +95,17 @@ def _training_rank(
     shared_batches: tuple[TrainingBatch, ...],
 ) -> None:
     started = time.perf_counter()
+    config = load_config(run_dir)
+    if config.training.cpu_threads_per_rank:
+        import cv2
+
+        torch.set_num_threads(config.training.cpu_threads_per_rank)
+        cv2.setNumThreads(config.training.cpu_threads_per_rank)
     settings = DistributedSettings(rank, world_size, devices[rank], init_method)
     with DistributedCoordinator(settings) as coordinator:
         initial = shared_batches[rank] if shared_batches else None
-        metrics, model, optimizer, step_index, iterations = _rank_step(
-            run_dir, coordinator, initial
+        metrics, model, optimizer, step_index, iterations, assembly_seconds, transfer_seconds = (
+            _rank_step(run_dir, coordinator, initial)
         )
         loss = torch.tensor([metrics.loss], device=coordinator.device)
         distributed.all_reduce(loss, op=distributed.ReduceOp.SUM)
@@ -108,6 +120,8 @@ def _training_rank(
                 float(loss.item() / world_size),
                 time.perf_counter() - started,
                 iterations,
+                assembly_seconds,
+                transfer_seconds,
             )
             results.put(result.model_dump_json())
 
@@ -116,7 +130,7 @@ def _rank_step(
     run_dir: Path,
     coordinator: DistributedCoordinator,
     initial_batch: TrainingBatch | None = None,
-) -> tuple[OptimizerMetrics, TraceNet, ModelOptimizer, int, int]:
+) -> tuple[OptimizerMetrics, TraceNet, ModelOptimizer, int, int, float, float]:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
     with _store(run_dir, readonly=True) as store:
@@ -129,8 +143,7 @@ def _rank_step(
     model = TraceNet(config.model, num_actions=len(action_catalog(config.policy))).to(
         coordinator.device
     )
-    checkpoint = manifest.checkpoint.file if manifest.checkpoint else None
-    payload = _load_model(run_dir, checkpoint, model, coordinator.device)
+    payload = _load_model(run_dir, manifest.checkpoint, model, coordinator.device)
     target = copy.deepcopy(model).to(coordinator.device).eval()
     parallel = DistributedDataParallel(
         model,
@@ -140,7 +153,7 @@ def _rank_step(
     optimizer = ModelOptimizer(parallel, config.training)
     if payload is not None:
         optimizer.optimizer.load_state_dict(payload["optimizer"])
-    metrics = _rank_iterations(
+    metrics, assembly_seconds, transfer_seconds = _rank_iterations(
         run_dir,
         coordinator,
         model,
@@ -150,7 +163,15 @@ def _rank_step(
         iteration_count,
         initial_batch,
     )
-    return metrics, model, optimizer, step_index, iteration_count
+    return (
+        metrics,
+        model,
+        optimizer,
+        step_index,
+        iteration_count,
+        assembly_seconds,
+        transfer_seconds,
+    )
 
 
 def _rank_iterations(
@@ -162,49 +183,99 @@ def _rank_iterations(
     training_index: int,
     iteration_count: int,
     initial_batch: TrainingBatch | None,
-) -> OptimizerMetrics:
+) -> tuple[OptimizerMetrics, float, float]:
     config = load_config(run_dir)
     results = []
     count = iteration_count
-    for iteration in range(count):
-        batch = (
-            batch_to_device(initial_batch, coordinator.device)
-            if iteration == 0 and initial_batch is not None
-            else _rank_batch(run_dir, coordinator, iteration)
+    assembly_seconds = 0.0
+    transfer_seconds = 0.0
+    loop_started = time.perf_counter()
+    with _store(run_dir, readonly=True) as store:
+        assembler = _assembler(run_dir, store)
+        batch_stream = batches(
+            assembler,
+            coordinator,
+            count,
+            initial_batch,
+            config.training.batch_size,
+            config.training.world_size,
+            config.policy.rewards.impossible_action,
+            config.training.batch_prefetch,
         )
-        index = training_index + iteration
-        results.append(
-            optimizer.step_training(
+        for iteration, (cpu_batch, assembly_duration) in enumerate(batch_stream):
+            assembly_seconds += assembly_duration
+            transfer_started = time.perf_counter()
+            batch = batch_to_device(cpu_batch, coordinator.device)
+            transfer_seconds += time.perf_counter() - transfer_started
+            index = training_index + iteration
+            iteration_metrics = optimizer.step_training(
                 batch,
                 target,
                 index,
                 config.policy.rewards.discount_rate,
                 config.policy.rewards.max_discounted_reward,
             )
-        )
-        if (index + 1) % config.training.target_network_update_every == 0:
-            target.load_state_dict(model.state_dict())
+            results.append(iteration_metrics)
+            if coordinator.is_publisher and (
+                (iteration + 1) % config.training.telemetry_every_iterations == 0
+                or iteration + 1 == count
+            ):
+                _record_progress(
+                    run_dir,
+                    coordinator,
+                    training_index,
+                    iteration,
+                    count,
+                    results,
+                    assembly_seconds,
+                    transfer_seconds,
+                    loop_started,
+                )
+            if (index + 1) % config.training.target_network_update_every == 0:
+                target.load_state_dict(model.state_dict())
     duration = sum(result.duration_seconds for result in results)
     samples = count * config.training.batch_size
-    return OptimizerMetrics(
-        sum(result.loss for result in results) / count,
-        duration,
-        samples / duration,
+    return (
+        OptimizerMetrics(
+            sum(result.loss for result in results) / count,
+            duration,
+            samples / duration,
+        ),
+        assembly_seconds,
+        transfer_seconds,
     )
 
 
-def _rank_batch(
-    run_dir: Path, coordinator: DistributedCoordinator, iteration: int
-) -> TrainingBatch:
+def _record_progress(
+    run_dir: Path,
+    coordinator: DistributedCoordinator,
+    training_index: int,
+    iteration: int,
+    count: int,
+    results: list[OptimizerMetrics],
+    assembly_seconds: float,
+    transfer_seconds: float,
+    loop_started: float,
+) -> None:
     config = load_config(run_dir)
-    with _store(run_dir, readonly=True) as store:
-        return _assembler(run_dir, store).assemble(
-            batch_size=config.training.batch_size,
-            device=coordinator.device,
-            impossible_reward=config.policy.rewards.impossible_action,
-            offset=(coordinator.settings.rank + iteration * config.training.world_size)
-            * config.training.batch_size,
-        )
+    completed = iteration + 1
+    elapsed = time.perf_counter() - loop_started
+    global_samples = completed * config.training.batch_size * config.training.world_size
+    record_training_progress(
+        run_dir,
+        event="training_progress",
+        rank=coordinator.settings.rank,
+        training_iteration=training_index + completed,
+        step_iterations_completed=completed,
+        step_iterations_total=count,
+        end_to_end_seconds=elapsed,
+        optimizer_seconds=sum(item.duration_seconds for item in results),
+        assembly_seconds=assembly_seconds,
+        transfer_seconds=transfer_seconds,
+        end_to_end_samples_per_second=global_samples / elapsed,
+        gpu_memory_allocated_bytes=torch.cuda.memory_allocated(coordinator.device),
+        gpu_memory_reserved_bytes=torch.cuda.memory_reserved(coordinator.device),
+    )
 
 
 def _publish_result(
@@ -216,11 +287,14 @@ def _publish_result(
     mean_loss: float,
     duration: float,
     iterations: int,
+    assembly_seconds: float,
+    transfer_seconds: float,
 ) -> RunnerResult:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
     publisher = CheckpointPublisher(run_dir, config.storage.checkpoints_directory)
     published = None
+    checkpoint_started = time.perf_counter()
     if (step_index + 1) % config.training.checkpoint_every_iterations == 0:
         published = publisher.publish(
             rank=0,
@@ -232,13 +306,19 @@ def _publish_result(
             manifest=manifest,
             now=time.time(),
         )
+    checkpoint_seconds = time.perf_counter() - checkpoint_started
     _record_step(
         run_dir,
         step_index,
         mean_loss,
-        metrics.duration_seconds,
+        metrics,
         iterations,
+        duration,
+        assembly_seconds,
+        transfer_seconds,
+        checkpoint_seconds,
     )
+    global_samples = iterations * config.training.batch_size * config.training.world_size
     return RunnerResult(
         status="completed",
         step_id=f"training-{step_index:08d}",
@@ -246,37 +326,71 @@ def _publish_result(
         artifacts=(str(published[0].relative_to(run_dir)),) if published else (),
         metrics={
             "loss": mean_loss,
+            "iterations": iterations,
             "optimizer_seconds": metrics.duration_seconds,
             "samples_per_second": metrics.samples_per_second * config.training.world_size,
+            "end_to_end_samples_per_second": global_samples / duration,
+            "assembly_seconds": assembly_seconds,
+            "transfer_seconds": transfer_seconds,
+            "checkpoint_seconds": checkpoint_seconds,
         },
     )
 
 
 def _load_model(
     run_dir: Path,
-    checkpoint: str | None,
+    checkpoint: CheckpointMetadata | None,
     model: TraceNet,
     device: torch.device,
 ) -> dict[str, Any] | None:
     if checkpoint is None:
         return None
-    payload: dict[str, Any] = torch.load(run_dir / checkpoint, map_location=device)
+    path = verify_checkpoint(run_dir, checkpoint)
+    payload: dict[str, Any] = torch.load(path, map_location=device, weights_only=True)
     model.load_state_dict(payload["model"])
     return payload
 
 
-def _record_step(run_dir: Path, index: int, loss: float, duration: float, iterations: int) -> None:
+def _record_step(
+    run_dir: Path,
+    index: int,
+    loss: float,
+    metrics: OptimizerMetrics,
+    iterations: int,
+    end_to_end_seconds: float,
+    assembly_seconds: float,
+    transfer_seconds: float,
+    checkpoint_seconds: float,
+) -> None:
+    config = load_config(run_dir)
     with _store(run_dir) as store:
-        state = store.get("run", "state") or {}
-        state["training_steps"] = index + 1
-        state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
-        store.put("run", "state", state)
+
+        def complete(current: dict[str, Any] | None) -> dict[str, Any]:
+            state = dict(current or {})
+            state["training_steps"] = index + 1
+            state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
+            return state
+
+        store.update("run", "state", complete)
         store.put(
             "training_steps",
             f"training-{index:08d}",
             {
                 "loss": loss,
-                "optimizer_seconds": duration,
+                "optimizer_seconds": metrics.duration_seconds,
+                "optimizer_samples_per_second": (
+                    metrics.samples_per_second * config.training.world_size
+                ),
+                "end_to_end_samples_per_second": (
+                    iterations
+                    * config.training.batch_size
+                    * config.training.world_size
+                    / end_to_end_seconds
+                ),
+                "end_to_end_seconds": end_to_end_seconds,
+                "assembly_seconds": assembly_seconds,
+                "transfer_seconds": transfer_seconds,
+                "checkpoint_seconds": checkpoint_seconds,
                 "iterations": iterations,
                 "status": "completed",
                 "ranks": 2,
@@ -301,6 +415,8 @@ def _assembler(run_dir: Path, store: LmdbRunStore) -> RecordedSampleAssembler:
         crop_size=(config.training.crop_width, config.training.crop_height),
         next_crop_size=(config.training.next_crop_width, config.training.next_crop_height),
         crop_random=(config.training.crop_random_x, config.training.crop_random_y),
+        decoded_image_cache_size=config.training.decoded_image_cache_size,
+        freeze_records=True,
         source=random.Random(config.seed),
     )
 

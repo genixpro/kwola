@@ -1,6 +1,7 @@
 """Rank-zero atomic checkpoint publication."""
 
 import hashlib
+import hmac
 import os
 import tempfile
 from collections.abc import Callable
@@ -10,6 +11,30 @@ from typing import BinaryIO, TypeVar
 from .manifest import CheckpointMetadata, RunManifest, save_manifest
 
 T = TypeVar("T")
+
+
+class CheckpointIntegrityError(RuntimeError):
+    pass
+
+
+def verify_checkpoint(run_dir: Path, metadata: CheckpointMetadata) -> Path:
+    root = run_dir.resolve()
+    try:
+        checkpoint = (root / metadata.file).resolve(strict=True)
+    except OSError as error:
+        raise CheckpointIntegrityError(f"checkpoint is missing: {metadata.file}") from error
+    if not checkpoint.is_relative_to(root) or not checkpoint.is_file():
+        raise CheckpointIntegrityError(f"checkpoint escapes the run directory: {metadata.file}")
+    digest = hashlib.sha256()
+    try:
+        with checkpoint.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise CheckpointIntegrityError(f"checkpoint cannot be read: {metadata.file}") from error
+    if not hmac.compare_digest(digest.hexdigest(), metadata.sha256):
+        raise CheckpointIntegrityError(f"checkpoint digest mismatch: {metadata.file}")
+    return checkpoint
 
 
 class CheckpointPublisher:

@@ -6,7 +6,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
 
 from kwola.domain.actions import BrowserKind
 
-ProfileName = Literal["testing", "standard"]
+ProfileName = Literal["testing", "standard", "rig"]
 
 
 class StrictModel(BaseModel):
@@ -35,6 +35,7 @@ class BrowserConfig(StrictModel):
     viewports: tuple[ViewportConfig, ...] = (ViewportConfig(width=1920, height=1080),)
     headless: bool = True
     prevent_offsite_navigation: bool = True
+    allowed_navigation_origins: tuple[AnyHttpUrl, ...] = ()
     page_load_timeout_seconds: float = Field(default=60.0, gt=0)
     action_timeout_seconds: float = Field(default=15.0, gt=0)
     network_idle_seconds: float = Field(default=0.5, ge=0)
@@ -49,6 +50,13 @@ class BrowserConfig(StrictModel):
             raise ValueError("enabled browsers must be unique")
         if not self.viewports:
             raise ValueError("at least one viewport must be configured")
+        for origin in self.allowed_navigation_origins:
+            if origin.username or origin.password:
+                raise ValueError("allowed navigation origins cannot contain credentials")
+            if origin.path not in {None, "", "/"} or origin.query or origin.fragment:
+                raise ValueError(
+                    "allowed navigation origins cannot contain a path, query, or fragment"
+                )
         return self
 
 
@@ -229,6 +237,10 @@ class TrainingConfig(StrictModel):
     sample_cache_workers: int = Field(default=4, ge=0)
     sample_cache_version: int = Field(default=1, ge=1)
     use_shared_memory_spool: bool = True
+    cpu_threads_per_rank: int = Field(default=0, ge=0, le=32)
+    batch_prefetch: bool = False
+    decoded_image_cache_size: int = Field(default=0, ge=0)
+    telemetry_every_iterations: int = Field(default=10, ge=1)
     checkpoint_every_iterations: int = Field(default=1, ge=1)
     target_network_update_every: int = Field(default=250, ge=1)
     action_probability_square_size: int = Field(default=30, ge=1)
@@ -283,6 +295,14 @@ class ReportingConfig(StrictModel):
     video_timeout_seconds: float = Field(default=900.0, gt=0)
 
 
+class OrchestrationConfig(StrictModel):
+    browser_workers: int = Field(default=1, ge=1, le=64)
+    browser_cpu_threads: int = Field(default=1, ge=1, le=32)
+    worker_timeout_seconds: float = Field(default=3600.0, gt=0)
+    telemetry_interval_seconds: float = Field(default=5.0, gt=0)
+    minimum_traces_before_training: int = Field(default=5, ge=1)
+
+
 class RunConfig(StrictModel):
     schema_version: int = Field(default=1, ge=1)
     target: AnyHttpUrl
@@ -295,6 +315,7 @@ class RunConfig(StrictModel):
     training: TrainingConfig
     storage: StorageConfig
     reporting: ReportingConfig
+    orchestration: OrchestrationConfig = OrchestrationConfig()
 
     @model_validator(mode="after")
     def instrumentation_requirements_are_consistent(self) -> Self:

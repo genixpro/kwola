@@ -1,8 +1,10 @@
 import random
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytest
 import torch
 
 from kwola.agent import InferencePolicy, TraceNet, action_catalog
@@ -11,7 +13,7 @@ from kwola.config import load_config
 from kwola.domain.actions import ActionMap, ActionTarget
 from kwola.domain.observations import Observation, Viewport
 from kwola.orchestration.initialize import initialize_run
-from kwola.storage import CheckpointPublisher, load_manifest
+from kwola.storage import CheckpointIntegrityError, CheckpointPublisher, load_manifest
 
 
 class NoExploreRandom(random.Random):
@@ -50,12 +52,32 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
         now=1.0,
     )
     assert published is not None
-    policy = InferencePolicy(tmp_path, config, NoExploreRandom(3))
+    with patch("kwola.agent.policy.torch.load", wraps=torch.load) as load:
+        policy = InferencePolicy(tmp_path, config, NoExploreRandom(3))
+    assert load.call_args.kwargs["weights_only"] is True
     observation = _observation()
     modeled = policy.select(observation, action_index=4, test_step_index=999, force_random=False)
     forced = policy.select(observation, action_index=4, test_step_index=999, force_random=True)
     assert modeled.source == "model"
     assert forced.source == "weighted_random"
+
+
+def test_policy_rejects_a_corrupted_checkpoint_before_loading(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 12)
+    config = load_config(tmp_path)
+    model = TraceNet(config.model, len(action_catalog(config.policy)))
+    published = CheckpointPublisher(tmp_path).publish(
+        rank=0,
+        generation=1,
+        writer=lambda stream: torch.save({"model": model.state_dict()}, stream),
+        manifest=load_manifest(tmp_path),
+        now=1.0,
+    )
+    assert published is not None
+    published[0].write_bytes(b"corrupted")
+
+    with pytest.raises(CheckpointIntegrityError, match="digest mismatch"):
+        InferencePolicy(tmp_path, config, NoExploreRandom(3))
 
 
 def test_policy_suppresses_repeated_target_until_new_branch(tmp_path: Path) -> None:

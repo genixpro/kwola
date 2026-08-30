@@ -1,9 +1,9 @@
 """Small, inspectable run manifest."""
 
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 from kwola.config.io import _atomic_json_write
 from kwola.config.models import ProfileName
@@ -21,6 +21,24 @@ class CheckpointMetadata(ManifestModel):
     file: str
     sha256: str
     published_at: float
+
+    @field_validator("file")
+    @classmethod
+    def checkpoint_path_is_relative(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if not value or "\\" in value or path.is_absolute() or ".." in path.parts:
+            raise ValueError("checkpoint file must be a confined relative POSIX path")
+        return value
+
+    @field_validator("sha256")
+    @classmethod
+    def checkpoint_digest_is_valid(cls, value: str) -> str:
+        normalized = value.lower()
+        if len(normalized) != 64 or any(
+            character not in "0123456789abcdef" for character in normalized
+        ):
+            raise ValueError("checkpoint sha256 must contain 64 hexadecimal characters")
+        return normalized
 
 
 class RunManifest(ManifestModel):

@@ -9,7 +9,7 @@ import torch
 from kwola.config.models import RunConfig
 from kwola.domain.actions import Action, ActionKind, ActionTarget
 from kwola.domain.observations import Observation
-from kwola.storage import load_manifest
+from kwola.storage import load_manifest, verify_checkpoint
 
 from .actions import action_catalog
 from .encoding import ObservationEncoder
@@ -90,10 +90,8 @@ class InferencePolicy:
         if manifest.checkpoint is None:
             return None
         model = TraceNet(self._config.model, len(self._channels))
-        payload = torch.load(
-            self._run_dir / manifest.checkpoint.file,
-            map_location=torch.device("cpu"),
-        )
+        checkpoint = verify_checkpoint(self._run_dir, manifest.checkpoint)
+        payload = torch.load(checkpoint, map_location=torch.device("cpu"), weights_only=True)
         model.load_state_dict(payload["model"])
         return model.eval()
 

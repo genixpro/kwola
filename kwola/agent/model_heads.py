@@ -1,7 +1,5 @@
 """TraceNet prediction heads."""
 
-from typing import cast
-
 import torch
 from torch import Tensor, nn
 
@@ -96,4 +94,4 @@ def _optional_linear(
 
 
 def _masked(values: Tensor, masks: Tensor, impossible: float) -> Tensor:
-    return cast(Tensor, values * masks + (1.0 - masks) * impossible)
+    return values * masks + (1.0 - masks) * impossible

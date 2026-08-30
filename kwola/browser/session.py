@@ -70,6 +70,7 @@ class BrowserSessionCoordinator:
         self._executor.execute(self._adapter.page, action)
         self._adapter.page.wait_for_timeout(self._action_settle_ms)
         self._waiter.wait(self._adapter.page)
+        self._adapter.ensure_allowed()
         return self.observe()
 
     def cursor_at(self, x: int, y: int) -> str:
@@ -84,6 +85,7 @@ class BrowserSessionCoordinator:
         return self._adapter.page.content()
 
     def observe(self) -> Observation:
+        self._adapter.ensure_allowed()
         action_map = self.discover_actions()
         console, network = self._telemetry.snapshot()
         return Observation(

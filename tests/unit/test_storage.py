@@ -11,6 +11,8 @@ from kwola.config import profile_config
 from kwola.storage import (
     AtomicBlobStore,
     BinaryCodec,
+    CheckpointIntegrityError,
+    CheckpointMetadata,
     CheckpointPublisher,
     CodecError,
     LmdbRunStore,
@@ -19,6 +21,7 @@ from kwola.storage import (
     StorageFullError,
     load_manifest,
     save_manifest,
+    verify_checkpoint,
 )
 
 
@@ -45,7 +48,18 @@ def test_lmdb_records_survive_restart_and_scan(tmp_path: Path) -> None:
     with LmdbRunStore(database, map_size=1024**2) as store:
         store.put("traces", "2", {"reward": 0.5})
         store.put("traces", "1", {"reward": 0.25})
+        store.put("traces", "session-1-trace-0", {"reward": 1.0})
+        store.put("traces", "session-2-trace-0", {"reward": 2.0})
         store.put("sessions", "1", {"status": "running"})
+        updated = store.update(
+            "sessions",
+            "1",
+            lambda current: {**(current or {}), "attempts": 1},
+        )
+        assert updated == {"status": "running", "attempts": 1}
+        assert tuple(store.scan_prefix("traces", "session-1-")) == (
+            ("session-1-trace-0", {"reward": 1.0}),
+        )
         assert store.delete("traces", "missing") is False
 
     with LmdbRunStore(database, map_size=1024**2, readonly=True) as store:
@@ -53,9 +67,13 @@ def test_lmdb_records_survive_restart_and_scan(tmp_path: Path) -> None:
         assert tuple(store.scan("traces")) == (
             ("1", {"reward": 0.25}),
             ("2", {"reward": 0.5}),
+            ("session-1-trace-0", {"reward": 1.0}),
+            ("session-2-trace-0", {"reward": 2.0}),
         )
         with pytest.raises(PermissionError):
             store.put("traces", "3", {})
+        with pytest.raises(PermissionError):
+            store.update("sessions", "1", lambda current: current or {})
 
 
 def test_atomic_blob_store_confines_paths(tmp_path: Path) -> None:
@@ -106,6 +124,47 @@ def test_only_rank_zero_publishes_checkpoint_and_manifest(tmp_path: Path) -> Non
     assert path.read_bytes() == b"checkpoint"
     assert updated.checkpoint is not None
     assert load_manifest(tmp_path) == updated
+    assert verify_checkpoint(tmp_path, updated.checkpoint) == path
+
+
+def test_checkpoint_verification_rejects_corruption_and_missing_files(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "checkpoints" / "model.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b"valid")
+    metadata = CheckpointMetadata(
+        generation=1,
+        file="checkpoints/model.pt",
+        sha256=hashlib.sha256(b"valid").hexdigest(),
+        published_at=1.0,
+    )
+    assert verify_checkpoint(tmp_path, metadata) == checkpoint
+    checkpoint.write_bytes(b"corrupt")
+    with pytest.raises(CheckpointIntegrityError, match="digest mismatch"):
+        verify_checkpoint(tmp_path, metadata)
+    checkpoint.unlink()
+    with pytest.raises(CheckpointIntegrityError, match="missing"):
+        verify_checkpoint(tmp_path, metadata)
+
+
+def test_checkpoint_paths_reject_traversal_absolute_and_symlink_escape(tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"outside").hexdigest()
+    with pytest.raises(ValueError, match="confined relative"):
+        CheckpointMetadata(generation=1, file="../outside.pt", sha256=digest, published_at=1.0)
+    with pytest.raises(ValueError, match="confined relative"):
+        CheckpointMetadata(generation=1, file="/outside.pt", sha256=digest, published_at=1.0)
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.pt"
+    outside.write_bytes(b"outside")
+    link = tmp_path / "checkpoint.pt"
+    link.symlink_to(outside)
+    metadata = CheckpointMetadata(
+        generation=1, file="checkpoint.pt", sha256=digest, published_at=1.0
+    )
+    try:
+        with pytest.raises(CheckpointIntegrityError, match="escapes"):
+            verify_checkpoint(tmp_path, metadata)
+    finally:
+        outside.unlink()
 
 
 def test_atomic_writers_remove_temporary_files_on_failure(tmp_path: Path) -> None:
