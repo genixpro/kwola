@@ -85,9 +85,7 @@ class TraceNet(nn.Module):
             self.heads.predicted_execution,
             self.heads.predicted_cursor,
         )
-        if not request.compute_auxiliary or not any(
-            auxiliary_heads
-        ):
+        if not request.compute_auxiliary or not any(auxiliary_heads):
             return
         indexes = self._action_indexes(request, total_reward)
         selected = [

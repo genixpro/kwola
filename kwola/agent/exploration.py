@@ -43,10 +43,9 @@ class ExplorationSchedule:
 
     @staticmethod
     def _interpolate(axis: ExplorationAxisConfig, portion: float) -> tuple[float, float]:
-        random = axis.start_random_rate + (
-            axis.end_random_rate - axis.start_random_rate
-        ) * portion
-        weighted = axis.start_weighted_random_rate + (
-            axis.end_weighted_random_rate - axis.start_weighted_random_rate
-        ) * portion
+        random = axis.start_random_rate + (axis.end_random_rate - axis.start_random_rate) * portion
+        weighted = (
+            axis.start_weighted_random_rate
+            + (axis.end_weighted_random_rate - axis.start_weighted_random_rate) * portion
+        )
         return random, weighted

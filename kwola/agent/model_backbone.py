@@ -38,9 +38,7 @@ class TraceNetBackbone(nn.Module):
     def __init__(self, config: ModelConfig, num_actions: int) -> None:
         super().__init__()
         self.config = config
-        self.stamp_size = (
-            config.additional_stamp_edge**2 * config.additional_stamp_depth
-        )
+        self.stamp_size = config.additional_stamp_edge**2 * config.additional_stamp_depth
         self.recent_symbols = nn.EmbeddingBag(
             config.symbol_dictionary_size, config.symbol_embedding_size, mode="sum"
         )
@@ -81,8 +79,10 @@ class TraceNetBackbone(nn.Module):
         attended = self._attention(data, pixels, batch, height, width)
         actions = self.recent_action_projection(data.recent_actions_vector)
         additional = torch.cat(
-            [torch.log10(data.step_number + torch.ones_like(data.step_number)).reshape(-1, 1),
-             self.recent_symbol_projection(recent)],
+            [
+                torch.log10(data.step_number + torch.ones_like(data.step_number)).reshape(-1, 1),
+                self.recent_symbol_projection(recent),
+            ],
             dim=1,
         )
         stamp, stamp_layer = self._stamp(additional, height, width)
@@ -125,11 +125,15 @@ class TraceNetBackbone(nn.Module):
     def _stamp(self, additional: Tensor, height: int, width: int) -> tuple[Tensor, Tensor]:
         config = self.config
         stamp = additional.reshape(
-            -1, config.additional_stamp_depth, config.additional_stamp_edge,
+            -1,
+            config.additional_stamp_depth,
+            config.additional_stamp_edge,
             config.additional_stamp_edge,
         )
         tiled = stamp.repeat(
-            1, 1, height // config.additional_stamp_edge + 1,
+            1,
+            1,
+            height // config.additional_stamp_edge + 1,
             width // config.additional_stamp_edge + 1,
         )
         return stamp, tiled[:, :, :height, :width]
@@ -142,8 +146,12 @@ def _visual_layers(config: ModelConfig, num_actions: int) -> nn.Sequential:
         modules.extend(
             [
                 nn.Conv2d(
-                    inputs, layer.kernels, layer.kernel_size, layer.stride,
-                    layer.padding, layer.dilation,
+                    inputs,
+                    layer.kernels,
+                    layer.kernel_size,
+                    layer.stride,
+                    layer.padding,
+                    layer.dilation,
                 ),
                 nn.ELU(),
                 nn.BatchNorm2d(layer.kernels),

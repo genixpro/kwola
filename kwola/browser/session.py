@@ -74,7 +74,7 @@ class BrowserSessionCoordinator:
 
     def observe(self) -> Observation:
         action_map = self.discover_actions()
-        console, _network = self._telemetry.snapshot()
+        console, network = self._telemetry.snapshot()
         return Observation(
             url=self._adapter.page.url,
             screenshot=self._screenshots.capture(self._adapter.page),
@@ -84,9 +84,24 @@ class BrowserSessionCoordinator:
             branch_symbols=self._collect_branches(),
             network_symbols=self._telemetry.network_symbols(),
             console_messages=tuple(entry.message for entry in console),
+            errors=_errors(console, network),
         )
 
     def _collect_branches(self) -> tuple[int, ...]:
         if self._branch_traces is None:
             return ()
         return self._branch_traces.collect(self._adapter.page)
+
+
+def _errors(console: tuple[object, ...], network: tuple[object, ...]) -> tuple[str, ...]:
+    messages = []
+    for entry in console:
+        level = getattr(entry, "level", "")
+        if level in {"error", "assert"}:
+            messages.append(f"console:{getattr(entry, 'message', '')}")
+    for entry in network:
+        status = int(getattr(entry, "status", 0))
+        failure = getattr(entry, "failure", None)
+        if failure or status >= 400:
+            messages.append(f"network:{status}:{getattr(entry, 'url', '')}:{failure or ''}")
+    return tuple(messages)

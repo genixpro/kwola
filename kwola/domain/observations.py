@@ -25,3 +25,4 @@ class Observation:
     branch_symbols: tuple[int, ...] = ()
     network_symbols: tuple[int, ...] = ()
     console_messages: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()

@@ -81,3 +81,45 @@ def test_abrupt_process_exit_is_reported() -> None:
             WorkerCommand(command_id="4", name="exit"),
             timeout_seconds=5,
         )
+
+
+def test_supervisor_rejects_reuse_and_oversized_commands() -> None:
+    supervisor = WorkerSupervisor(successful_worker)
+    supervisor._process = object()  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="active worker"):
+        supervisor.run(WorkerCommand(command_id="5", name="reuse"), 1)
+    supervisor._process = None
+    command = WorkerCommand(
+        command_id="6",
+        name="large",
+        parameters={"payload": "x" * (1024 * 1024)},
+    )
+    with pytest.raises(ValueError, match="1 MiB"):
+        supervisor.run(command, 1)
+
+
+class ForcedProcess:
+    def __init__(self) -> None:
+        self.checks = 0
+        self.killed = False
+
+    def is_alive(self) -> bool:
+        self.checks += 1
+        return self.checks <= 2
+
+    def terminate(self) -> None:
+        pass
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_supervisor_forces_termination_after_grace_period() -> None:
+    supervisor = WorkerSupervisor(successful_worker)
+    process = ForcedProcess()
+    supervisor._process = process  # type: ignore[assignment]
+    supervisor.cancel()
+    assert process.killed

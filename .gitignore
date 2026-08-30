@@ -1,5 +1,4 @@
 .idea
-package-lock.json
 *.egg-info
 *__pycache__*
 venv

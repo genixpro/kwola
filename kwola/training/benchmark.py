@@ -43,9 +43,7 @@ def run_benchmark(run_dir: Path, iterations: int = 5) -> BenchmarkResult:
     measurements = [optimizer.step(request) for _ in range(iterations)]
     median = statistics.median(item.duration_seconds for item in measurements)
     throughput = config.training.batch_size / median
-    vram = (
-        torch.cuda.max_memory_allocated(device) / 1024**3 if device.type == "cuda" else 0.0
-    )
+    vram = torch.cuda.max_memory_allocated(device) / 1024**3 if device.type == "cuda" else 0.0
     passed = device.type != "cuda" or (median <= 1.35 and throughput >= 145 and vram <= 5.0)
     return BenchmarkResult(
         passed=passed,

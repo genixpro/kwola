@@ -8,6 +8,7 @@ import torch
 
 from kwola.agent import TraceNet
 from kwola.config import load_config
+from kwola.hooks import HookRegistry, LifecycleEvent, LifecycleEventName
 from kwola.storage import CheckpointPublisher, LmdbRunStore, RunManifest, load_manifest
 from kwola.training.optimizer import ModelOptimizer
 from kwola.training.samples import RecordedSampleAssembler, TrainingBatch
@@ -16,16 +17,29 @@ from .results import RunnerResult
 
 
 class TrainingRunner:
-    def __init__(self, run_dir: Path) -> None:
+    def __init__(self, run_dir: Path, hooks: HookRegistry | None = None) -> None:
         self._run_dir = run_dir
         self._config = load_config(run_dir)
+        self._hooks = hooks or HookRegistry()
 
     def run(self, gpu: int | None = None) -> RunnerResult:
-        if gpu is None and self._config.training.world_size > 1:
-            from kwola.training.distributed import run_distributed_training
+        self._dispatch(LifecycleEventName.RUN_STARTED)
+        try:
+            if gpu is None and self._config.training.world_size > 1:
+                from kwola.training.distributed import run_distributed_training
 
-            return run_distributed_training(self._run_dir)
-        return self._run_single(gpu)
+                result = run_distributed_training(self._run_dir)
+            else:
+                result = self._run_single(gpu)
+            self._dispatch(
+                LifecycleEventName.TRAINING_ITERATION_FINISHED,
+                result.step_id,
+                tuple(result.metrics.items()),
+            )
+            return result
+        finally:
+            self._dispatch(LifecycleEventName.RUN_FINISHED)
+            self._hooks.close()
 
     def _run_single(self, gpu: int | None) -> RunnerResult:
         started = time.perf_counter()
@@ -65,9 +79,7 @@ class TrainingRunner:
             },
         )
 
-    def _batch(
-        self, store: LmdbRunStore, device: torch.device
-    ) -> TrainingBatch:
+    def _batch(self, store: LmdbRunStore, device: torch.device) -> TrainingBatch:
         assembler = RecordedSampleAssembler(
             self._run_dir,
             store,
@@ -90,9 +102,7 @@ class TrainingRunner:
         manifest: RunManifest,
         generation: int,
     ) -> Path:
-        publisher = CheckpointPublisher(
-            self._run_dir, self._config.storage.checkpoints_directory
-        )
+        publisher = CheckpointPublisher(self._run_dir, self._config.storage.checkpoints_directory)
         published = publisher.publish(
             rank=0,
             generation=generation,
@@ -137,4 +147,20 @@ class TrainingRunner:
             self._run_dir / self._config.storage.database_directory,
             map_size=self._config.storage.database_map_size_bytes,
             compression_level=self._config.storage.codec_compression_level,
+        )
+
+    def _dispatch(
+        self,
+        name: LifecycleEventName,
+        subject_id: str | None = None,
+        payload: tuple[tuple[str, object], ...] = (),
+    ) -> None:
+        self._hooks.dispatch(
+            LifecycleEvent(
+                name=name,
+                occurred_at=time.time(),
+                run_id=self._run_dir.name,
+                subject_id=subject_id,
+                payload=payload,
+            )
         )

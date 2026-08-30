@@ -68,14 +68,22 @@ def _map_head(config: ModelConfig, inputs: int, outputs: int) -> nn.Sequential:
     layer = config.layers[4]
     return nn.Sequential(
         nn.Conv2d(
-            inputs, layer.kernels, layer.kernel_size, layer.stride,
-            layer.padding, layer.dilation,
+            inputs,
+            layer.kernels,
+            layer.kernel_size,
+            layer.stride,
+            layer.padding,
+            layer.dilation,
         ),
         nn.ELU(),
         nn.BatchNorm2d(layer.kernels),
         nn.Conv2d(
-            layer.kernels, outputs, config.prediction_head_kernel_size,
-            config.prediction_head_stride, config.prediction_head_padding, bias=False,
+            layer.kernels,
+            outputs,
+            config.prediction_head_kernel_size,
+            config.prediction_head_stride,
+            config.prediction_head_padding,
+            bias=False,
         ),
         nn.Upsample(scale_factor=8, mode="bilinear", align_corners=False),
     )

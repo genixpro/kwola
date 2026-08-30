@@ -51,3 +51,36 @@ def test_config_round_trip_is_atomic_and_directory_must_be_empty(tmp_path: Path)
     assert not tuple(run_dir.glob(".kwola.json.*"))
     with pytest.raises(FileExistsError):
         create_run_config("https://example.com", "testing", run_dir, 123)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (lambda data: data["browser"].update(enabled=[]), "at least one browser"),
+        (
+            lambda data: data["browser"].update(enabled=["chromium", "chromium"]),
+            "unique",
+        ),
+        (lambda data: data["browser"].update(viewports=[]), "at least one viewport"),
+        (lambda data: data["model"].update(layers=data["model"]["layers"][:4]), "five"),
+        (
+            lambda data: data["model"]["layers"][3].update(kernels=999),
+            "pixel_features",
+        ),
+        (
+            lambda data: data["training"].update(world_size=2, device_indices=[]),
+            "CPU training",
+        ),
+        (
+            lambda data: data["instrumentation"].update(enabled=False, rewrite_javascript=True),
+            "requires instrumentation",
+        ),
+    ),
+)
+def test_all_cross_field_constraints_are_actionable(mutation: object, message: str) -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    data = config.model_dump()
+    assert callable(mutation)
+    mutation(data)
+    with pytest.raises(ValidationError, match=message):
+        type(config).model_validate(data)

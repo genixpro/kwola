@@ -29,18 +29,14 @@ class RewardCalculator:
         reward = config.action_success if signals.action_succeeded else config.action_failure
         reward += config.code_executed if signals.code_executed else config.no_code_executed
         reward += self._new_code_reward(signals)
-        reward += (
-            config.network_traffic if signals.network_traffic else config.no_network_traffic
-        )
+        reward += config.network_traffic if signals.network_traffic else config.no_network_traffic
         reward += (
             config.new_network_traffic
             if signals.new_network_traffic
             else config.no_new_network_traffic
         )
         reward += (
-            config.screenshot_changed
-            if signals.screenshot_changed
-            else config.no_screenshot_change
+            config.screenshot_changed if signals.screenshot_changed else config.no_screenshot_change
         )
         reward += config.new_screenshot if signals.screenshot_new else config.no_new_screenshot
         reward += config.url_changed if signals.url_changed else config.no_url_change

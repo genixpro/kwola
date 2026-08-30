@@ -64,9 +64,7 @@ class InstrumentationAddon:
     def done(self) -> None:
         self._javascript.close()
 
-    def _rewrite(
-        self, url: str, content_type: str, source: bytes
-    ) -> tuple[bytes, str | None]:
+    def _rewrite(self, url: str, content_type: str, source: bytes) -> tuple[bytes, str | None]:
         media_type = content_type.partition(";")[0].strip().lower()
         try:
             if self._rewrite_javascript and _is_javascript(url, media_type):
@@ -80,9 +78,7 @@ class InstrumentationAddon:
         return source, None
 
     def _record_network(self, flow: http.HTTPFlow, status: int) -> None:
-        self._telemetry.record_network(
-            NetworkEntry(flow.request.method, flow.request.url, status)
-        )
+        self._telemetry.record_network(NetworkEntry(flow.request.method, flow.request.url, status))
 
 
 def _is_javascript(url: str, media_type: str) -> bool:

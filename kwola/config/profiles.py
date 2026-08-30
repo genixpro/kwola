@@ -9,8 +9,7 @@ from .models import ProfileName, RunConfig
 def _layers(kernels: tuple[int, ...]) -> list[dict[str, int]]:
     strides = (2, 2, 2, 1, 1)
     return [
-        {"kernels": count, "stride": stride}
-        for count, stride in zip(kernels, strides, strict=True)
+        {"kernels": count, "stride": stride} for count, stride in zip(kernels, strides, strict=True)
     ]
 
 

@@ -1,5 +1,6 @@
 """One explicit browser-testing runner."""
 
+import hashlib
 import random
 import time
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from kwola.config import load_config
 from kwola.config.models import ViewportConfig
 from kwola.domain.actions import Action, BrowserKind
 from kwola.domain.observations import Observation
+from kwola.hooks import HookRegistry, LifecycleEvent, LifecycleEventName
 from kwola.instrumentation import (
     BranchTraceCollector,
     InstrumentationAddon,
@@ -33,10 +35,16 @@ from .results import RunnerResult
 
 
 class TestingRunner:
-    def __init__(self, run_dir: Path, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        clock: Callable[[], float] = time.time,
+        hooks: HookRegistry | None = None,
+    ) -> None:
         self._run_dir = run_dir
         self._clock = clock
         self._config = load_config(run_dir)
+        self._hooks = hooks or HookRegistry()
 
     def run(
         self,
@@ -46,18 +54,19 @@ class TestingRunner:
         viewport: tuple[int, int] | None = None,
     ) -> RunnerResult:
         started = self._clock()
-        browser_kind = browser or self._config.browser.enabled[0]
-        if browser_kind not in self._config.browser.enabled:
-            raise ValueError(f"browser {browser_kind} is not enabled for this run")
-        selected_viewport = self._viewport(viewport)
-        with self._store() as store:
-            return self._run_step(
-                store,
-                started,
-                browser_kind,
-                selected_viewport,
-                random_policy,
-            )
+        self._dispatch(LifecycleEventName.RUN_STARTED)
+        try:
+            browser_kind = browser or self._config.browser.enabled[0]
+            if browser_kind not in self._config.browser.enabled:
+                raise ValueError(f"browser {browser_kind} is not enabled for this run")
+            selected_viewport = self._viewport(viewport)
+            with self._store() as store:
+                return self._run_step(
+                    store, started, browser_kind, selected_viewport, random_policy
+                )
+        finally:
+            self._dispatch(LifecycleEventName.RUN_FINISHED)
+            self._hooks.close()
 
     def _run_step(
         self,
@@ -73,6 +82,7 @@ class TestingRunner:
         artifacts: list[str] = []
         try:
             observation = session.start(str(self._config.target))
+            self._dispatch(LifecycleEventName.SESSION_STARTED, step_id)
             policy = RandomActionPolicy(
                 random.Random(self._config.seed + step_index),
                 self._config.policy.custom_typing_strings,
@@ -81,8 +91,11 @@ class TestingRunner:
             seen_branches = set(observation.branch_symbols)
             for trace_index in range(self._config.policy.testing_sequence_length):
                 action = policy.select(observation.action_map)
+                trace_id = f"{step_id}-trace-{trace_index:04d}"
+                self._dispatch(LifecycleEventName.BEFORE_ACTION, trace_id)
                 before = observation
                 observation = session.execute(action)
+                self._dispatch(LifecycleEventName.AFTER_ACTION, trace_id)
                 reward = self._record_trace(
                     step_id,
                     trace_index,
@@ -92,6 +105,11 @@ class TestingRunner:
                     artifacts,
                     store,
                     seen_branches,
+                )
+                self._dispatch(
+                    LifecycleEventName.TRACE_RECORDED,
+                    trace_id,
+                    (("reward", reward),),
                 )
                 rewards.append(reward)
             self._complete_step(store, step_id, browser_kind, rewards, random_policy)
@@ -104,6 +122,7 @@ class TestingRunner:
             )
         finally:
             session.close()
+            self._dispatch(LifecycleEventName.SESSION_FINISHED, step_id)
 
     def _session(
         self,
@@ -123,9 +142,7 @@ class TestingRunner:
         adapter = PlaywrightBrowserAdapter(
             self._config.browser, browser, viewport, telemetry, proxy_server
         )
-        autologin = AutologinService(
-            self._config.browser.autologin, extractor, executor, waiter
-        )
+        autologin = AutologinService(self._config.browser.autologin, extractor, executor, waiter)
         return BrowserSessionCoordinator(
             adapter,
             extractor,
@@ -191,6 +208,7 @@ class TestingRunner:
                 "reward": reward,
                 "branch_symbols": list(after.branch_symbols),
                 "network_symbols": list(after.network_symbols),
+                "errors": list(after.errors),
                 "viewport": [before.viewport.width, before.viewport.height],
                 "action_targets": [
                     {
@@ -207,7 +225,22 @@ class TestingRunner:
                 "screenshot": str(screenshot.relative_to(self._run_dir)),
             },
         )
+        self._record_bugs(store, trace_id, after.errors)
         return reward
+
+    @staticmethod
+    def _record_bugs(store: LmdbRunStore, trace_id: str, errors: tuple[str, ...]) -> None:
+        for message in errors:
+            fingerprint = hashlib.sha256(message.encode()).hexdigest()
+            existing = store.get("bugs", fingerprint)
+            traces = list(existing.get("trace_ids", [])) if existing else []
+            if trace_id not in traces:
+                traces.append(trace_id)
+            store.put(
+                "bugs",
+                fingerprint,
+                {"message": message, "fingerprint": fingerprint, "trace_ids": traces},
+            )
 
     @staticmethod
     def _step_index(store: LmdbRunStore) -> int:
@@ -236,9 +269,7 @@ class TestingRunner:
             },
         )
 
-    def _proxy(
-        self, store: LmdbRunStore, telemetry: TelemetryBuffer
-    ) -> ProxyService | None:
+    def _proxy(self, store: LmdbRunStore, telemetry: TelemetryBuffer) -> ProxyService | None:
         config = self._config.instrumentation
         if not config.enabled:
             return None
@@ -264,3 +295,19 @@ class TestingRunner:
         if override is None:
             return self._config.browser.viewports[0]
         return ViewportConfig(width=override[0], height=override[1])
+
+    def _dispatch(
+        self,
+        name: LifecycleEventName,
+        subject_id: str | None = None,
+        payload: tuple[tuple[str, object], ...] = (),
+    ) -> None:
+        self._hooks.dispatch(
+            LifecycleEvent(
+                name=name,
+                occurred_at=self._clock(),
+                run_id=self._run_dir.name,
+                subject_id=subject_id,
+                payload=payload,
+            )
+        )

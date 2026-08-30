@@ -2,41 +2,10 @@ import ast
 from pathlib import Path
 
 PACKAGE = Path(__file__).parents[2] / "kwola"
-MIGRATION_EXCLUSIONS = {"components", "datamodels", "diagnostics", "tasks"}
-LEGACY_BIN_FILES = {
-    "benchmark_neural_network.py",
-    "create_kros3_experiment.py",
-    "full_internal_test_suite.py",
-    "initialize.py",
-    "install_proxy_cert.py",
-    "rapid_local_test_suite.py",
-    "regenerate_charts.py",
-    "reset.py",
-    "run_multiple.py",
-    "run_test_step.py",
-    "run_train_step.py",
-    "test_chromedriver.py",
-    "test_ffmpeg.py",
-    "test_installation.py",
-    "test_javascript_rewriting.py",
-    "test_neural_network.py",
-    "train_agent.py",
-    "website_check.py",
-}
 
 
 def production_modules() -> tuple[Path, ...]:
-    modules = []
-    for path in PACKAGE.rglob("*.py"):
-        relative = path.relative_to(PACKAGE)
-        if relative.parts[0] in MIGRATION_EXCLUSIONS:
-            continue
-        if relative.parts[0] == "bin" and path.name in LEGACY_BIN_FILES:
-            continue
-        if relative == Path("config/config.py") or relative == Path("config/logger.py"):
-            continue
-        modules.append(path)
-    return tuple(modules)
+    return tuple(PACKAGE.rglob("*.py"))
 
 
 def test_production_size_limits() -> None:
@@ -76,7 +45,7 @@ def test_domain_has_no_infrastructure_imports() -> None:
     assert not failures, "\n".join(failures)
 
 
-def test_new_architecture_has_no_finalizers_or_atexit() -> None:
+def test_architecture_has_no_finalizers_or_atexit() -> None:
     failures: list[str] = []
     for path in production_modules():
         tree = ast.parse(path.read_text(encoding="utf-8"))

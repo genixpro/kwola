@@ -7,7 +7,9 @@ import matplotlib
 import matplotlib.pyplot as pyplot
 
 from kwola.config import load_config
-from kwola.storage import LmdbRunStore
+from kwola.storage import AtomicBlobStore, LmdbRunStore
+
+from .videos import VideoRenderer
 
 matplotlib.use("Agg")
 
@@ -28,11 +30,18 @@ class ReportService:
             "bugs": len(bugs),
             "total_reward": sum(_reward(trace) for trace in traces),
         }
-        summary_path = report_dir / "summary.json"
-        summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-        chart_path = report_dir / "rewards.png"
-        self._reward_chart(chart_path, traces)
-        return summary_path, chart_path
+        blob_store = AtomicBlobStore(self._run_dir)
+        summary_path = blob_store.write(
+            "reports", "summary.json", (json.dumps(summary, indent=2) + "\n").encode()
+        )
+        artifacts = [summary_path]
+        if self._config.reporting.charts:
+            chart_path = report_dir / "rewards.png"
+            self._reward_chart(chart_path, traces)
+            artifacts.append(chart_path)
+        artifacts.extend(self._videos(traces))
+        artifacts.extend(self._bug_reports(bugs, blob_store))
+        return tuple(artifacts)
 
     def _records(
         self,
@@ -63,9 +72,44 @@ class ReportService:
         figure.savefig(path)
         pyplot.close(figure)
 
+    def _videos(self, traces: list[dict[str, object]]) -> list[Path]:
+        if not (self._config.reporting.debug_videos or self._config.reporting.annotated_videos):
+            return []
+        groups: dict[str, list[dict[str, object]]] = {}
+        for trace in traces:
+            groups.setdefault(str(trace["step_id"]), []).append(trace)
+        renderer = VideoRenderer(self._run_dir)
+        artifacts = []
+        for step_id, step_traces in groups.items():
+            ordered = sorted(step_traces, key=_trace_index)
+            if self._config.reporting.debug_videos:
+                path = self._run_dir / "reports" / "videos" / f"{step_id}-debug.mp4"
+                artifacts.append(renderer.render(path, ordered, annotated=False))
+            if self._config.reporting.annotated_videos:
+                path = self._run_dir / "reports" / "videos" / f"{step_id}-annotated.mp4"
+                artifacts.append(renderer.render(path, ordered, annotated=True))
+        return artifacts
+
+    def _bug_reports(self, bugs: list[dict[str, object]], blobs: AtomicBlobStore) -> list[Path]:
+        if not self._config.reporting.bug_reports:
+            return []
+        artifacts = []
+        for bug in bugs:
+            fingerprint = str(bug["fingerprint"])
+            payload = json.dumps(bug, indent=2, sort_keys=True).encode() + b"\n"
+            artifacts.append(blobs.write("reports/bugs", f"{fingerprint}.json", payload))
+        return artifacts
+
 
 def _reward(trace: dict[str, object]) -> float:
     value = trace["reward"]
     if not isinstance(value, int | float):
         raise TypeError("trace reward is not numeric")
     return float(value)
+
+
+def _trace_index(trace: dict[str, object]) -> int:
+    value = trace["index"]
+    if not isinstance(value, int):
+        raise TypeError("trace index is not an integer")
+    return value

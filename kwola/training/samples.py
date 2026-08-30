@@ -172,6 +172,7 @@ class RecordedSampleAssembler:
             steps,
         )
 
+
 def _trace_order(item: tuple[str, Mapping[str, Any]]) -> tuple[str, int]:
     return str(item[1]["step_id"]), int(item[1]["index"])
 
@@ -184,8 +185,7 @@ def _next_samples(
     selected: Sequence[tuple[str, dict[str, Any]]],
     traces: Sequence[tuple[str, dict[str, Any]]],
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[bool]]:
-    lookup = {(str(trace["step_id"]), int(trace["index"])): (key, trace)
-              for key, trace in traces}
+    lookup = {(str(trace["step_id"]), int(trace["index"])): (key, trace) for key, trace in traces}
     samples = []
     validity = []
     for current in selected:

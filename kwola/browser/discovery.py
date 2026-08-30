@@ -26,9 +26,7 @@ class ActionMapExtractor:
         if raw.get("error"):
             raise RuntimeError(f"action-map JavaScript failed: {raw['error']}")
         targets = tuple(
-            target
-            for item in raw["targets"]
-            if (target := self._target(item)) is not None
+            target for item in raw["targets"] if (target := self._target(item)) is not None
         )
         return ActionMap(
             targets=targets,

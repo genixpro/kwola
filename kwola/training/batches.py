@@ -18,9 +18,7 @@ def diagnostic_batch(
 ) -> TraceNetRequest:
     generator = torch.Generator(device="cpu").manual_seed(seed)
     image = torch.rand(batch_size, 1, edge, edge, generator=generator).to(device)
-    recent_images = torch.rand(
-        batch_size, num_actions, edge, edge, generator=generator
-    ).to(device)
+    recent_images = torch.rand(batch_size, num_actions, edge, edge, generator=generator).to(device)
     recent_vector = torch.rand(batch_size, 5 * num_actions, generator=generator).to(device)
     indexes, offsets, weights = _symbols(batch_size, device)
     symbol_set = torch.tensor([1, 2, 3, 4], dtype=torch.long, device=device)

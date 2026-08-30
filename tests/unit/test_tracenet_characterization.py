@@ -1,49 +1,12 @@
-from typing import Any
-
+import pytest
 import torch
 
 from kwola.agent.model_backbone import BackboneInput
 from kwola.agent.tracenet import TraceNet, TraceNetRequest
-from kwola.components.agents.TraceNet import TraceNet as LegacyTraceNet
 from kwola.config import profile_config
 
 
-def legacy_config() -> dict[str, Any]:
-    config = profile_config("testing", "https://example.com", 1)
-    model = config.model
-    values: dict[str, Any] = {
-        "neural_network_additional_features_stamp_edge_size": model.additional_stamp_edge,
-        "neural_network_additional_features_stamp_depth_size": model.additional_stamp_depth,
-        "symbol_embedding_size": model.symbol_embedding_size,
-        "neural_network_recent_actions_feature_size": model.recent_action_features,
-        "symbol_dictionary_size": model.symbol_dictionary_size,
-        "neural_network_pixel_features": model.pixel_features,
-        "testing_recent_actions_vector_number_of_recent_traces": model.recent_action_history,
-        "enable_trace_prediction_loss": model.enable_trace_prediction,
-        "enable_execution_feature_prediction_loss": model.enable_execution_feature_prediction,
-        "enable_cursor_prediction_loss": model.enable_cursor_prediction,
-        "reward_impossible_action": config.policy.rewards.impossible_action,
-    }
-    for index, layer in enumerate(model.layers, start=1):
-        values.update(
-            {
-                f"neural_network_layer_{index}_num_kernels": layer.kernels,
-                f"neural_network_layer_{index}_kernel_size": layer.kernel_size,
-                f"neural_network_layer_{index}_stride": layer.stride,
-                f"neural_network_layer_{index}_padding": layer.padding,
-                f"neural_network_layer_{index}_dilation": layer.dilation,
-            }
-        )
-    for name in ("present_reward", "discounted_future_reward", "actor", "advantage"):
-        values[f"neural_network_{name}_convolution_kernel_size"] = (
-            model.prediction_head_kernel_size
-        )
-        values[f"neural_network_{name}_convolution_stride"] = model.prediction_head_stride
-        values[f"neural_network_{name}_convolution_padding"] = model.prediction_head_padding
-    return values
-
-
-def inputs(batch: int, actions: int) -> tuple[dict[str, Any], TraceNetRequest]:
+def inputs(batch: int, actions: int) -> TraceNetRequest:
     torch.manual_seed(19)
     image = torch.rand(batch, 1, 64, 64)
     recent_actions_image = torch.rand(batch, actions, 64, 64)
@@ -55,28 +18,6 @@ def inputs(batch: int, actions: int) -> tuple[dict[str, Any], TraceNetRequest]:
     symbol_mask = torch.zeros(batch, 3, dtype=torch.bool)
     step = torch.tensor([1.0, 2.0])
     masks = torch.ones(batch, actions, 64, 64)
-    old = {
-        "image": image,
-        "recentActionsImage": recent_actions_image,
-        "recentActionsVector": recent_actions_vector,
-        "recentSymbolIndexes": symbol_indexes,
-        "recentSymbolOffsets": offsets,
-        "recentSymbolWeights": weights,
-        "coverageSymbolIndexes": symbol_indexes,
-        "coverageSymbolOffsets": offsets,
-        "coverageSymbolWeights": weights,
-        "coverageSymbolsSet": symbols_set,
-        "coverageSymbolsKeyMask": symbol_mask,
-        "stepNumber": step,
-        "pixelActionMaps": masks,
-        "computeRewards": True,
-        "outputStamp": True,
-        "outputFutureSymbolEmbedding": False,
-        "computeActionProbabilities": True,
-        "computeStateValues": True,
-        "computeAdvantageValues": True,
-        "computeExtras": False,
-    }
     backbone = BackboneInput(
         image=image,
         recent_actions_image=recent_actions_image,
@@ -91,36 +32,58 @@ def inputs(batch: int, actions: int) -> tuple[dict[str, Any], TraceNetRequest]:
         coverage_symbols_key_mask=symbol_mask,
         step_number=step,
     )
-    request = TraceNetRequest(backbone, masks, -10.0, output_stamp=True)
-    return old, request
+    return TraceNetRequest(backbone, masks, -10.0, output_stamp=True)
 
 
-def test_refactored_tracenet_matches_legacy_cpu_outputs() -> None:
-    actions = 4
+def test_refactored_tracenet_matches_captured_legacy_outputs() -> None:
+    expected: dict[str, tuple[list[int], float, float, float]] = {
+        "presentRewards": (
+            [2, 4, 64, 64],
+            72.80548095703125,
+            -0.0585971400141716,
+            -0.043252166360616684,
+        ),
+        "discountFutureRewards": (
+            [2, 4, 64, 64],
+            1040.2357177734375,
+            -0.022762859240174294,
+            0.04504061117768288,
+        ),
+        "stamp": (
+            [2, 5, 2, 2],
+            -0.4242258667945862,
+            0.3010300099849701,
+            -0.0969955325126648,
+        ),
+        "actionProbabilities": (
+            [2, 4, 64, 64],
+            2.000000238418579,
+            5.971854625386186e-05,
+            6.112419941928238e-05,
+        ),
+        "stateValues": (
+            [2, 1],
+            -0.14570394158363342,
+            -0.038977183401584625,
+            -0.1067267507314682,
+        ),
+        "advantage": (
+            [2, 4, 64, 64],
+            1489.890625,
+            -0.0021966660860925913,
+            0.05324368551373482,
+        ),
+    }
     config = profile_config("testing", "https://example.com", 1)
     torch.manual_seed(7)
-    legacy = LegacyTraceNet(legacy_config(), actions, 12, 37)
-    torch.manual_seed(8)
-    current = TraceNet(config.model, actions, 12, 37)
-    legacy_state = legacy.state_dict()
-    current_state = current.state_dict()
-    assert [value.shape for value in legacy_state.values()] == [
-        value.shape for value in current_state.values()
-    ]
-    current.load_state_dict(
-        {
-            key: legacy_value
-            for key, legacy_value in zip(current_state, legacy_state.values(), strict=True)
-        }
-    )
-    legacy.eval()
-    current.eval()
-    old_input, request = inputs(2, actions)
-
+    model = TraceNet(config.model, 4, 12, 37).eval()
+    assert sum(parameter.numel() for parameter in model.parameters()) == 3_486_562
     with torch.no_grad():
-        expected = legacy(old_input)
-        actual = current(request)
-
-    assert actual.keys() == expected.keys()
-    for name in expected:
-        torch.testing.assert_close(actual[name], expected[name], rtol=1e-5, atol=1e-6)
+        outputs = model(inputs(2, 4))
+    assert outputs.keys() == expected.keys()
+    for name, (shape, total, first, last) in expected.items():
+        value = outputs[name]
+        assert list(value.shape) == shape
+        assert float(value.sum()) == pytest.approx(total, rel=1e-5, abs=1e-6)
+        assert float(value.flatten()[0]) == pytest.approx(first, rel=1e-5, abs=1e-6)
+        assert float(value.flatten()[-1]) == pytest.approx(last, rel=1e-5, abs=1e-6)

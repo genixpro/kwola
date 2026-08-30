@@ -7,9 +7,7 @@ from kwola.storage import LmdbRunStore, load_manifest
 
 def test_cli_exposes_only_the_supported_top_level_commands() -> None:
     parser = build_parser()
-    subcommands = next(
-        action for action in parser._actions if getattr(action, "choices", None)
-    )
+    subcommands = next(action for action in parser._actions if getattr(action, "choices", None))
 
     assert set(subcommands.choices) == {
         "init",

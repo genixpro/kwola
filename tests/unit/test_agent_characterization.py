@@ -44,9 +44,9 @@ def test_present_rewards_match_legacy_characterization() -> None:
         )
     ) == pytest.approx(-0.04)
     expected_prevalence_reward = ((2.718**-1.5) + 1) * 0.3 * 0.5
-    assert calculator.present(
-        signals(code_prevalence_log_normalized_z_score=1.5)
-    ) == pytest.approx(0.159 + expected_prevalence_reward)
+    assert calculator.present(signals(code_prevalence_log_normalized_z_score=1.5)) == pytest.approx(
+        0.159 + expected_prevalence_reward
+    )
 
 
 def test_discounted_future_rewards_exclude_the_current_frame() -> None:
@@ -90,9 +90,12 @@ def test_single_session_uses_midpoint_axis() -> None:
     policy = profile_config("testing", "https://example.com", 1).policy
     schedule = ExplorationSchedule(policy.exploration, policy.testing_sequence_length)
 
-    assert schedule.probability(
-        action_index=0,
-        session_index=0,
-        session_count=1,
-        test_step_index=0,
-    ).random > 0
+    assert (
+        schedule.probability(
+            action_index=0,
+            session_index=0,
+            session_count=1,
+            test_step_index=0,
+        ).random
+        > 0
+    )
