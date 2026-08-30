@@ -31,10 +31,18 @@ class InferencePolicy:
             config.policy.exploration, config.policy.testing_sequence_length
         )
         self._encoder = ObservationEncoder(
-            config.model, None, config.policy.rewards.impossible_action, self._channels
+            config.model,
+            None,
+            config.policy.rewards.impossible_action,
+            self._channels,
+            config.training.recent_action_image_radius,
+            config.training.recent_action_image_decay,
         )
         self._model = self._load_model()
-        self._recent_actions: list[Action] = []
+        self._model_actions: list[Action] = []
+        self._repeat_actions: list[Action] = []
+        self._coverage_symbols: set[int] = set()
+        self._recent_symbol_history: list[tuple[int, ...]] = []
         self._seen_branches: set[int] = set()
 
     def select(
@@ -45,6 +53,7 @@ class InferencePolicy:
         test_step_index: int,
         force_random: bool,
     ) -> Action:
+        self._record_observation(observation)
         observation = self._filtered_observation(observation)
         exploration = self._schedule.probability(
             action_index=action_index,
@@ -55,15 +64,23 @@ class InferencePolicy:
         if force_random or self._model is None or self._random.random() < exploration.random:
             action = self._random_policy.select(observation.action_map)
         else:
-            action = self._model_action(observation)
-        self._recent_actions.append(action)
+            action = self._model_action(observation, action_index)
+        self._model_actions.append(action)
+        self._model_actions = self._model_actions[-self._config.model.recent_action_history :]
+        self._repeat_actions.append(action)
         return action
+
+    def _record_observation(self, observation: Observation) -> None:
+        if not self._model_actions:
+            return
+        self._coverage_symbols.update(observation.branch_symbols)
+        self._recent_symbol_history.append(observation.branch_symbols)
 
     def _filtered_observation(self, observation: Observation) -> Observation:
         new_branches = set(observation.branch_symbols) - self._seen_branches
         self._seen_branches.update(observation.branch_symbols)
         if new_branches:
-            self._recent_actions.clear()
+            self._repeat_actions.clear()
         policy = self._config.policy
         if not policy.repeat_action_override or policy.max_repeat_maps_without_new_branches == 0:
             return observation
@@ -82,7 +99,7 @@ class InferencePolicy:
             target.left <= action.x <= target.right
             and target.top <= action.y <= target.bottom
             and any(channel.kind is action.kind for channel in self._random_policy.allowed(target))
-            for action in self._recent_actions
+            for action in self._repeat_actions
         )
 
     def _load_model(self) -> TraceNet | None:
@@ -92,12 +109,19 @@ class InferencePolicy:
         model = TraceNet(self._config.model, len(self._channels))
         checkpoint = verify_checkpoint(self._run_dir, manifest.checkpoint)
         payload = torch.load(checkpoint, map_location=torch.device("cpu"), weights_only=True)
-        model.load_state_dict(payload["model"])
+        model.load_checkpoint_state_dict(payload["model"])
         return model.eval()
 
-    def _model_action(self, observation: Observation) -> Action:
+    def _model_action(self, observation: Observation, action_index: int) -> Action:
         assert self._model is not None
-        request = self._encoder.encode(observation, torch.device("cpu"))
+        request = self._encoder.encode(
+            observation,
+            torch.device("cpu"),
+            recent_actions=tuple(self._model_actions),
+            coverage_symbols=tuple(sorted(self._coverage_symbols)),
+            recent_symbol_history=tuple(self._recent_symbol_history),
+            step_number=action_index,
+        )
         with torch.no_grad():
             probabilities = self._model(request)["actionProbabilities"][0]
         flat = int(probabilities.flatten().argmax())

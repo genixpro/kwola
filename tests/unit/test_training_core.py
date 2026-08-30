@@ -6,7 +6,7 @@ from kwola.agent import TraceNet
 from kwola.config import profile_config
 from kwola.training.batches import diagnostic_batch
 from kwola.training.losses import aggregate_loss, behavior_loss
-from kwola.training.optimizer import ModelOptimizer
+from kwola.training.optimizer import ModelOptimizer, load_optimizer_checkpoint
 from kwola.training.samples import TrainingBatch
 
 
@@ -58,3 +58,31 @@ def test_behavior_loss_phase_schedule_and_optimizer() -> None:
     behavior_metrics = optimizer.step_training(batch, target, 6, 0.85, 10.0)
     assert diagnostic_metrics.samples_per_second > 0
     assert behavior_metrics.samples_per_second > 0
+
+
+def test_optimizer_checkpoint_appends_restored_critic_parameters() -> None:
+    config = profile_config("testing", "https://example.com", 6)
+    request = diagnostic_batch(
+        batch_size=2,
+        num_actions=6,
+        edge=64,
+        seed=10,
+        device=torch.device("cpu"),
+        impossible_reward=config.policy.rewards.impossible_action,
+    )
+    original_model = TraceNet(config.model, 6)
+    original = ModelOptimizer(original_model, config.training)
+    original.step(request)
+    legacy = copy.deepcopy(original.optimizer.state_dict())
+    added_parameters = len(tuple(original_model.heads.visual_state_value.parameters()))
+    legacy_ids = legacy["param_groups"][0]["params"][:-added_parameters]
+    legacy["param_groups"][0]["params"] = legacy_ids
+    legacy["state"] = {key: value for key, value in legacy["state"].items() if key in legacy_ids}
+    legacy_state_ids = set(legacy["state"])
+    restored = ModelOptimizer(TraceNet(config.model, 6), config.training)
+
+    load_optimizer_checkpoint(restored.optimizer, legacy, added_parameters)
+
+    restored_state = restored.optimizer.state_dict()
+    assert len(restored_state["param_groups"][0]["params"]) > len(legacy_ids)
+    assert legacy_state_ids <= set(restored_state["state"])

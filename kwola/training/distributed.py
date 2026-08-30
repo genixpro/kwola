@@ -27,7 +27,7 @@ from kwola.storage import (
 
 from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
-from .optimizer import ModelOptimizer, OptimizerMetrics
+from .optimizer import ModelOptimizer, OptimizerMetrics, load_optimizer_checkpoint
 from .samples import RecordedSampleAssembler, TrainingBatch
 from .spool import batch_to_device, share_batch
 from .telemetry import record_training_progress
@@ -152,7 +152,8 @@ def _rank_step(
     )
     optimizer = ModelOptimizer(parallel, config.training)
     if payload is not None:
-        optimizer.optimizer.load_state_dict(payload["optimizer"])
+        added = model.visual_state_parameter_count
+        load_optimizer_checkpoint(optimizer.optimizer, payload["optimizer"], added)
     metrics, assembly_seconds, transfer_seconds = _rank_iterations(
         run_dir,
         coordinator,
@@ -347,7 +348,7 @@ def _load_model(
         return None
     path = verify_checkpoint(run_dir, checkpoint)
     payload: dict[str, Any] = torch.load(path, map_location=device, weights_only=True)
-    model.load_state_dict(payload["model"])
+    model.load_checkpoint_state_dict(payload["model"])
     return payload
 
 
@@ -417,6 +418,7 @@ def _assembler(run_dir: Path, store: LmdbRunStore) -> RecordedSampleAssembler:
         crop_random=(config.training.crop_random_x, config.training.crop_random_y),
         decoded_image_cache_size=config.training.decoded_image_cache_size,
         decoded_image_cache_directory=(run_dir / config.storage.cache_directory / "decoded-images"),
+        compact_cpu_tensors=True,
         freeze_records=True,
         enable_trace_prediction=config.model.enable_trace_prediction,
         enable_execution_feature_prediction=config.model.enable_execution_feature_prediction,

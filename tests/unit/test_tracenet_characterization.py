@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 import torch
 
@@ -35,7 +37,7 @@ def inputs(batch: int, actions: int) -> TraceNetRequest:
     return TraceNetRequest(backbone, masks, -10.0, output_stamp=True)
 
 
-def test_refactored_tracenet_matches_captured_legacy_outputs() -> None:
+def test_tracenet_outputs_remain_characterized() -> None:
     expected: dict[str, tuple[list[int], float, float, float]] = {
         "presentRewards": (
             [2, 4, 64, 64],
@@ -63,9 +65,9 @@ def test_refactored_tracenet_matches_captured_legacy_outputs() -> None:
         ),
         "stateValues": (
             [2, 1],
-            -0.14570394158363342,
-            -0.038977183401584625,
-            -0.1067267507314682,
+            0.007126409560441971,
+            0.026084695011377335,
+            -0.018958285450935364,
         ),
         "advantage": (
             [2, 4, 64, 64],
@@ -77,7 +79,7 @@ def test_refactored_tracenet_matches_captured_legacy_outputs() -> None:
     config = profile_config("testing", "https://example.com", 1)
     torch.manual_seed(7)
     model = TraceNet(config.model, 4, 12, 37).eval()
-    assert sum(parameter.numel() for parameter in model.parameters()) == 3_486_562
+    assert sum(parameter.numel() for parameter in model.parameters()) == 3_499_747
     with torch.no_grad():
         outputs = model(inputs(2, 4))
     assert outputs.keys() == expected.keys()
@@ -87,3 +89,38 @@ def test_refactored_tracenet_matches_captured_legacy_outputs() -> None:
         assert float(value.sum()) == pytest.approx(total, rel=1e-5, abs=1e-6)
         assert float(value.flatten()[0]) == pytest.approx(first, rel=1e-5, abs=1e-6)
         assert float(value.flatten()[-1]) == pytest.approx(last, rel=1e-5, abs=1e-6)
+
+
+def test_state_critic_responds_to_visual_features() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    torch.manual_seed(7)
+    model = TraceNet(config.model, 4, 12, 37).eval()
+    request = inputs(2, 4)
+    changed = replace(
+        request,
+        backbone=replace(request.backbone, image=torch.ones_like(request.backbone.image)),
+    )
+
+    with torch.no_grad():
+        original = model(request)["stateValues"]
+        visually_changed = model(changed)["stateValues"]
+
+    assert not torch.allclose(original, visually_changed)
+
+
+def test_symbol_only_critic_checkpoint_is_migrated_safely() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    original = TraceNet(config.model, 4, 12, 37)
+    legacy = {
+        name: value
+        for name, value in original.state_dict().items()
+        if not name.startswith("heads.visual_state_value.")
+    }
+    restored = TraceNet(config.model, 4, 12, 37)
+
+    restored.load_checkpoint_state_dict(legacy)
+
+    final = restored.heads.visual_state_value.projection[-1]
+    assert isinstance(final, torch.nn.Linear)
+    assert not bool(final.weight.any())
+    assert not bool(final.bias.any())

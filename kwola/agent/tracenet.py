@@ -1,5 +1,6 @@
 """TraceNet topology with focused backbone and prediction-head ownership."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import torch
@@ -49,6 +50,10 @@ class TraceNet(nn.Module):
             cursor_count,
         )
 
+    @property
+    def visual_state_parameter_count(self) -> int:
+        return len(tuple(self.heads.visual_state_value.parameters()))
+
     def forward(self, request: TraceNetRequest) -> dict[str, Tensor]:
         features = self.backbone(request.backbone)
         output: dict[str, Tensor] = {}
@@ -68,7 +73,9 @@ class TraceNet(nn.Module):
                 features.merged, request.pixel_action_maps
             )
         if request.compute_state_values:
-            output["stateValues"] = self.heads.state_value(features.state_features)
+            output["stateValues"] = self.heads.state_values(
+                features.merged, features.state_features
+            )
         if request.compute_advantage_values:
             values = self.heads.advantage(features.merged)
             masks = request.pixel_action_maps
@@ -76,6 +83,26 @@ class TraceNet(nn.Module):
         self._auxiliary(output, request, features, total_reward)
         self._future_embedding(output, request)
         return output
+
+    def load_checkpoint_state_dict(self, state_dict: Mapping[str, Tensor]) -> None:
+        """Load current checkpoints or migrate checkpoints from the symbol-only critic."""
+        visual_prefix = "heads.visual_state_value."
+        legacy_critic = not any(name.startswith(visual_prefix) for name in state_dict)
+        incompatible = self.load_state_dict(state_dict, strict=False)
+        visual_keys = {
+            f"{visual_prefix}{name}" for name in self.heads.visual_state_value.state_dict()
+        }
+        missing = set(incompatible.missing_keys)
+        unexpected = set(incompatible.unexpected_keys)
+        if unexpected or missing - visual_keys or (missing and not legacy_critic):
+            problems = []
+            if missing:
+                problems.append(f"missing keys: {sorted(missing)}")
+            if unexpected:
+                problems.append(f"unexpected keys: {sorted(unexpected)}")
+            raise RuntimeError("incompatible TraceNet checkpoint; " + "; ".join(problems))
+        if legacy_critic:
+            self.heads.initialize_legacy_visual_state()
 
     def _future_embedding(self, output: dict[str, Tensor], request: TraceNetRequest) -> None:
         if request.future_symbol_indexes is None:

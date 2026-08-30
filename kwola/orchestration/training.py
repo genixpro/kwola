@@ -19,7 +19,7 @@ from kwola.storage import (
     load_manifest,
     verify_checkpoint,
 )
-from kwola.training.optimizer import ModelOptimizer, OptimizerMetrics
+from kwola.training.optimizer import ModelOptimizer, OptimizerMetrics, load_optimizer_checkpoint
 from kwola.training.samples import RecordedSampleAssembler, TrainingBatch
 
 from .lifecycle import RunnerLifecycle
@@ -206,8 +206,9 @@ class TrainingRunner:
         device = next(model.parameters()).device
         checkpoint = verify_checkpoint(self._run_dir, metadata)
         payload = torch.load(checkpoint, map_location=device, weights_only=True)
-        model.load_state_dict(payload["model"])
-        optimizer.optimizer.load_state_dict(payload["optimizer"])
+        model.load_checkpoint_state_dict(payload["model"])
+        added = int(getattr(model, "visual_state_parameter_count", 0))
+        load_optimizer_checkpoint(optimizer.optimizer, payload["optimizer"], added)
 
     def _state(self, store: LmdbRunStore) -> tuple[int, int, int, int]:
         state = store.get("run", "state") or {}

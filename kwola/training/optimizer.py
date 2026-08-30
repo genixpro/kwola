@@ -1,7 +1,9 @@
 """Focused optimizer execution."""
 
 import time
+from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from torch import nn
@@ -74,3 +76,35 @@ class ModelOptimizer:
         duration = time.perf_counter() - started
         throughput = len(batch.sample_ids) / duration
         return OptimizerMetrics(float(losses.total.detach()), duration, throughput)
+
+
+def load_optimizer_checkpoint(
+    optimizer: torch.optim.Optimizer,
+    state_dict: dict[str, Any],
+    appended_parameter_count: int,
+) -> None:
+    """Load optimizer state, appending freshly introduced model parameters when needed."""
+    current = optimizer.state_dict()
+    saved_groups = state_dict.get("param_groups")
+    current_groups = current.get("param_groups")
+    if not isinstance(saved_groups, list) or not isinstance(current_groups, list):
+        optimizer.load_state_dict(state_dict)
+        return
+    if len(saved_groups) != len(current_groups):
+        optimizer.load_state_dict(state_dict)
+        return
+    saved_counts = [len(group["params"]) for group in saved_groups]
+    current_counts = [len(group["params"]) for group in current_groups]
+    if saved_counts == current_counts:
+        optimizer.load_state_dict(state_dict)
+        return
+    if any(saved > current for saved, current in zip(saved_counts, current_counts, strict=True)):
+        optimizer.load_state_dict(state_dict)
+        return
+    if sum(current_counts) - sum(saved_counts) != appended_parameter_count:
+        optimizer.load_state_dict(state_dict)
+        return
+    migrated = deepcopy(state_dict)
+    for saved, current_group in zip(migrated["param_groups"], current_groups, strict=True):
+        saved["params"] = list(current_group["params"])
+    optimizer.load_state_dict(migrated)

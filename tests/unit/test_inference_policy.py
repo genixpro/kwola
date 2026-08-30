@@ -8,9 +8,9 @@ import pytest
 import torch
 
 from kwola.agent import InferencePolicy, TraceNet, action_catalog
-from kwola.agent.encoding import ACTION_KINDS, action_masks
+from kwola.agent.encoding import ACTION_KINDS, ObservationEncoder, action_masks
 from kwola.config import load_config
-from kwola.domain.actions import ActionMap, ActionTarget
+from kwola.domain.actions import Action, ActionKind, ActionMap, ActionTarget
 from kwola.domain.observations import Observation, Viewport
 from kwola.orchestration.initialize import initialize_run
 from kwola.storage import CheckpointIntegrityError, CheckpointPublisher, load_manifest
@@ -39,6 +39,51 @@ def test_action_masks_map_target_capabilities() -> None:
     assert bool(action_masks(ActionMap((), 10, 10, "1"), 8).all())
 
 
+def test_observation_encoder_restores_temporal_inference_state(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 12)
+    config = load_config(tmp_path)
+    channels = action_catalog(config.policy)
+    encoder = ObservationEncoder(
+        config.model,
+        None,
+        config.policy.rewards.impossible_action,
+        channels,
+        config.training.recent_action_image_radius,
+        config.training.recent_action_image_decay,
+    )
+    click = Action(ActionKind.CLICK, 16, 24, source="model", channel="click")
+
+    request = encoder.encode(
+        _observation(),
+        torch.device("cpu"),
+        recent_actions=(click,),
+        coverage_symbols=(11, 22),
+        recent_symbol_history=((11,), (22,)),
+        step_number=7,
+    )
+    backbone = request.backbone
+    click_index = tuple(channel.name for channel in channels).index("click")
+
+    assert backbone.step_number.tolist() == [7.0]
+    assert backbone.coverage_symbol_indexes.tolist() == [11, 22]
+    assert backbone.recent_symbol_indexes.tolist() == [11, 22]
+    assert backbone.recent_symbol_weights.tolist() == pytest.approx([0.9, 1.0])
+    assert backbone.recent_actions_vector[0, click_index] == 1
+    assert backbone.recent_actions_image[0, click_index].sum() > 0
+
+
+def test_default_inference_symbols_do_not_mix_network_and_branch_namespaces(
+    tmp_path: Path,
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 12)
+    config = load_config(tmp_path)
+    request = ObservationEncoder(
+        config.model, None, config.policy.rewards.impossible_action
+    ).encode(_observation(), torch.device("cpu"))
+
+    assert request.backbone.coverage_symbol_indexes.tolist() == [1, 2]
+
+
 def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 12)
     config = load_config(tmp_path)
@@ -56,10 +101,19 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
         policy = InferencePolicy(tmp_path, config, NoExploreRandom(3))
     assert load.call_args.kwargs["weights_only"] is True
     observation = _observation()
-    modeled = policy.select(observation, action_index=4, test_step_index=999, force_random=False)
+    with patch.object(policy._encoder, "encode", wraps=policy._encoder.encode) as encode:
+        modeled = policy.select(
+            observation, action_index=4, test_step_index=999, force_random=False
+        )
+        policy.select(observation, action_index=5, test_step_index=999, force_random=False)
     forced = policy.select(observation, action_index=4, test_step_index=999, force_random=True)
     assert modeled.source == "model"
     assert forced.source == "weighted_random"
+    second_context = encode.call_args_list[1].kwargs
+    assert len(second_context["recent_actions"]) == 1
+    assert second_context["coverage_symbols"] == (1, 2)
+    assert second_context["recent_symbol_history"] == ((1, 2),)
+    assert second_context["step_number"] == 5
 
 
 def test_policy_rejects_a_corrupted_checkpoint_before_loading(tmp_path: Path) -> None:
