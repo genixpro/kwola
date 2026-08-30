@@ -1,5 +1,6 @@
 """Thread-safe, drainable browser telemetry collector."""
 
+import hashlib
 from dataclasses import dataclass
 from threading import Lock
 
@@ -44,3 +45,13 @@ class TelemetryBuffer:
             self._console.clear()
             self._network.clear()
             return console, network
+
+    def network_symbols(self) -> tuple[int, ...]:
+        with self._lock:
+            urls = {entry.url for entry in self._network if entry.status > 0}
+        return tuple(sorted(_network_symbol(url) for url in urls))
+
+
+def _network_symbol(url: str) -> int:
+    digest = hashlib.blake2b(url.encode(), digest_size=8)
+    return int.from_bytes(digest.digest())

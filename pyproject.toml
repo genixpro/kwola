@@ -38,7 +38,7 @@ kwola = "kwola.bin.main:main"
 include = ["kwola*"]
 
 [tool.setuptools.package-data]
-kwola = ["browser/assets/*.js", "images/*.png"]
+kwola = ["browser/assets/*.js", "instrumentation/assets/*.cjs", "images/*.png"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=kwola --cov-branch --cov-report=term-missing"

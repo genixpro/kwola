@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from kwola.domain.actions import Action, ActionMap
 from kwola.domain.observations import Observation, Viewport
+from kwola.instrumentation import BranchTraceCollector, ProxyService
 from kwola.instrumentation.telemetry import TelemetryBuffer
 
 from .adapter import PlaywrightBrowserAdapter
@@ -25,6 +26,8 @@ class BrowserSessionCoordinator:
         screenshots: ScreenshotService,
         autologin: AutologinService,
         telemetry: TelemetryBuffer,
+        branch_traces: BranchTraceCollector | None = None,
+        proxy: ProxyService | None = None,
         clock: Callable[[], float] = time.time,
         action_settle_seconds: float = 0.25,
     ) -> None:
@@ -35,12 +38,16 @@ class BrowserSessionCoordinator:
         self._screenshots = screenshots
         self._autologin = autologin
         self._telemetry = telemetry
+        self._branch_traces = branch_traces
+        self._proxy = proxy
         self._clock = clock
         self._action_settle_ms = action_settle_seconds * 1000
 
     def start(self, target: str) -> Observation:
-        self._adapter.start()
+        if self._proxy is not None:
+            self._proxy.start()
         try:
+            self._adapter.start()
             self._adapter.navigate(target)
             self._waiter.wait(self._adapter.page)
             self._autologin.run(self._adapter.page)
@@ -50,7 +57,11 @@ class BrowserSessionCoordinator:
             raise
 
     def close(self) -> None:
-        self._adapter.close()
+        try:
+            self._adapter.close()
+        finally:
+            if self._proxy is not None:
+                self._proxy.close()
 
     def discover_actions(self) -> ActionMap:
         return self._extractor.extract(self._adapter.page)
@@ -70,5 +81,12 @@ class BrowserSessionCoordinator:
             viewport=Viewport(action_map.viewport_width, action_map.viewport_height),
             action_map=action_map,
             timestamp=self._clock(),
+            branch_symbols=self._collect_branches(),
+            network_symbols=self._telemetry.network_symbols(),
             console_messages=tuple(entry.message for entry in console),
         )
+
+    def _collect_branches(self) -> tuple[int, ...]:
+        if self._branch_traces is None:
+            return ()
+        return self._branch_traces.collect(self._adapter.page)

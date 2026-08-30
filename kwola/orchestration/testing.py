@@ -20,7 +20,13 @@ from kwola.config import load_config
 from kwola.config.models import ViewportConfig
 from kwola.domain.actions import Action, BrowserKind
 from kwola.domain.observations import Observation
-from kwola.instrumentation import TelemetryBuffer
+from kwola.instrumentation import (
+    BranchTraceCollector,
+    InstrumentationAddon,
+    ProxyService,
+    ResourceRegistry,
+    TelemetryBuffer,
+)
 from kwola.storage import AtomicBlobStore, LmdbRunStore
 
 from .results import RunnerResult
@@ -44,9 +50,26 @@ class TestingRunner:
         if browser_kind not in self._config.browser.enabled:
             raise ValueError(f"browser {browser_kind} is not enabled for this run")
         selected_viewport = self._viewport(viewport)
-        step_index = self._step_index()
+        with self._store() as store:
+            return self._run_step(
+                store,
+                started,
+                browser_kind,
+                selected_viewport,
+                random_policy,
+            )
+
+    def _run_step(
+        self,
+        store: LmdbRunStore,
+        started: float,
+        browser_kind: BrowserKind,
+        viewport: ViewportConfig,
+        random_policy: bool,
+    ) -> RunnerResult:
+        step_index = self._step_index(store)
         step_id = f"testing-{step_index:08d}"
-        session = self._session(browser_kind, selected_viewport)
+        session = self._session(browser_kind, viewport, store)
         artifacts: list[str] = []
         try:
             observation = session.start(str(self._config.target))
@@ -55,6 +78,7 @@ class TestingRunner:
                 self._config.policy.custom_typing_strings,
             )
             rewards: list[float] = []
+            seen_branches = set(observation.branch_symbols)
             for trace_index in range(self._config.policy.testing_sequence_length):
                 action = policy.select(observation.action_map)
                 before = observation
@@ -66,9 +90,11 @@ class TestingRunner:
                     before,
                     observation,
                     artifacts,
+                    store,
+                    seen_branches,
                 )
                 rewards.append(reward)
-            self._complete_step(step_id, browser_kind, rewards, random_policy)
+            self._complete_step(store, step_id, browser_kind, rewards, random_policy)
             return RunnerResult(
                 status="completed",
                 step_id=step_id,
@@ -80,7 +106,10 @@ class TestingRunner:
             session.close()
 
     def _session(
-        self, browser: BrowserKind, viewport: ViewportConfig
+        self,
+        browser: BrowserKind,
+        viewport: ViewportConfig,
+        store: LmdbRunStore,
     ) -> BrowserSessionCoordinator:
         telemetry = TelemetryBuffer()
         navigation = NavigationPolicy(
@@ -89,8 +118,10 @@ class TestingRunner:
         extractor = ActionMapExtractor(navigation)
         executor = ActionExecutor()
         waiter = NetworkWaiter(self._config.browser.page_load_timeout_seconds)
+        proxy = self._proxy(store, telemetry)
+        proxy_server = proxy.server if proxy is not None else None
         adapter = PlaywrightBrowserAdapter(
-            self._config.browser, browser, viewport, telemetry
+            self._config.browser, browser, viewport, telemetry, proxy_server
         )
         autologin = AutologinService(
             self._config.browser.autologin, extractor, executor, waiter
@@ -103,6 +134,8 @@ class TestingRunner:
             ScreenshotService(),
             autologin,
             telemetry,
+            BranchTraceCollector() if proxy is not None else None,
+            proxy,
             clock=self._clock,
             action_settle_seconds=self._config.browser.action_settle_seconds,
         )
@@ -115,14 +148,19 @@ class TestingRunner:
         before: Observation,
         after: Observation,
         artifacts: list[str],
+        store: LmdbRunStore,
+        seen_branches: set[int],
     ) -> float:
+        new_branches = set(after.branch_symbols) - seen_branches
+        seen_branches.update(after.branch_symbols)
+        new_network = set(after.network_symbols) - set(before.network_symbols)
         reward = RewardCalculator(self._config.policy.rewards).present(
             RewardSignals(
                 action_succeeded=True,
-                code_executed=False,
-                new_branches_executed=False,
-                network_traffic=False,
-                new_network_traffic=False,
+                code_executed=bool(after.branch_symbols),
+                new_branches_executed=bool(new_branches),
+                network_traffic=bool(after.network_symbols),
+                new_network_traffic=bool(new_network),
                 screenshot_changed=before.screenshot != after.screenshot,
                 screenshot_new=False,
                 url_changed=before.url != after.url,
@@ -134,51 +172,73 @@ class TestingRunner:
         blob = AtomicBlobStore(self._run_dir / self._config.storage.blobs_directory)
         screenshot = blob.write("screenshots", f"{trace_id}.png", after.screenshot)
         artifacts.append(str(screenshot.relative_to(self._run_dir)))
-        with self._store() as store:
-            store.put(
-                "traces",
-                trace_id,
-                {
-                    "step_id": step_id,
-                    "index": trace_index,
-                    "action": {
-                        "kind": action.kind.value,
-                        "x": action.x,
-                        "y": action.y,
-                        "text": action.text,
-                        "direction": action.direction,
-                        "source": action.source,
-                    },
-                    "url_before": before.url,
-                    "url_after": after.url,
-                    "reward": reward,
-                    "screenshot": str(screenshot.relative_to(self._run_dir)),
+        store.put(
+            "traces",
+            trace_id,
+            {
+                "step_id": step_id,
+                "index": trace_index,
+                "action": {
+                    "kind": action.kind.value,
+                    "x": action.x,
+                    "y": action.y,
+                    "text": action.text,
+                    "direction": action.direction,
+                    "source": action.source,
                 },
-            )
+                "url_before": before.url,
+                "url_after": after.url,
+                "reward": reward,
+                "branch_symbols": list(after.branch_symbols),
+                "network_symbols": list(after.network_symbols),
+                "screenshot": str(screenshot.relative_to(self._run_dir)),
+            },
+        )
         return reward
 
-    def _step_index(self) -> int:
-        with self._store() as store:
-            state = store.get("run", "state") or {}
-            return int(state.get("testing_steps", 0))
+    @staticmethod
+    def _step_index(store: LmdbRunStore) -> int:
+        state = store.get("run", "state") or {}
+        return int(state.get("testing_steps", 0))
 
+    @staticmethod
     def _complete_step(
-        self, step_id: str, browser: BrowserKind, rewards: list[float], random_policy: bool
+        store: LmdbRunStore,
+        step_id: str,
+        browser: BrowserKind,
+        rewards: list[float],
+        random_policy: bool,
     ) -> None:
-        with self._store() as store:
-            state = store.get("run", "state") or {}
-            state["testing_steps"] = int(state.get("testing_steps", 0)) + 1
-            store.put("run", "state", state)
-            store.put(
-                "testing_steps",
-                step_id,
-                {
-                    "browser": browser.value,
-                    "random": random_policy,
-                    "trace_count": len(rewards),
-                    "reward": sum(rewards),
-                },
-            )
+        state = store.get("run", "state") or {}
+        state["testing_steps"] = int(state.get("testing_steps", 0)) + 1
+        store.put("run", "state", state)
+        store.put(
+            "testing_steps",
+            step_id,
+            {
+                "browser": browser.value,
+                "random": random_policy,
+                "trace_count": len(rewards),
+                "reward": sum(rewards),
+            },
+        )
+
+    def _proxy(
+        self, store: LmdbRunStore, telemetry: TelemetryBuffer
+    ) -> ProxyService | None:
+        config = self._config.instrumentation
+        if not config.enabled:
+            return None
+        blobs = AtomicBlobStore(self._run_dir / self._config.storage.blobs_directory)
+        resources = ResourceRegistry(store, blobs, self._run_dir)
+        addon = InstrumentationAddon(
+            telemetry,
+            resources,
+            rewrite_html=config.rewrite_html,
+            rewrite_javascript=config.rewrite_javascript,
+            capture_resources=config.capture_resources,
+        )
+        return ProxyService(addon, config.proxy_port)
 
     def _store(self) -> LmdbRunStore:
         return LmdbRunStore(
