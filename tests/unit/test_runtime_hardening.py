@@ -98,6 +98,25 @@ def test_cpu_distributed_coordinator_lifecycle(monkeypatch: pytest.MonkeyPatch) 
         DistributedSettings(0, 1, 0, "unused")
 
 
+def test_nccl_barrier_names_the_local_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    barrier_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda _device: None)
+    monkeypatch.setattr(distributed_training.distributed, "init_process_group", lambda **_v: None)
+    monkeypatch.setattr(
+        distributed_training.distributed,
+        "barrier",
+        lambda **values: barrier_calls.append(values),
+    )
+    monkeypatch.setattr(distributed_training.distributed, "destroy_process_group", lambda: None)
+    coordinator = DistributedCoordinator(DistributedSettings(0, 1, 1, "tcp://127.0.0.1:1"))
+
+    with coordinator:
+        coordinator.barrier()
+
+    assert barrier_calls == [{"device_ids": [1]}]
+
+
 class FakePage:
     url = "https://example.com/app"
 
@@ -293,8 +312,11 @@ def test_training_runner_iterations_state_record_and_dispatch(
         assert store.get("run", "state")["training_iterations"] == 2  # type: ignore[index]
 
 
-def test_cpu_benchmark_executes_complete_optimizer_path(tmp_path: Path) -> None:
+def test_cpu_benchmark_executes_complete_optimizer_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 12)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
     result = run_benchmark(tmp_path, iterations=1)
 

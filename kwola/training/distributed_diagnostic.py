@@ -40,7 +40,9 @@ def run_two_rank_diagnostic() -> DistributedDiagnosticResult:
 
 
 def _diagnostic_rank(rank: int, world_size: int, init_method: str, results: Any) -> None:
-    config = profile_config("testing", "https://example.com", 991)
+    # Match production's reward-only heads. Two steps are intentional: DDP reports
+    # an unfinished reduction from unused parameters at the next forward pass.
+    config = profile_config("rig", "https://example.com", 991)
     settings = DistributedSettings(rank, world_size, rank, init_method)
     with DistributedCoordinator(settings) as coordinator:
         action_count = len(action_catalog(config.policy))
@@ -55,6 +57,7 @@ def _diagnostic_rank(rank: int, world_size: int, init_method: str, results: Any)
             device=coordinator.device,
             impossible_reward=config.policy.rewards.impossible_action,
         )
+        metrics = optimizer.step(request)
         metrics = optimizer.step(request)
         loss = torch.tensor([metrics.loss], device=coordinator.device)
         gathered = [torch.zeros_like(loss) for _ in range(world_size)]

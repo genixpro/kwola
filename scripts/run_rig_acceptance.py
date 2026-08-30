@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the destructive-on-copies Kwola 1.1 rig release gate and capture evidence."""
+"""Run the fresh-schema Kwola 1.1 rig release gate and capture evidence."""
 
 import argparse
 import hashlib
@@ -13,7 +13,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from kwola.config import load_config
 from kwola.storage import LmdbRunStore, load_manifest, verify_checkpoint
@@ -40,7 +40,6 @@ def main(argv: list[str] | None = None) -> int:
         evidence_dir = arguments.evidence_dir.resolve()
         _prepare_evidence_dir(evidence_dir)
         runner = AcceptanceRunner(
-            legacy_run=arguments.legacy_run_dir.resolve(),
             evidence_dir=evidence_dir,
             kros1_url=arguments.kros1_url,
             kros3_url=arguments.kros3_url,
@@ -56,12 +55,10 @@ class AcceptanceRunner:
     def __init__(
         self,
         *,
-        legacy_run: Path,
         evidence_dir: Path,
         kros1_url: str,
         kros3_url: str,
     ) -> None:
-        self.legacy_run = legacy_run
         self.evidence_dir = evidence_dir
         self.kros1_url = kros1_url
         self.kros3_url = kros3_url
@@ -72,25 +69,24 @@ class AcceptanceRunner:
         self.metrics: dict[str, Any] = {}
         self.kwola = _required_command("kwola")
         self.pytest = _required_command("pytest")
+        self.ruff = _required_command("ruff")
+        self.mypy = _required_command("mypy")
 
     def run(self) -> None:
-        legacy_copy = self.evidence_dir / "legacy-copy"
         fresh_run = self.evidence_dir / "fresh-rig-run"
-        shutil.copytree(self.legacy_run, legacy_copy, symlinks=False)
-        original_digest = _tree_digest(self.legacy_run)
-        self.artifact_hashes["legacy_source_tree"] = original_digest
-        self.artifact_hashes["legacy_source_checkpoint"] = _checkpoint_hash(legacy_copy)
+        self._run(
+            "ruff-format",
+            (self.ruff, "format", "--check", "kwola", "tests", __file__),
+        )
+        self._run("ruff-check", (self.ruff, "check", "kwola", "tests", __file__))
+        self._run("mypy", (self.mypy, "--strict", "kwola", __file__))
+        self._run("pytest", (self.pytest, "-q"))
         self._run("doctor", (self.kwola, "doctor", "--require-gpus", "2"))
         self._run(
             "browser-contract",
             (self.pytest, "-q", "tests/rig/test_browser_action_contract.py", "--no-cov"),
             environment={"KWOLA_RIG_ACCEPTANCE": "1", "KWOLA_KROS1_URL": self.kros1_url},
         )
-        self._run(
-            "legacy-checkpoint-single-gpu",
-            (self.kwola, "train-step", str(legacy_copy), "--gpu", "0"),
-        )
-        self.artifact_hashes["legacy_copy_published_checkpoint"] = _checkpoint_hash(legacy_copy)
         self._run(
             "initialize-fresh-rig",
             (
@@ -133,8 +129,6 @@ class AcceptanceRunner:
             ("ps", "-ax", "-o", "pid=,command="),
         )
         _verify_clean_process_scan(self.evidence_dir / process_scan.log)
-        if _tree_digest(self.legacy_run) != original_digest:
-            raise AcceptanceFailure("the original legacy run changed during acceptance")
         self._write_manifest()
 
     def _run_concurrent_training(self, fresh_run: Path) -> None:
@@ -267,7 +261,6 @@ class AcceptanceRunner:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--legacy-run-dir", type=Path, required=True)
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--kros1-url", required=True)
     parser.add_argument("--kros3-url", required=True)
@@ -309,14 +302,6 @@ def _command_evidence(
     )
 
 
-def _tree_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    for child in sorted(item for item in path.rglob("*") if item.is_file()):
-        digest.update(str(child.relative_to(path)).encode())
-        digest.update(hashlib.sha256(child.read_bytes()).digest())
-    return digest.hexdigest()
-
-
 def _verify_instrumented_run(run_dir: Path) -> None:
     config = load_config(run_dir)
     with LmdbRunStore(
@@ -345,6 +330,8 @@ def _checkpoint_hash(run_dir: Path) -> str:
 
 def _verify_benchmark(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise AcceptanceFailure("benchmark output is not a JSON object")
     if not payload.get("passed"):
         raise AcceptanceFailure("benchmark did not pass")
     if float(payload["samples_per_second"]) < 145:
@@ -353,7 +340,7 @@ def _verify_benchmark(path: Path) -> dict[str, Any]:
         raise AcceptanceFailure("benchmark optimizer median exceeds 1.35 seconds")
     if float(payload["peak_vram_gib"]) > 5.0:
         raise AcceptanceFailure("benchmark peak VRAM exceeds 5 GiB")
-    return payload
+    return cast(dict[str, Any], payload)
 
 
 def _environment_versions() -> dict[str, str]:

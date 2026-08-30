@@ -100,3 +100,13 @@ def test_future_trace_embedding_is_a_detached_auxiliary_target() -> None:
     output = model(request)["decayingFutureSymbolEmbedding"]
 
     assert not output.requires_grad
+
+
+def test_reward_only_profile_has_no_trainable_parameters_detached_from_loss() -> None:
+    config = profile_config("rig", "https://example.com", 1)
+    model = TraceNet(config.model, 4)
+
+    outputs = model(inputs(2, 4))
+    (outputs["presentRewards"].mean() + outputs["discountFutureRewards"].mean()).backward()
+
+    assert [name for name, parameter in model.named_parameters() if parameter.grad is None] == []

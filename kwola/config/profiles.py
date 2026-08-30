@@ -80,7 +80,7 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
             "enable_trace_prediction": False,
         },
         "training": {
-            "batch_size": 24,
+            "batch_size": 48,
             "batches_per_iteration": 600,
             "min_batches_per_iteration": 300,
             "max_batches_per_iteration": 900,

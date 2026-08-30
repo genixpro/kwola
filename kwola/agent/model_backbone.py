@@ -29,7 +29,6 @@ class BackboneInput:
 class BackboneOutput:
     merged: Tensor
     stamp: Tensor
-    state_features: Tensor
     height: int
     width: int
 
@@ -40,9 +39,6 @@ class TraceNetBackbone(nn.Module):
         self.config = config
         self.stamp_size = config.additional_stamp_edge**2 * config.additional_stamp_depth
         self.recent_symbols = nn.EmbeddingBag(
-            config.symbol_dictionary_size, config.symbol_embedding_size, mode="sum"
-        )
-        self.coverage_symbols = nn.EmbeddingBag(
             config.symbol_dictionary_size, config.symbol_embedding_size, mode="sum"
         )
         self.attention_keys = nn.Embedding(
@@ -75,7 +71,7 @@ class TraceNetBackbone(nn.Module):
         visual_input = torch.cat([data.image, data.recent_actions_image], dim=1)
         pixels = self.visual(visual_input)
         batch, _, height, width = pixels.shape
-        recent, coverage = self._symbol_bags(data)
+        recent = self._recent_symbol_bag(data)
         attended = self._attention(data, pixels, batch, height, width)
         actions = self.recent_action_projection(data.recent_actions_vector)
         additional = torch.cat(
@@ -89,21 +85,15 @@ class TraceNetBackbone(nn.Module):
         action_image = actions.reshape(batch, self.config.recent_action_features, 1, 1)
         action_image = action_image.repeat(1, 1, height, width)
         merged = torch.cat([attended, action_image, stamp_layer, pixels], dim=1)
-        state_features = torch.cat([additional.reshape(batch, -1), coverage], dim=1)
-        return BackboneOutput(merged, stamp, state_features, height, width)
+        return BackboneOutput(merged, stamp, height, width)
 
-    def _symbol_bags(self, data: BackboneInput) -> tuple[Tensor, Tensor]:
+    def _recent_symbol_bag(self, data: BackboneInput) -> Tensor:
         recent = self.recent_symbols(
             data.recent_symbol_indexes,
             data.recent_symbol_offsets,
             per_sample_weights=data.recent_symbol_weights,
         )
-        coverage = self.coverage_symbols(
-            data.coverage_symbol_indexes,
-            data.coverage_symbol_offsets,
-            per_sample_weights=data.coverage_symbol_weights,
-        )
-        return nn.functional.normalize(recent, dim=1), nn.functional.normalize(coverage, dim=1)
+        return nn.functional.normalize(recent, dim=1)
 
     def _attention(
         self, data: BackboneInput, pixels: Tensor, batch: int, height: int, width: int

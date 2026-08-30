@@ -62,7 +62,10 @@ class DistributedCoordinator:
 
     def barrier(self) -> None:
         self._require_started()
-        distributed.barrier()
+        if self.settings.backend == "nccl":
+            distributed.barrier(device_ids=[self.settings.local_device])
+        else:
+            distributed.barrier()
 
     def propagate_failure(self, failed: bool) -> bool:
         self._require_started()

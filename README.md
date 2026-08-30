@@ -1,9 +1,10 @@
 # Kwola
 
-Kwola is an autonomous browser-testing and learning system for web applications. Kwola 1.1 remains
-compatible with 1.0 run configurations and correctly published checkpoints. It requires Python 3.12
-and targets Linux for production. It supports Playwright Chromium and Firefox,
-mitmproxy-based JavaScript branch instrumentation, local LMDB runs, and PyTorch/NCCL training.
+Kwola is an autonomous browser-testing and learning system for web applications. Kwola 1.1 uses the
+learning schema version 2 and intentionally rejects 1.0 runs and checkpoints; initialize a fresh run
+after upgrading. It requires Python 3.12 and targets Linux for production. It supports Playwright
+Chromium and Firefox, mitmproxy-based JavaScript branch instrumentation, local LMDB runs, and
+PyTorch/NCCL training.
 
 ## Install
 
@@ -39,9 +40,10 @@ kwola proxy install-cert
 
 The built-in profiles are `testing`, `standard`, and `rig`. `rig` is the default and continuously
 feeds both GPUs from eight parallel browser environments. It budgets two CPU threads per browser
-and four per training rank on the 32-thread reference host, caches decoded screenshots in RAM, and
-prefetches CPU batches while the GPUs optimize. `standard` preserves the conservative two-rank
-reference configuration. Pass `--gpu INDEX` for an explicit single-GPU step.
+and four per training rank on the 32-thread reference host, uses a measured batch of 48 per GPU,
+caches decoded screenshots in RAM, and prefetches CPU batches while the GPUs optimize. `standard`
+preserves the conservative two-rank reference configuration. Pass `--gpu INDEX` for an explicit
+single-GPU step.
 
 Every run contains strictly validated `kwola.json` and `manifest.json` files, an LMDB database,
 content-addressed blobs, disposable prepared-sample cache records, reports, logs, and atomically
@@ -51,8 +53,8 @@ Credentials are referenced by environment-variable name and are never written in
 configuration files. For example, set `browser.autologin.email_environment` and
 `browser.autologin.password_environment` in `kwola.json`, then export those named variables before
 running Kwola. The equivalent fixed-action fields are `policy.actions.email_environment` and
-`policy.actions.password_environment`. Legacy 1.0 files containing inline credentials remain
-loadable, but Kwola refuses to write new configuration files containing inline secrets.
+`policy.actions.password_environment`. Kwola refuses to write new configuration files containing
+inline secrets.
 
 See [Architecture](docs/architecture.md) for component and process ownership, storage layout, hook
 ordering, and failure behavior. See [Acceptance evidence](docs/acceptance.md) for the recorded
@@ -75,11 +77,10 @@ Every high or critical advisory fails this policy unless it has an owned, justif
 exception, regardless of whether an upstream fix is currently available.
 
 Release acceptance additionally passes `--require-no-exceptions` to the dependency policy and runs
-the complete gate on the Linux two-GPU host without modifying the source 1.0 run:
+the complete gate from a fresh schema-v2 run on the Linux two-GPU host:
 
 ```sh
 uv run python scripts/run_rig_acceptance.py \
-  --legacy-run-dir /path/to/kwola-1.0-run \
   --evidence-dir /path/to/new-empty-evidence-directory \
   --kros1-url http://127.0.0.1:3001/ \
   --kros3-url http://127.0.0.1:3003/

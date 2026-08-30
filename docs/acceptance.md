@@ -67,6 +67,31 @@ instrumentation absence, ordered exploration thresholds, replay coverage/shuffli
 varied persistent crop augmentation, and strict checkpoint round trips. Training telemetry records
 the present and future losses, selected Q, bootstrap target, absolute TD error, and gradient norm.
 
+## Schema-v2 measured results (2026-08-30)
+
+- The final source passed Ruff formatting/linting, strict mypy over 91 Python sources, and the full
+  suite on both macOS and the Linux rig: 189 passed, two opt-in tests skipped, and 88.45%/88.72%
+  branch-aware coverage. The live Kros action contract also passed in Chromium and Firefox.
+- A 600-iteration single-GPU recorded-sample step published a complete schema-v2 checkpoint and
+  sustained 185.73 optimizer samples/second. The first real two-rank attempt then exposed a dead
+  coverage-state embedding that single-device execution could tolerate but DDP could not reduce.
+  Removing that obsolete state-value path made every reward-only model parameter participate in the
+  loss; the diagnostic now deliberately executes two iterations so this failure class is caught.
+- The corrected 600-iteration DDP step completed concurrently with Firefox collection in 149.72
+  seconds at 260.86 optimizer and 192.36 end-to-end samples/second. Both GPUs averaged 80.7% while
+  loaded at batch 24, and the online model, target model, optimizer, and iteration state published as
+  checkpoint generation 1.
+- Sustained batch measurements increased end-to-end throughput from 192.36 at batch 24 to 211.06 at
+  batch 32, 216.52 at batch 40, and 229.15 at batch 48. Batch 48 delivered 326.85 optimizer
+  samples/second and peaked at 6,352 MiB per 8 GiB card, so the rig profile now uses 48 while
+  retaining roughly 1.8 GiB of VRAM margin. The warmed acceptance benchmark passed at 451.20
+  samples/second, 0.10638 seconds median optimizer time, and 3.179 GiB peak allocated VRAM.
+- A bounded production-shaped run kept all eight browser slots (four Chromium and four Firefox) and
+  both DDP ranks active. Every initial browser slot completed 50 actions and was resubmitted. During
+  the loaded window the GPUs averaged 73.1% and 71.3%, host CPU averaged 38.1% with a 100% peak, no
+  swap or I/O wait occurred, and the pipeline retained ample RAM. The intentional interrupt recorded
+  `pipeline_stopped`; the final scan found no browser, proxy, instrumentation, or training workers.
+
 The unchanged performance gates are at least 145 samples/second, no more than 1.35 seconds median
 optimizer time, and no more than 5 GiB peak VRAM. The 1.0.0 measurements above are historical
 baseline evidence and do not satisfy the 1.1.0 release gate.
