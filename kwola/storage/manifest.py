@@ -40,6 +40,7 @@ class RunManifest(ManifestModel):
         profile: ProfileName,
         seed: int,
         enabled_browsers: tuple[BrowserKind, ...],
+        schema_version: int = 1,
     ) -> "RunManifest":
         try:
             kwola_version = version("kwola")
@@ -51,6 +52,7 @@ class RunManifest(ManifestModel):
             profile=profile,
             seed=seed,
             enabled_browsers=enabled_browsers,
+            schema_version=schema_version,
         )
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from pydantic import BaseModel, ConfigDict, Field
 
-from kwola.agent import TraceNet
+from kwola.agent import TraceNet, action_catalog
 from kwola.config import load_config
 
 from .batches import diagnostic_batch
@@ -29,11 +29,12 @@ def run_benchmark(run_dir: Path, iterations: int = 5) -> BenchmarkResult:
         torch.cuda.set_device(device)
         torch.cuda.reset_peak_memory_stats(device)
         torch.backends.cudnn.benchmark = True
-    model = TraceNet(config.model, num_actions=6).to(device)
+    action_count = len(action_catalog(config.policy))
+    model = TraceNet(config.model, num_actions=action_count).to(device)
     optimizer = ModelOptimizer(model, config.training)
     request = diagnostic_batch(
         batch_size=config.training.batch_size,
-        num_actions=6,
+        num_actions=action_count,
         edge=64 if config.profile == "testing" else 320,
         seed=config.seed,
         device=device,

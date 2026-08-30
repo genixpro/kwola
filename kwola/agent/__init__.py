@@ -1,5 +1,6 @@
 """Inference policy, rewards, encoders, symbols, model, and checkpoints."""
 
+from .actions import action_catalog
 from .exploration import ExplorationProbabilities, ExplorationSchedule
 from .policy import InferencePolicy
 from .random_policy import RandomActionPolicy
@@ -15,4 +16,5 @@ __all__ = [
     "RewardSignals",
     "TraceNet",
     "TraceNetRequest",
+    "action_catalog",
 ]

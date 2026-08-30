@@ -1,16 +1,22 @@
 """One explicit optimizer runner with rank-zero checkpoint publication."""
 
 import copy
+import random
 import time
 from pathlib import Path
 
 import torch
 
-from kwola.agent import TraceNet
+from kwola.agent import TraceNet, action_catalog
 from kwola.config import load_config
-from kwola.hooks import HookRegistry, LifecycleEvent, LifecycleEventName
+from kwola.hooks import (
+    HookRegistry,
+    LifecycleEvent,
+    LifecycleEventName,
+    training_core_hooks,
+)
 from kwola.storage import CheckpointPublisher, LmdbRunStore, RunManifest, load_manifest
-from kwola.training.optimizer import ModelOptimizer
+from kwola.training.optimizer import ModelOptimizer, OptimizerMetrics
 from kwola.training.samples import RecordedSampleAssembler, TrainingBatch
 
 from .results import RunnerResult
@@ -20,7 +26,7 @@ class TrainingRunner:
     def __init__(self, run_dir: Path, hooks: HookRegistry | None = None) -> None:
         self._run_dir = run_dir
         self._config = load_config(run_dir)
-        self._hooks = hooks or HookRegistry()
+        self._hooks = hooks or HookRegistry(training_core_hooks(run_dir, self._config))
 
     def run(self, gpu: int | None = None) -> RunnerResult:
         self._dispatch(LifecycleEventName.RUN_STARTED)
@@ -47,31 +53,34 @@ class TrainingRunner:
         if gpu is not None:
             torch.cuda.set_device(gpu)
         with self._store() as store:
-            step_index, trace_count = self._state(store)
+            step_index, trace_count, training_index, iteration_count = self._state(store)
             if trace_count == 0:
                 raise RuntimeError("training requires at least one recorded browser trace")
-            batch = self._batch(store, device)
+            self._assembler(store).prepare_cache(self._config.training.sample_cache_workers)
         step_id = f"training-{step_index:08d}"
-        model = TraceNet(self._config.model, num_actions=6).to(device)
+        model = TraceNet(
+            self._config.model, num_actions=len(action_catalog(self._config.policy))
+        ).to(device)
         optimizer = ModelOptimizer(model, self._config.training)
         manifest = load_manifest(self._run_dir)
         checkpoint_file = manifest.checkpoint.file if manifest.checkpoint else None
         self._load_checkpoint(model, optimizer, checkpoint_file)
         target_model = copy.deepcopy(model).to(device).eval()
-        metrics = optimizer.step_training(
-            batch,
-            target_model,
-            step_index,
-            self._config.policy.rewards.discount_rate,
-            self._config.policy.rewards.max_discounted_reward,
+        metrics = self._iterations(
+            optimizer, model, target_model, device, training_index, iteration_count
         )
-        checkpoint = self._publish(model, optimizer, manifest, step_index + 1)
-        self._record(step_id, metrics.loss, metrics.duration_seconds)
+        checkpoint = self._maybe_publish(model, optimizer, manifest, step_index + 1)
+        self._record(
+            step_id,
+            metrics.loss,
+            metrics.duration_seconds,
+            iteration_count,
+        )
         return RunnerResult(
             status="completed",
             step_id=step_id,
             duration_seconds=time.perf_counter() - started,
-            artifacts=(str(checkpoint.relative_to(self._run_dir)),),
+            artifacts=(str(checkpoint.relative_to(self._run_dir)),) if checkpoint else (),
             metrics={
                 "loss": metrics.loss,
                 "optimizer_seconds": metrics.duration_seconds,
@@ -79,29 +88,85 @@ class TrainingRunner:
             },
         )
 
-    def _batch(self, store: LmdbRunStore, device: torch.device) -> TrainingBatch:
-        assembler = RecordedSampleAssembler(
+    def _iterations(
+        self,
+        optimizer: ModelOptimizer,
+        model: TraceNet,
+        target: TraceNet,
+        device: torch.device,
+        training_index: int,
+        iteration_count: int,
+    ) -> OptimizerMetrics:
+        results = []
+        count = iteration_count
+        for iteration in range(count):
+            with self._store() as store:
+                batch = self._batch(store, device, iteration * self._config.training.batch_size)
+            index = training_index + iteration
+            results.append(
+                optimizer.step_training(
+                    batch,
+                    target,
+                    index,
+                    self._config.policy.rewards.discount_rate,
+                    self._config.policy.rewards.max_discounted_reward,
+                )
+            )
+            if (index + 1) % self._config.training.target_network_update_every == 0:
+                target.load_state_dict(model.state_dict())
+        duration = sum(result.duration_seconds for result in results)
+        samples = count * self._config.training.batch_size
+        return OptimizerMetrics(
+            sum(result.loss for result in results) / count,
+            duration,
+            samples / duration,
+        )
+
+    def _batch(self, store: LmdbRunStore, device: torch.device, offset: int = 0) -> TrainingBatch:
+        return self._assembler(store).assemble(
+            batch_size=self._config.training.batch_size,
+            device=device,
+            impossible_reward=self._config.policy.rewards.impossible_action,
+            offset=offset,
+        )
+
+    def _assembler(self, store: LmdbRunStore) -> RecordedSampleAssembler:
+        return RecordedSampleAssembler(
             self._run_dir,
             store,
             symbol_dictionary_size=self._config.model.symbol_dictionary_size,
             discount_rate=self._config.policy.rewards.discount_rate,
             max_discounted_reward=self._config.policy.rewards.max_discounted_reward,
             cache_version=self._config.training.sample_cache_version,
-        )
-        return assembler.assemble(
-            batch_size=self._config.training.batch_size,
-            edge=64 if self._config.profile == "testing" else 320,
-            device=device,
-            impossible_reward=self._config.policy.rewards.impossible_action,
+            channels=action_catalog(self._config.policy),
+            recent_action_history=self._config.model.recent_action_history,
+            recent_action_radius=self._config.training.recent_action_image_radius,
+            recent_action_decay=self._config.training.recent_action_image_decay,
+            image_downscale_ratio=self._config.model.image_downscale_ratio,
+            crop_size=(
+                self._config.training.crop_width,
+                self._config.training.crop_height,
+            ),
+            next_crop_size=(
+                self._config.training.next_crop_width,
+                self._config.training.next_crop_height,
+            ),
+            crop_random=(
+                self._config.training.crop_random_x,
+                self._config.training.crop_random_y,
+            ),
+            source=random.Random(self._config.seed),
         )
 
-    def _publish(
+    def _maybe_publish(
         self,
         model: TraceNet,
         optimizer: ModelOptimizer,
         manifest: RunManifest,
         generation: int,
-    ) -> Path:
+    ) -> Path | None:
+        if generation % self._config.training.checkpoint_every_iterations:
+            return None
         publisher = CheckpointPublisher(self._run_dir, self._config.storage.checkpoints_directory)
         published = publisher.publish(
             rank=0,
@@ -126,20 +191,35 @@ class TrainingRunner:
         model.load_state_dict(payload["model"])
         optimizer.optimizer.load_state_dict(payload["optimizer"])
 
-    @staticmethod
-    def _state(store: LmdbRunStore) -> tuple[int, int]:
+    def _state(self, store: LmdbRunStore) -> tuple[int, int, int, int]:
         state = store.get("run", "state") or {}
-        return int(state.get("training_steps", 0)), sum(1 for _ in store.scan("traces"))
+        return (
+            int(state.get("training_steps", 0)),
+            sum(1 for _ in store.scan("traces")),
+            int(state.get("training_iterations", 0)),
+            int(
+                state.get(
+                    "scheduled_training_iterations",
+                    self._config.training.batches_per_iteration,
+                )
+            ),
+        )
 
-    def _record(self, step_id: str, loss: float, duration: float) -> None:
+    def _record(self, step_id: str, loss: float, duration: float, iterations: int) -> None:
         with self._store() as store:
             state = store.get("run", "state") or {}
             state["training_steps"] = int(state.get("training_steps", 0)) + 1
+            state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
             store.put("run", "state", state)
             store.put(
                 "training_steps",
                 step_id,
-                {"loss": loss, "optimizer_seconds": duration, "status": "completed"},
+                {
+                    "loss": loss,
+                    "optimizer_seconds": duration,
+                    "iterations": iterations,
+                    "status": "completed",
+                },
             )
 
     def _store(self) -> LmdbRunStore:

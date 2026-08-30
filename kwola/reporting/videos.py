@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,15 @@ import cv2
 
 
 class VideoRenderer:
-    def __init__(self, run_dir: Path, frames_per_second: float = 2.0) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        frames_per_second: float = 2.0,
+        timeout_seconds: float = 900.0,
+    ) -> None:
         self._run_dir = run_dir
         self._fps = frames_per_second
+        self._timeout_seconds = timeout_seconds
 
     def render(
         self,
@@ -23,7 +30,11 @@ class VideoRenderer:
     ) -> Path:
         if not traces:
             raise ValueError("video rendering requires at least one trace")
-        frames = [self._frame(trace, annotated) for trace in traces]
+        deadline = time.monotonic() + self._timeout_seconds
+        frames = []
+        for trace in traces:
+            self._check_deadline(deadline)
+            frames.append(self._frame(trace, annotated))
         height, width = frames[0].shape[:2]
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(dir=path.parent, suffix=".mp4")
@@ -40,15 +51,24 @@ class VideoRenderer:
             raise RuntimeError("OpenCV could not initialize the MP4 video writer")
         try:
             for frame in frames:
+                self._check_deadline(deadline)
                 if frame.shape[:2] != (height, width):
                     frame = cv2.resize(frame, (width, height))
                 writer.write(frame)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
         finally:
             writer.release()
         with temporary.open("rb") as stream:
             os.fsync(stream.fileno())
         temporary.replace(path)
         return path
+
+    @staticmethod
+    def _check_deadline(deadline: float) -> None:
+        if time.monotonic() > deadline:
+            raise TimeoutError("video rendering exceeded its configured timeout")
 
     def _frame(self, trace: Mapping[str, Any], annotated: bool) -> Any:
         screenshot = self._run_dir / str(trace["screenshot"])

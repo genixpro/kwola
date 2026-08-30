@@ -72,6 +72,17 @@ class BrowserSessionCoordinator:
         self._waiter.wait(self._adapter.page)
         return self.observe()
 
+    def cursor_at(self, x: int, y: int) -> str:
+        value = self._adapter.page.evaluate(
+            "([x,y]) => { const e=document.elementFromPoint(x,y); "
+            "return e ? getComputedStyle(e).cursor : 'none'; }",
+            [x, y],
+        )
+        return str(value or "none")
+
+    def page_html(self) -> str:
+        return self._adapter.page.content()
+
     def observe(self) -> Observation:
         action_map = self.discover_actions()
         console, network = self._telemetry.snapshot()

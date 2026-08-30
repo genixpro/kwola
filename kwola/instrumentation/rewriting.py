@@ -10,6 +10,8 @@ from pathlib import Path
 from threading import Lock
 from typing import IO, Self
 
+from .canonical import BranchIndexRealigner, canonicalize_url, resource_identity
+
 
 class RewriteError(RuntimeError):
     pass
@@ -33,6 +35,8 @@ class JavaScriptRewriter:
         self._worker: subprocess.Popen[str] | None = None
         self._lock = Lock()
         self._cache: dict[str, bytes] = {}
+        self._prior_versions: dict[str, bytes] = {}
+        self._realigner = BranchIndexRealigner()
 
     def __enter__(self) -> Self:
         return self
@@ -59,17 +63,22 @@ class JavaScriptRewriter:
         if cached is not None:
             return cached
         strict, body = _remove_strict_prefix(source.strip())
-        resource_id = hashlib.sha256(url.encode()).hexdigest()[:10]
+        canonical_url = canonicalize_url(url)
+        resource_id = resource_identity(url)
         try:
-            output = self._transform(url, body, "script", resource_id)
+            output = self._transform(canonical_url, body, "script", resource_id)
         except RewriteError as error:
             if "'import' and 'export'" not in str(error):
                 raise
-            output = self._transform(url, body, "module", resource_id)
+            output = self._transform(canonical_url, body, "module", resource_id)
         if self._branch_counter.search(output) is None:
             self._cache[cache_key] = source
             return source
         prefix = b'"use strict";\n' if strict else b""
+        prior = self._prior_versions.get(canonical_url)
+        if prior is not None:
+            output = self._realigner.realign(prior, output)
+        self._prior_versions[canonical_url] = output
         rewritten = prefix + output
         self._cache[cache_key] = rewritten
         return rewritten

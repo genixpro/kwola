@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import torch
 
-from kwola.agent import InferencePolicy, TraceNet
+from kwola.agent import InferencePolicy, TraceNet, action_catalog
 from kwola.agent.encoding import ACTION_KINDS, action_masks
 from kwola.config import load_config
 from kwola.domain.actions import ActionMap, ActionTarget
@@ -40,7 +40,7 @@ def test_action_masks_map_target_capabilities() -> None:
 def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 12)
     config = load_config(tmp_path)
-    model = TraceNet(config.model, len(ACTION_KINDS))
+    model = TraceNet(config.model, len(action_catalog(config.policy)))
     manifest = load_manifest(tmp_path)
     published = CheckpointPublisher(tmp_path).publish(
         rank=0,
@@ -56,6 +56,37 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
     forced = policy.select(observation, action_index=4, test_step_index=999, force_random=True)
     assert modeled.source == "model"
     assert forced.source == "weighted_random"
+
+
+def test_policy_suppresses_repeated_target_until_new_branch(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 12)
+    config = load_config(tmp_path)
+    policy_config = config.policy.model_copy(update={"max_repeat_maps_without_new_branches": 1})
+    policy = InferencePolicy(
+        tmp_path,
+        config.model_copy(update={"policy": policy_config}),
+        random.Random(4),
+    )
+    image = np.full((64, 128), 128, dtype=np.uint8)
+    success, encoded = cv2.imencode(".png", image)
+    assert success
+    targets = (
+        ActionTarget(0, 0, 63, 64, "button", can_click=True),
+        ActionTarget(64, 0, 127, 64, "button", can_click=True),
+    )
+    observation = Observation(
+        url="https://example.com",
+        screenshot=encoded.tobytes(),
+        viewport=Viewport(128, 64),
+        action_map=ActionMap(targets, 128, 64, "1"),
+        timestamp=1.0,
+        branch_symbols=(1,),
+    )
+
+    first = policy.select(observation, action_index=0, test_step_index=1, force_random=True)
+    second = policy.select(observation, action_index=1, test_step_index=1, force_random=True)
+
+    assert (first.x < 64) != (second.x < 64)
 
 
 def _observation() -> Observation:

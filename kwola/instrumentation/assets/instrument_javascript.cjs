@@ -17,7 +17,7 @@ input.on("line", (line) => {
     const result = babel.transformSync(
       Buffer.from(request.source, "base64").toString("utf8"),
       {
-        filename: request.url,
+        filename: request.resourceId,
         plugins: [[kwola, {}, request.resourceId]],
         retainLines: true,
         sourceType: request.sourceType,

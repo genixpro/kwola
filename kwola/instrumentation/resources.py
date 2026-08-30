@@ -7,6 +7,8 @@ from typing import Any
 
 from kwola.storage import AtomicBlobStore, LmdbRunStore
 
+from .canonical import canonicalize_url
+
 
 class ResourceRegistry:
     def __init__(
@@ -31,12 +33,14 @@ class ResourceRegistry:
         rewrite_kind: str | None,
     ) -> str:
         content_hash = hashlib.sha256(original).hexdigest()
-        url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+        canonical_url = canonicalize_url(url)
+        url_hash = hashlib.sha256(canonical_url.encode()).hexdigest()[:16]
         record_id = f"{url_hash}-{content_hash[:16]}"
         suffix = _safe_suffix(content_type)
         blob = self._blobs.write("resources", f"{content_hash}{suffix}", original)
         record: dict[str, Any] = {
             "url": url,
+            "canonical_url": canonical_url,
             "status": status,
             "content_type": content_type,
             "headers": dict(headers),
@@ -47,7 +51,20 @@ class ResourceRegistry:
             "blob": str(blob.relative_to(self._run_dir)),
         }
         self._store.put("resources", record_id, record)
-        self._store.put("resource_urls", url_hash, {"latest": record_id, "url": url})
+        previous = self._store.get("resource_urls", url_hash) or {}
+        versions = list(previous.get("versions", []))
+        if record_id not in versions:
+            versions.append(record_id)
+        self._store.put(
+            "resource_urls",
+            url_hash,
+            {
+                "latest": record_id,
+                "url": url,
+                "canonical_url": canonical_url,
+                "versions": versions,
+            },
+        )
         return record_id
 
 

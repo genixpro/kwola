@@ -25,6 +25,9 @@ class TraceNetRequest:
     auxiliary_action_type: Tensor | None = None
     auxiliary_action_x: Tensor | None = None
     auxiliary_action_y: Tensor | None = None
+    future_symbol_indexes: Tensor | None = None
+    future_symbol_offsets: Tensor | None = None
+    future_symbol_weights: Tensor | None = None
 
 
 class TraceNet(nn.Module):
@@ -71,7 +74,19 @@ class TraceNet(nn.Module):
             masks = request.pixel_action_maps
             output["advantage"] = values * masks + (1 - masks) * request.impossible_action_reward
         self._auxiliary(output, request, features, total_reward)
+        self._future_embedding(output, request)
         return output
+
+    def _future_embedding(self, output: dict[str, Tensor], request: TraceNetRequest) -> None:
+        if request.future_symbol_indexes is None:
+            return
+        assert request.future_symbol_offsets is not None
+        assert request.future_symbol_weights is not None
+        output["decayingFutureSymbolEmbedding"] = self.backbone.recent_symbols(
+            request.future_symbol_indexes,
+            request.future_symbol_offsets,
+            per_sample_weights=request.future_symbol_weights,
+        )
 
     def _auxiliary(
         self,

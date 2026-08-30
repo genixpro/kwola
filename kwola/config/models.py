@@ -61,7 +61,6 @@ class InstrumentationConfig(StrictModel):
     capture_network: bool = True
     capture_html: bool = False
     capture_resources: bool = True
-    capture_screenshots: bool = True
     branch_trace_timeout_seconds: float = Field(default=30.0, gt=0)
 
 
@@ -116,6 +115,48 @@ class RewardConfig(StrictModel):
     max_discounted_reward: float = Field(default=10.0, gt=0)
 
 
+class ActionWeightsConfig(StrictModel):
+    click: float = Field(default=1.0, gt=0)
+    clear: float = Field(default=0.5, gt=0)
+    custom_type: float = Field(default=0.5, gt=0)
+    double_click: float = Field(default=0.2, gt=0)
+    right_click: float = Field(default=0.2, gt=0)
+    scrolling: float = Field(default=0.2, gt=0)
+    type_brackets: float = Field(default=0.3, gt=0)
+    type_email: float = Field(default=1.0, gt=0)
+    type_math: float = Field(default=0.3, gt=0)
+    type_name: float = Field(default=0.7, gt=0)
+    type_number: float = Field(default=1.0, gt=0)
+    type_other_symbol: float = Field(default=0.3, gt=0)
+    type_paragraph: float = Field(default=0.7, gt=0)
+    type_password: float = Field(default=1.0, gt=0)
+    random_generated: float = Field(default=0.4, gt=0)
+    random_letters: float = Field(default=1.0, gt=0)
+
+
+class ActionConfig(StrictModel):
+    email: str | None = None
+    password: str | None = None
+    name: str | None = None
+    paragraph: str | None = None
+    random_letters: bool = False
+    random_address: bool = False
+    random_email: bool = True
+    random_phone_number: bool = False
+    random_paragraph: bool = False
+    random_date_time: bool = False
+    random_credit_card: bool = False
+    random_url: bool = False
+    random_number: bool = True
+    random_brackets: bool = False
+    random_math: bool = False
+    random_other_symbol: bool = False
+    double_click: bool = False
+    right_click: bool = False
+    scrolling: bool = True
+    weights: ActionWeightsConfig = ActionWeightsConfig()
+
+
 class PolicyConfig(StrictModel):
     exploration: ExplorationConfig = ExplorationConfig()
     rewards: RewardConfig = RewardConfig()
@@ -124,6 +165,7 @@ class PolicyConfig(StrictModel):
     max_repeat_maps_without_new_branches: int = Field(default=3, ge=0)
     testing_sequence_length: int = Field(default=5, ge=2)
     custom_typing_strings: tuple[str, ...] = ()
+    actions: ActionConfig = ActionConfig()
 
 
 class ConvolutionLayerConfig(StrictModel):
@@ -174,6 +216,9 @@ class LossConfig(StrictModel):
 class TrainingConfig(StrictModel):
     batch_size: int = Field(default=4, ge=1)
     batches_per_iteration: int = Field(default=8, ge=1)
+    min_batches_per_iteration: int = Field(default=1, ge=1)
+    max_batches_per_iteration: int = Field(default=1200, ge=1)
+    batch_iteration_adjustment: int = Field(default=1, ge=1)
     learning_rate: float = Field(default=1e-3, gt=0)
     optimizer: Literal["adam", "adamax"] = "adamax"
     gradient_beta: float = Field(default=0.97, gt=0, lt=1)
@@ -185,6 +230,16 @@ class TrainingConfig(StrictModel):
     sample_cache_version: int = Field(default=1, ge=1)
     use_shared_memory_spool: bool = True
     checkpoint_every_iterations: int = Field(default=1, ge=1)
+    target_network_update_every: int = Field(default=250, ge=1)
+    action_probability_square_size: int = Field(default=30, ge=1)
+    crop_width: int = Field(default=320, ge=8)
+    crop_height: int = Field(default=320, ge=8)
+    next_crop_width: int = Field(default=448, ge=8)
+    next_crop_height: int = Field(default=448, ge=8)
+    crop_random_x: int = Field(default=100, ge=0)
+    crop_random_y: int = Field(default=100, ge=0)
+    recent_action_image_radius: int = Field(default=40, ge=1)
+    recent_action_image_decay: float = Field(default=0.8, gt=0, le=1)
     losses: LossConfig = LossConfig()
 
     @model_validator(mode="after")
@@ -193,6 +248,20 @@ class TrainingConfig(StrictModel):
             raise ValueError("world_size must match the number of device indices")
         if not self.device_indices and self.world_size != 1:
             raise ValueError("CPU training only supports world_size=1")
+        dimensions = (
+            self.crop_width,
+            self.crop_height,
+            self.next_crop_width,
+            self.next_crop_height,
+        )
+        if any(value % 8 for value in dimensions):
+            raise ValueError("training crop dimensions must be divisible by 8")
+        if (
+            not self.min_batches_per_iteration
+            <= self.batches_per_iteration
+            <= self.max_batches_per_iteration
+        ):
+            raise ValueError("batches_per_iteration must be within its adaptive bounds")
         return self
 
 

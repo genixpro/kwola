@@ -35,6 +35,7 @@ def run_doctor(require_gpus: int = 0) -> DoctorReport:
         _check_platform(),
         _check_ffmpeg(),
         _check_lmdb(),
+        _check_shared_memory(),
         *_check_browsers(),
         _check_torch(require_gpus),
     ]
@@ -76,6 +77,23 @@ def _check_lmdb() -> DiagnosticCheck:
         return DiagnosticCheck(name="lmdb", passed=passed, detail="atomic write/read probe")
     except Exception as error:
         return DiagnosticCheck(name="lmdb", passed=False, detail=f"{type(error).__name__}: {error}")
+
+
+def _check_shared_memory() -> DiagnosticCheck:
+    if platform.system() != "Linux":
+        return DiagnosticCheck(
+            name="shared-memory",
+            passed=True,
+            detail="/dev/shm is required on Linux production",
+        )
+    path = Path("/dev/shm")
+    usage = shutil.disk_usage(path) if path.is_dir() else None
+    available = usage.free if usage else 0
+    return DiagnosticCheck(
+        name="shared-memory",
+        passed=path.is_dir() and available >= 1024**3,
+        detail=f"/dev/shm available={available / 1024**3:.2f} GiB (required: 1.00 GiB)",
+    )
 
 
 def _check_browsers() -> tuple[DiagnosticCheck, ...]:

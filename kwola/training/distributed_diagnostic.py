@@ -11,7 +11,7 @@ from torch import distributed
 from torch.multiprocessing import spawn  # type: ignore[attr-defined]
 from torch.nn.parallel import DistributedDataParallel
 
-from kwola.agent import TraceNet
+from kwola.agent import TraceNet, action_catalog
 from kwola.config import profile_config
 
 from .batches import diagnostic_batch
@@ -43,12 +43,13 @@ def _diagnostic_rank(rank: int, world_size: int, init_method: str, results: Any)
     config = profile_config("testing", "https://example.com", 991)
     settings = DistributedSettings(rank, world_size, rank, init_method)
     with DistributedCoordinator(settings) as coordinator:
-        model = TraceNet(config.model, num_actions=6).to(coordinator.device)
+        action_count = len(action_catalog(config.policy))
+        model = TraceNet(config.model, num_actions=action_count).to(coordinator.device)
         parallel = DistributedDataParallel(model, device_ids=[rank], output_device=rank)
         optimizer = ModelOptimizer(parallel, config.training)
         request = diagnostic_batch(
             batch_size=2,
-            num_actions=6,
+            num_actions=action_count,
             edge=64,
             seed=config.seed + rank,
             device=coordinator.device,

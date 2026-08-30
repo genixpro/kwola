@@ -1,17 +1,18 @@
 """Checkpoint-backed inference with scheduled seeded exploration."""
 
 import random
-import string
+from dataclasses import replace
 from pathlib import Path
 
 import torch
 
 from kwola.config.models import RunConfig
-from kwola.domain.actions import Action, ActionKind
+from kwola.domain.actions import Action, ActionKind, ActionTarget
 from kwola.domain.observations import Observation
 from kwola.storage import load_manifest
 
-from .encoding import ACTION_KINDS, ObservationEncoder
+from .actions import action_catalog
+from .encoding import ObservationEncoder
 from .exploration import ExplorationSchedule
 from .random_policy import RandomActionPolicy
 from .tracenet import TraceNet
@@ -22,16 +23,19 @@ class InferencePolicy:
         self._run_dir = run_dir
         self._config = config
         self._random = source
-        self._random_policy = RandomActionPolicy(source, config.policy.custom_typing_strings)
+        self._channels = action_catalog(config.policy)
+        self._random_policy = RandomActionPolicy(
+            source, self._channels, weighted=config.policy.weighted_random_actions
+        )
         self._schedule = ExplorationSchedule(
             config.policy.exploration, config.policy.testing_sequence_length
         )
-        edge = 64 if config.profile == "testing" else 320
         self._encoder = ObservationEncoder(
-            config.model, edge, config.policy.rewards.impossible_action
+            config.model, None, config.policy.rewards.impossible_action, self._channels
         )
-        self._edge = edge
         self._model = self._load_model()
+        self._recent_actions: list[Action] = []
+        self._seen_branches: set[int] = set()
 
     def select(
         self,
@@ -41,6 +45,7 @@ class InferencePolicy:
         test_step_index: int,
         force_random: bool,
     ) -> Action:
+        observation = self._filtered_observation(observation)
         exploration = self._schedule.probability(
             action_index=action_index,
             session_index=0,
@@ -48,14 +53,43 @@ class InferencePolicy:
             test_step_index=test_step_index,
         )
         if force_random or self._model is None or self._random.random() < exploration.random:
-            return self._random_policy.select(observation.action_map)
-        return self._model_action(observation)
+            action = self._random_policy.select(observation.action_map)
+        else:
+            action = self._model_action(observation)
+        self._recent_actions.append(action)
+        return action
+
+    def _filtered_observation(self, observation: Observation) -> Observation:
+        new_branches = set(observation.branch_symbols) - self._seen_branches
+        self._seen_branches.update(observation.branch_symbols)
+        if new_branches:
+            self._recent_actions.clear()
+        policy = self._config.policy
+        if not policy.repeat_action_override or policy.max_repeat_maps_without_new_branches == 0:
+            return observation
+        targets = tuple(
+            target
+            for target in observation.action_map.targets
+            if self._repeat_count(target) < policy.max_repeat_maps_without_new_branches
+        )
+        if not targets:
+            return observation
+        action_map = replace(observation.action_map, targets=targets)
+        return replace(observation, action_map=action_map)
+
+    def _repeat_count(self, target: ActionTarget) -> int:
+        return sum(
+            target.left <= action.x <= target.right
+            and target.top <= action.y <= target.bottom
+            and any(channel.kind is action.kind for channel in self._random_policy.allowed(target))
+            for action in self._recent_actions
+        )
 
     def _load_model(self) -> TraceNet | None:
         manifest = load_manifest(self._run_dir)
         if manifest.checkpoint is None:
             return None
-        model = TraceNet(self._config.model, len(ACTION_KINDS))
+        model = TraceNet(self._config.model, len(self._channels))
         payload = torch.load(
             self._run_dir / manifest.checkpoint.file,
             map_location=torch.device("cpu"),
@@ -69,19 +103,23 @@ class InferencePolicy:
         with torch.no_grad():
             probabilities = self._model(request)["actionProbabilities"][0]
         flat = int(probabilities.flatten().argmax())
-        pixels = self._edge * self._edge
-        kind = ACTION_KINDS[flat // pixels]
+        height, width = probabilities.shape[-2:]
+        pixels = height * width
+        channel = self._channels[flat // pixels]
         pixel = flat % pixels
-        y, x = divmod(pixel, self._edge)
+        y, x = divmod(pixel, width)
         viewport = observation.viewport
-        action_x = min(viewport.width - 1, x * viewport.width // self._edge)
-        action_y = min(viewport.height - 1, y * viewport.height // self._edge)
-        text = self._typing_text() if kind is ActionKind.TYPE else None
-        direction = self._random.choice(("up", "down")) if kind is ActionKind.SCROLL else None
-        return Action(kind, action_x, action_y, text, direction, "model")
-
-    def _typing_text(self) -> str:
-        if self._config.policy.custom_typing_strings:
-            return self._random.choice(self._config.policy.custom_typing_strings)
-        length = self._random.randint(4, 20)
-        return "".join(self._random.choice(string.ascii_lowercase) for _ in range(length))
+        action_x = min(viewport.width - 1, x * viewport.width // width)
+        action_y = min(viewport.height - 1, y * viewport.height // height)
+        generated = (
+            self._random_policy.typing_text(channel) if channel.kind is ActionKind.TYPE else None
+        )
+        return Action(
+            channel.kind,
+            action_x,
+            action_y,
+            generated,
+            channel.direction,
+            "model",
+            channel.name,
+        )

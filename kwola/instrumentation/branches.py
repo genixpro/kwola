@@ -19,8 +19,16 @@ _SNAPSHOT_SCRIPT = """
 
 
 class BranchTraceCollector:
+    def __init__(self, timeout_seconds: float = 30.0, restore_timeout_seconds: float = 15.0):
+        self._timeout_ms = timeout_seconds * 1000
+        self._restore_timeout_ms = restore_timeout_seconds * 1000
+
     def collect(self, page: Page) -> tuple[int, ...]:
-        raw = page.evaluate(_SNAPSHOT_SCRIPT)
+        page.set_default_timeout(self._timeout_ms)
+        try:
+            raw = page.evaluate(_SNAPSHOT_SCRIPT)
+        finally:
+            page.set_default_timeout(self._restore_timeout_ms)
         if not isinstance(raw, dict):
             return ()
         return tuple(sorted(_executed_symbols(raw)))

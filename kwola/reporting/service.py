@@ -19,7 +19,7 @@ class ReportService:
         self._run_dir = run_dir
         self._config = load_config(run_dir)
 
-    def generate(self) -> tuple[Path, ...]:
+    def generate(self, *, scheduled: bool = False) -> tuple[Path, ...]:
         report_dir = self._run_dir / "reports"
         report_dir.mkdir(parents=True, exist_ok=True)
         traces, testing, training, bugs = self._records()
@@ -35,7 +35,8 @@ class ReportService:
             "reports", "summary.json", (json.dumps(summary, indent=2) + "\n").encode()
         )
         artifacts = [summary_path]
-        if self._config.reporting.charts:
+        chart_due = len(testing) % self._config.reporting.chart_every_testing_steps == 0
+        if self._config.reporting.charts and (chart_due or not scheduled):
             chart_path = report_dir / "rewards.png"
             self._reward_chart(chart_path, traces)
             artifacts.append(chart_path)
@@ -78,7 +79,9 @@ class ReportService:
         groups: dict[str, list[dict[str, object]]] = {}
         for trace in traces:
             groups.setdefault(str(trace["step_id"]), []).append(trace)
-        renderer = VideoRenderer(self._run_dir)
+        renderer = VideoRenderer(
+            self._run_dir, timeout_seconds=self._config.reporting.video_timeout_seconds
+        )
         artifacts = []
         for step_id, step_traces in groups.items():
             ordered = sorted(step_traces, key=_trace_index)

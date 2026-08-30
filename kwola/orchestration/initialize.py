@@ -14,6 +14,7 @@ def initialize_run(target: str, profile: ProfileName, run_dir: Path, seed: int) 
         profile=config.profile,
         seed=config.seed,
         enabled_browsers=config.browser.enabled,
+        schema_version=config.schema_version,
     )
     save_manifest(manifest, run_dir)
     for directory in (

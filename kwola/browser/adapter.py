@@ -25,12 +25,17 @@ class PlaywrightBrowserAdapter:
         viewport: ViewportConfig,
         telemetry: TelemetryBuffer,
         proxy_server: str | None = None,
+        *,
+        capture_console: bool = True,
+        capture_network: bool = True,
     ) -> None:
         self._config = config
         self._browser_kind = browser_kind
         self._viewport = viewport
         self._telemetry = telemetry
         self._proxy_server = proxy_server
+        self._capture_console = capture_console
+        self._capture_network = capture_network
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -62,8 +67,10 @@ class PlaywrightBrowserAdapter:
         )
         self._page = self._context.new_page()
         self._page.set_default_timeout(self._config.action_timeout_seconds * 1000)
-        self._page.on("console", self._record_console)
-        self._page.on("response", self._record_response)
+        if self._capture_console:
+            self._page.on("console", self._record_console)
+        if self._capture_network:
+            self._page.on("response", self._record_response)
 
     def navigate(self, target: str) -> None:
         self.page.goto(
