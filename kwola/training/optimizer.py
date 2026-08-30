@@ -25,6 +25,7 @@ class OptimizerMetrics:
     mean_bootstrap_target: float = 0.0
     mean_absolute_td_error: float = 0.0
     gradient_norm: float = 0.0
+    conservative_q_loss: float = 0.0
 
 
 def summarize_optimizer_metrics(
@@ -42,6 +43,7 @@ def summarize_optimizer_metrics(
         mean_bootstrap_target=sum(result.mean_bootstrap_target for result in results) / count,
         mean_absolute_td_error=sum(result.mean_absolute_td_error for result in results) / count,
         gradient_norm=sum(result.gradient_norm for result in results) / count,
+        conservative_q_loss=sum(result.conservative_q_loss for result in results) / count,
     )
 
 
@@ -116,4 +118,5 @@ class ModelOptimizer:
             mean_bootstrap_target=float(losses.mean_bootstrap_target.detach()),
             mean_absolute_td_error=float(losses.mean_absolute_td_error.detach()),
             gradient_norm=float(gradient_norm.detach()),
+            conservative_q_loss=float(losses.conservative_q.detach()),
         )

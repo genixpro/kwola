@@ -26,7 +26,6 @@ class InferencePolicy:
         self._random = source
         self._channels = action_catalog(config.policy)
         self._weighted_random_policy = RandomActionPolicy(source, self._channels, weighted=True)
-        self._uniform_random_policy = RandomActionPolicy(source, self._channels, weighted=False)
         self._schedule = ExplorationSchedule(
             config.policy.exploration, config.policy.testing_sequence_length
         )
@@ -65,18 +64,15 @@ class InferencePolicy:
             session_count=1,
             test_step_index=test_step_index,
         )
-        draw = self._random.random()
         evaluation: tuple[TraceNetRequest, dict[str, torch.Tensor]] | None = None
-        if force_random or self._model is None or draw < exploration.weighted_random:
+        if force_random or self._model is None:
             action = self._weighted_random_policy.select(observation.action_map)
-        elif draw < exploration.random:
-            action = self._uniform_random_policy.select(observation.action_map)
+        elif self._random.random() < exploration.random:
+            action = self._weighted_random_policy.select(observation.action_map)
         else:
-            if capture_diagnostics:
-                evaluation = self._evaluate_model(observation, action_index, True)
-                action = self._action_from_output(observation, evaluation[1])
-            else:
-                action = self._model_action(observation, action_index)
+            evaluation = self._evaluate_model(observation, action_index, capture_diagnostics)
+            weighted = self._random.random() < exploration.weighted_random
+            action = self._action_from_output(observation, evaluation[1], weighted=weighted)
         if capture_diagnostics:
             if evaluation is None:
                 evaluation = self._diagnostic_evaluation(observation, action_index)
@@ -148,10 +144,6 @@ class InferencePolicy:
         model.load_state_dict(payload["model"], strict=True)  # type: ignore[arg-type]
         return model.eval()
 
-    def _model_action(self, observation: Observation, action_index: int) -> Action:
-        _request, output = self._evaluate_model(observation, action_index, False)
-        return self._action_from_output(observation, output)
-
     def _evaluate_model(
         self, observation: Observation, action_index: int, output_stamp: bool
     ) -> tuple[TraceNetRequest, dict[str, torch.Tensor]]:
@@ -189,9 +181,15 @@ class InferencePolicy:
         self,
         observation: Observation,
         output: dict[str, torch.Tensor],
+        *,
+        weighted: bool = False,
     ) -> Action:
         action_values = output["actionValues"][0]
-        flat = int(action_values.flatten().argmax())
+        flat = self._weighted_flat_index(action_values) if weighted else None
+        if weighted and flat is None:
+            return self._weighted_random_policy.select(observation.action_map)
+        if flat is None:
+            flat = int(action_values.flatten().argmax())
         height, width = action_values.shape[-2:]
         pixels = height * width
         channel = self._channels[flat // pixels]
@@ -211,9 +209,41 @@ class InferencePolicy:
             action_y,
             generated,
             channel.direction,
-            "model",
+            "weighted_random" if weighted else "model",
             channel.name,
         )
+
+    def _weighted_flat_index(self, action_values: torch.Tensor) -> int | None:
+        values = action_values.flatten()
+        valid = torch.isfinite(values) & (values > torch.finfo(values.dtype).min)
+        valid_indexes = torch.nonzero(valid, as_tuple=False).flatten()
+        if valid_indexes.numel() == 0:
+            return None
+        candidates = values[valid]
+        minimum = candidates.min()
+        maximum = candidates.max()
+        if float(maximum) > 0:
+            weights = (
+                (candidates - minimum).square()
+                if float(minimum) > 0
+                else candidates.clamp_min(0).square()
+            )
+        else:
+            weights = (candidates - minimum).square()
+        total = weights.sum()
+        if not torch.isfinite(total) or float(total) <= 0:
+            return None
+        threshold = self._random.random() * float(total)
+        cumulative = weights.cumsum(0)
+        position = int(
+            torch.searchsorted(
+                cumulative,
+                torch.tensor(threshold, dtype=weights.dtype, device=weights.device),
+                right=True,
+            )
+        )
+        position = min(position, valid_indexes.numel() - 1)
+        return int(valid_indexes[position])
 
     def _predicted(
         self, output: dict[str, torch.Tensor], observation: Observation

@@ -36,6 +36,15 @@ class FixedDrawRandom(random.Random):
         return self._draw
 
 
+class SequenceDrawRandom(random.Random):
+    def __init__(self, *draws: float) -> None:
+        super().__init__(0)
+        self._draws = iter(draws)
+
+    def random(self) -> float:
+        return next(self._draws)
+
+
 class FixedActionPolicy:
     def __init__(self, source: str) -> None:
         self._source = source
@@ -160,28 +169,38 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("draw", "expected"),
-    ((0.1, "weighted"), (0.3, "uniform"), (0.8, "greedy")),
+    ("draws", "expected"),
+    (((0.1,), "weighted"), ((0.8, 0.1), "q_weighted"), ((0.8, 0.3), "greedy")),
 )
-def test_exploration_uses_ordered_weighted_uniform_and_greedy_intervals(
+def test_exploration_uses_random_then_model_weighting_as_independent_stages(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    draw: float,
+    draws: tuple[float, ...],
     expected: str,
 ) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 13)
     config = load_config(tmp_path)
-    policy = InferencePolicy(tmp_path, config, FixedDrawRandom(draw))
+    policy = InferencePolicy(tmp_path, config, SequenceDrawRandom(*draws))
     policy._schedule = SimpleNamespace(  # type: ignore[assignment]
         probability=lambda **_values: ExplorationProbabilities(0.5, 0.2)
     )
     policy._weighted_random_policy = FixedActionPolicy("weighted")  # type: ignore[assignment]
-    policy._uniform_random_policy = FixedActionPolicy("uniform")  # type: ignore[assignment]
     policy._model = object()  # type: ignore[assignment]
     monkeypatch.setattr(
         policy,
-        "_model_action",
-        lambda *_args: Action(ActionKind.CLICK, 1, 1, source="greedy", channel="click"),
+        "_evaluate_model",
+        lambda *_args: (object(), {}),
+    )
+    monkeypatch.setattr(
+        policy,
+        "_action_from_output",
+        lambda *_args, weighted=False: Action(
+            ActionKind.CLICK,
+            1,
+            1,
+            source="q_weighted" if weighted else "greedy",
+            channel="click",
+        ),
     )
 
     selected = policy.select(_observation(), action_index=0, test_step_index=0, force_random=False)
@@ -196,17 +215,27 @@ def test_forced_random_always_uses_weighted_policy(
     config = load_config(tmp_path)
     policy = InferencePolicy(tmp_path, config, FixedDrawRandom(0.99))
     policy._weighted_random_policy = FixedActionPolicy("weighted")  # type: ignore[assignment]
-    policy._uniform_random_policy = FixedActionPolicy("uniform")  # type: ignore[assignment]
     policy._model = object()  # type: ignore[assignment]
-    monkeypatch.setattr(
-        policy,
-        "_model_action",
-        lambda *_args: Action(ActionKind.CLICK, 1, 1, source="greedy", channel="click"),
-    )
 
     selected = policy.select(_observation(), action_index=0, test_step_index=0, force_random=True)
 
     assert selected.source == "weighted"
+
+
+def test_model_weighted_exploration_samples_from_q_values(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 15)
+    config = load_config(tmp_path)
+    policy = InferencePolicy(tmp_path, config, FixedDrawRandom(0.0))
+    values = torch.full(
+        (1, len(action_catalog(config.policy)), 1, 2),
+        torch.finfo(torch.float32).min,
+    )
+    values[0, 0, 0] = torch.tensor([1.0, 2.0])
+
+    selected = policy._action_from_output(_observation(), {"actionValues": values}, weighted=True)
+
+    assert selected.source == "weighted_random"
+    assert selected.x == 32
 
 
 def test_policy_rejects_a_corrupted_checkpoint_before_loading(tmp_path: Path) -> None:

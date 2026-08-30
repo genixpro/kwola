@@ -1,6 +1,33 @@
-"""Deterministic shuffled replay with disjoint distributed-rank slices."""
+"""Fresh-data-bounded shuffled replay with disjoint distributed-rank slices."""
 
 import random
+
+
+def minimum_replay_size(batch_size: int, world_size: int) -> int:
+    """Return the samples required for one duplicate-free global update."""
+    return batch_size * world_size
+
+
+def bounded_replay_iterations(size: int, requested: int, batch_size: int, world_size: int) -> int:
+    """Limit updates to complete global batches covered by the new-data budget."""
+    complete_global_batches = size // minimum_replay_size(batch_size, world_size)
+    return min(requested, complete_global_batches)
+
+
+def require_replay_iterations(
+    size: int,
+    requested: int,
+    batch_size: int,
+    world_size: int,
+    label: str = "training",
+) -> int:
+    count = bounded_replay_iterations(size, requested, batch_size, world_size)
+    if count:
+        return count
+    required = minimum_replay_size(batch_size, world_size)
+    raise RuntimeError(
+        f"{label} requires at least {required} traces for one duplicate-free global batch"
+    )
 
 
 class ReplaySampler:

@@ -9,6 +9,19 @@
 - Recorded-sample training now snapshots trace metadata once per training step, caches decoded
   screenshots, assembles batches on CPU, and prefetches the next batch while DDP computes.
   Step-local cache preparation no longer rescans and rereads every historical screenshot.
+- Training now requires a complete global batch of newly recorded traces. The new-trace count bounds
+  each invocation to duplicate-free updates over the frozen replay snapshot, and a successfully
+  trained trace-count high-water mark prevents an unchanged replay set from triggering again.
+- Next-state crop augmentation retries random crops until a valid action remains visible, then uses
+  an action-centred fallback. Empty next-action masks explicitly produce a zero Double-DQN bootstrap
+  target instead of selecting an invalid flattened cell.
+- The loss now includes a configurable conservative-Q margin penalty for unsupported valid actions,
+  enabled by default with weight and margin `0.1`. Its contribution is recorded as
+  `conservative_q_loss` in training results, stored training records, and progress telemetry.
+- Exploration now uses independent stages: `random` controls action-catalog-weighted behavior that
+  bypasses inference, while `weighted_random` conditionally selects Q-weighted sampling after model
+  evaluation. These settings are no longer ordered thresholds, and the uniform-random interval has
+  been removed.
 - Every run records pipeline/resource JSONL telemetry and rank-zero training progress, including
   assembly, transfer, optimizer, checkpoint, GPU-memory, worker, and end-to-end throughput metrics.
   `kwola status RUN_DIR` reports live rates, in-flight workers, and recent CPU/GPU utilization.

@@ -113,14 +113,6 @@ class ExplorationAxisConfig(StrictModel):
     start_weighted_random_rate: float = Field(default=1.0, ge=0, le=1)
     end_weighted_random_rate: float = Field(default=1.0, ge=0, le=1)
 
-    @model_validator(mode="after")
-    def weighted_exploration_is_within_total(self) -> Self:
-        if self.start_weighted_random_rate > self.start_random_rate:
-            raise ValueError("start weighted-random rate cannot exceed total random rate")
-        if self.end_weighted_random_rate > self.end_random_rate:
-            raise ValueError("end weighted-random rate cannot exceed total random rate")
-        return self
-
 
 class ExplorationConfig(StrictModel):
     action: ExplorationAxisConfig = ExplorationAxisConfig(
@@ -267,6 +259,8 @@ class LossConfig(StrictModel):
     execution_trace: float = Field(default=1.0, ge=0)
     discounted_future_reward: float = Field(default=8.0, ge=0)
     present_reward: float = Field(default=16.0, ge=0)
+    conservative_q: float = Field(default=0.1, ge=0)
+    conservative_q_margin: float = Field(default=0.1, ge=0)
 
 
 class TrainingConfig(StrictModel):

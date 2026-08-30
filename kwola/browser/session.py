@@ -114,6 +114,7 @@ class BrowserSessionCoordinator:
             errors=_errors(console, network),
             branch_trace_available=branches.available,
             application_fitness=self._application_fitness(),
+            network_event_count=len(network),
         )
 
     def _collect_branches(self) -> BranchTraceSnapshot:

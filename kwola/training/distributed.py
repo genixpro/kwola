@@ -1,4 +1,4 @@
-"""Two-rank recorded-sample training with explicit DDP ownership."""
+"""Multi-rank recorded-sample training with explicit DDP ownership."""
 
 import copy
 import multiprocessing
@@ -30,7 +30,8 @@ from .assembler_factory import recorded_sample_assembler
 from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
 from .optimizer import ModelOptimizer, OptimizerMetrics, summarize_optimizer_metrics
-from .replay import ReplaySampler
+from .replay import ReplaySampler, require_replay_iterations
+from .replay_state import require_new_replay as _prepare_cache
 from .samples import RecordedSampleAssembler, TrainingBatch
 from .spool import batch_to_device, share_batch
 from .telemetry import record_training_progress
@@ -64,12 +65,6 @@ def run_distributed_training(run_dir: Path) -> RunnerResult:
         join=True,
     )
     return RunnerResult.model_validate_json(results.get())
-
-
-def _prepare_cache(run_dir: Path) -> None:
-    with _store(run_dir, readonly=True) as store:
-        if not any(True for _ in store.scan("traces")):
-            raise RuntimeError("training requires at least one recorded browser trace")
 
 
 def _shared_initial_batches(run_dir: Path) -> tuple[TrainingBatch, ...]:
@@ -124,6 +119,7 @@ def _training_rank(
             target,
             optimizer,
             step_index,
+            trace_count,
             iterations,
             assembly_seconds,
             transfer_seconds,
@@ -138,6 +134,7 @@ def _training_rank(
                 target,
                 optimizer,
                 step_index,
+                trace_count,
                 metrics,
                 float(loss.item() / world_size),
                 time.perf_counter() - started,
@@ -152,15 +149,24 @@ def _rank_step(
     run_dir: Path,
     coordinator: DistributedCoordinator,
     initial_batch: TrainingBatch | None = None,
-) -> tuple[OptimizerMetrics, TraceNet, TraceNet, ModelOptimizer, int, int, float, float]:
+) -> tuple[OptimizerMetrics, TraceNet, TraceNet, ModelOptimizer, int, int, int, float, float]:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
     with _store(run_dir, readonly=True) as store:
         state = store.get("run", "state") or {}
         step_index = int(state.get("training_steps", 0))
         training_index = int(state.get("training_iterations", 0))
-        iteration_count = int(
+        requested_iterations = int(
             state.get("scheduled_training_iterations", config.training.batches_per_iteration)
+        )
+        trace_count = sum(1 for _ in store.scan("traces"))
+        trained_trace_count = int(state.get("training_trace_count", 0))
+        iteration_count = require_replay_iterations(
+            trace_count - trained_trace_count,
+            requested_iterations,
+            config.training.batch_size,
+            config.training.world_size,
+            "distributed training",
         )
     model = TraceNet(config.model, num_actions=len(action_catalog(config.policy))).to(
         coordinator.device
@@ -192,6 +198,7 @@ def _rank_step(
         target,
         optimizer,
         step_index,
+        trace_count,
         iteration_count,
         assembly_seconds,
         transfer_seconds,
@@ -312,6 +319,7 @@ def _record_progress(
         mean_bootstrap_target=(sum(item.mean_bootstrap_target for item in results) / completed),
         mean_absolute_td_error=(sum(item.mean_absolute_td_error for item in results) / completed),
         gradient_norm=sum(item.gradient_norm for item in results) / completed,
+        conservative_q_loss=sum(item.conservative_q_loss for item in results) / completed,
         gpu_memory_allocated_bytes=torch.cuda.memory_allocated(coordinator.device),
         gpu_memory_reserved_bytes=torch.cuda.memory_reserved(coordinator.device),
     )
@@ -323,6 +331,7 @@ def _publish_result(
     target: TraceNet,
     optimizer: ModelOptimizer,
     step_index: int,
+    trace_count: int,
     metrics: OptimizerMetrics,
     mean_loss: float,
     duration: float,
@@ -358,6 +367,7 @@ def _publish_result(
         mean_loss,
         metrics,
         iterations,
+        trace_count,
         duration,
         assembly_seconds,
         transfer_seconds,
@@ -384,6 +394,7 @@ def _publish_result(
             "mean_bootstrap_target": metrics.mean_bootstrap_target,
             "mean_absolute_td_error": metrics.mean_absolute_td_error,
             "gradient_norm": metrics.gradient_norm,
+            "conservative_q_loss": metrics.conservative_q_loss,
         },
     )
 
@@ -410,6 +421,7 @@ def _record_step(
     loss: float,
     metrics: OptimizerMetrics,
     iterations: int,
+    trace_count: int,
     end_to_end_seconds: float,
     assembly_seconds: float,
     transfer_seconds: float,
@@ -422,6 +434,7 @@ def _record_step(
             state = dict(current or {})
             state["training_steps"] = index + 1
             state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
+            state["training_trace_count"] = trace_count
             return state
 
         store.update("run", "state", complete)
@@ -450,6 +463,7 @@ def _record_step(
                 "mean_bootstrap_target": metrics.mean_bootstrap_target,
                 "mean_absolute_td_error": metrics.mean_absolute_td_error,
                 "gradient_norm": metrics.gradient_norm,
+                "conservative_q_loss": metrics.conservative_q_loss,
                 "iterations": iterations,
                 "status": "completed",
                 "ranks": config.training.world_size,

@@ -1,4 +1,4 @@
-"""The historical three-axis exploration schedule as a pure service."""
+"""Three-axis schedule producing independent random and Q-weighted probabilities."""
 
 import math
 from dataclasses import dataclass
@@ -10,10 +10,6 @@ from kwola.config.models import ExplorationAxisConfig, ExplorationConfig
 class ExplorationProbabilities:
     random: float
     weighted_random: float
-
-    def __post_init__(self) -> None:
-        if self.weighted_random > self.random:
-            raise ValueError("weighted-random probability cannot exceed total random probability")
 
 
 class ExplorationSchedule:

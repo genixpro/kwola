@@ -33,7 +33,14 @@ kwola CLI
 Testing workers immediately receive another browser session when they finish; the trainer has no
 barrier with them. Each training invocation freezes the current trace snapshot and creates a seeded
 shuffle from the run seed, training-step index, and replay epoch. DDP ranks consume disjoint slices
-of that common permutation, and a new permutation begins only after every trace has been offered.
+of that common permutation. Automatic training waits for at least the greater of
+`orchestration.minimum_traces_before_training` and one complete configured global batch of newly
+recorded traces. New traces provide the update budget, while sample indexes come from the complete
+frozen replay snapshot. The invocation runs no more than
+`floor(new_traces / (batch_size * world_size))` updates or the scheduled count, whichever is smaller,
+so it never crosses a permutation boundary. After success, the current trace count is persisted as a
+high-water mark; an unchanged replay set cannot train again. Explicit single-device training applies
+the same rule with a world size of one.
 The parent prepares one shared-memory CPU batch per rank; each rank then keeps a decoded-image LRU and
 builds the next CPU batch on a prefetch thread while the current batch computes. Gradients synchronize
 through DDP. After a final barrier, only rank 0 writes the training record and atomically publishes a
@@ -58,21 +65,29 @@ Its order defines both TraceNet output channels and recorded action indexes. Inf
 assembly share the legacy screenshot transform: grayscale, aspect-preserving configured downscale,
 dimensions rounded upward to a multiple of eight, and values rounded to two decimals. Current-state
 training crops are seeded and action-centred; next-state crops use a separately seeded random centre.
+Next-state augmentation makes up to eight random attempts to keep at least one valid action visible,
+then uses an action-centred fallback. A trace with no valid action even in that fallback is rejected.
 Images, action masks, reward masks, coordinates, and recent-action features are cropped together.
 
 TraceNet retains separate immediate- and discounted-future reward maps. Their masked sum is the
 action-value map used directly by greedy inference. Training uses masked Double DQN: the online model
 selects the next valid spatial action, the target model evaluates it, terminal transitions receive a
-zero future target, and both reward heads train immediately with Smooth L1 loss. Optional cursor,
-execution-feature, and future-symbol auxiliaries remain; the future-symbol target is detached.
-Gradients are clipped and target checkpoints refresh on the configured global iteration cadence.
+zero future target, and an empty next-action mask also produces zero bootstrap value. Both reward
+heads train immediately with Smooth L1 loss. Optional cursor, execution-feature, and future-symbol
+auxiliaries remain; the future-symbol target is detached. A conservative margin loss lowers the
+highest valid action outside the demonstrated region until it is at least the configured margin below
+the demonstrated Q value, limiting offline-Q extrapolation without raising the demonstrated value.
+Its default weight and margin are both `0.1`; a zero weight disables it. Gradients are clipped and
+target checkpoints refresh on the configured global iteration cadence.
 
-Exploration probabilities are ordered thresholds: weighted random occupies the first interval,
-uniform random the remainder of the total-random interval, and greedy Q selection the rest. Forced
-random testing remains weighted. Branch novelty is claimed atomically in a campaign-wide LMDB
-collection before each trace is committed. Initial-page coverage is claimed without reward. Code and
-no-code shaping applies only when branch instrumentation was available; screenshot and URL novelty
-remain session-local.
+Exploration has two independent stages. The scheduled `random` probability first decides whether to
+bypass inference and use action-catalog-weighted random behavior. If the model runs, a second draw
+against `weighted_random` chooses between Q-weighted sampling over valid model outputs and the greedy
+maximum. The probabilities are conditional rather than ordered intervals and either may exceed the
+other. Forced-random testing and inference without a checkpoint use action-catalog-weighted random
+behavior. Branch novelty is claimed atomically in a campaign-wide LMDB collection before each trace
+is committed. Initial-page coverage is claimed without reward. Code and no-code shaping applies only
+when branch instrumentation was available; screenshot and URL novelty remain session-local.
 
 ## Run layout
 
@@ -125,6 +140,8 @@ teardown. Browser and proxy lifecycles are context-managed and idempotently clos
 
 The pipeline telemetry stream records worker submission/completion and periodic host, process-tree,
 memory, and NVIDIA GPU samples. Rank zero emits progress during long training steps with separate
-assembly, host-to-device transfer, optimizer, memory, and end-to-end rates. These append-only records
-remain readable while a run is active through `kwola status`, including per-slot retry counts,
-backoff delay, and the latest worker error.
+assembly, host-to-device transfer, optimizer, memory, and end-to-end rates. Training results and
+stored step records include present, future, and conservative-Q losses; mean selected Q, mean
+bootstrap target, mean absolute TD error, and gradient norm. These append-only records remain
+readable while a run is active through `kwola status`, including per-slot retry counts, backoff delay,
+and the latest worker error.

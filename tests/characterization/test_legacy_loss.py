@@ -1,10 +1,12 @@
+from dataclasses import replace
+
 import torch
 from torch import Tensor, nn
 
 from kwola.agent.model_heads import TraceNetHeads
 from kwola.config import profile_config
 from kwola.training.batches import diagnostic_batch
-from kwola.training.losses import _double_dqn_targets, _value_losses
+from kwola.training.losses import _conservative_q_loss, _double_dqn_targets, _value_losses
 from kwola.training.samples import TrainingBatch
 
 
@@ -68,6 +70,47 @@ def test_double_dqn_clips_positive_and_negative_bootstraps_symmetrically() -> No
     )
 
     torch.testing.assert_close(targets, torch.tensor([10.0, -10.0]))
+
+
+def test_double_dqn_does_not_bootstrap_an_empty_nonterminal_action_mask() -> None:
+    batch = _batch(torch.tensor([True, True]))
+    empty_request = replace(
+        batch.next_request,
+        pixel_action_maps=torch.zeros_like(batch.next_request.pixel_action_maps),
+    )
+    batch = replace(batch, next_request=empty_request)
+    values = torch.full((2, 2, 8, 8), 100.0)
+
+    targets = _double_dqn_targets(
+        FixedModel({"actionValues": values}),
+        FixedModel({"actionValues": values}),
+        batch,
+        discount_rate=0.85,
+        maximum=10.0,
+    )
+
+    torch.testing.assert_close(targets, torch.zeros(2))
+
+
+def test_conservative_q_margin_lowers_the_best_unsupported_action() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    batch = _batch(torch.tensor([False, False]))
+    values = torch.zeros(2, 2, 8, 8, requires_grad=True)
+    with torch.no_grad():
+        values[0, 1, 0, 1] = 5.0
+        values[1, 0, 0, 1] = 4.0
+
+    loss = _conservative_q_loss(
+        {"actionValues": values}, batch, torch.zeros(2), config.training.losses
+    )
+    loss.backward()
+
+    assert loss > 0
+    assert values.grad is not None
+    assert values.grad[0, 1, 0, 1] > 0
+    assert values.grad[1, 0, 0, 1] > 0
+    assert values.grad[0, 0, 0, 0] == 0
+    assert values.grad[1, 1, 0, 0] == 0
 
 
 def test_present_reward_trains_on_terminal_and_only_recorded_region() -> None:

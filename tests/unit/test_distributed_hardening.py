@@ -66,6 +66,7 @@ def test_training_rank_reduces_and_publishes_rank_zero(
             object(),
             object(),
             5,
+            100,
             7,
             0.25,
             0.5,
@@ -115,6 +116,8 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
                 "scheduled_training_iterations": 3,
             },
         )
+        for index in range(12):
+            store.put("traces", f"trace-{index}", {"index": index})
     model = RankModel()
     monkeypatch.setattr(distributed_training, "TraceNet", lambda *_args, **_values: model)
     monkeypatch.setattr(distributed_training, "_load_models", lambda *_args: None)
@@ -148,7 +151,7 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
         "initial",  # type: ignore[arg-type]
     )
 
-    assert result[4:] == (4, 3, 0.4, 0.2)
+    assert result[4:] == (4, 12, 3, 0.4, 0.2)
     assert received == [(4, 20, 3, "initial")]
 
 
@@ -212,6 +215,7 @@ def test_shared_batches_progress_and_checkpoint_publication(
         target,  # type: ignore[arg-type]
         optimizer,  # type: ignore[arg-type]
         0,
+        4,
         OptimizerMetrics(1.5, 0.5, 8.0),
         1.5,
         2.0,
@@ -232,3 +236,4 @@ def test_shared_batches_progress_and_checkpoint_publication(
     assert state is not None
     assert state["training_steps"] == 1
     assert state["training_iterations"] == 2
+    assert state["training_trace_count"] == 4

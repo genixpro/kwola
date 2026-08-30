@@ -47,6 +47,27 @@ def test_pipeline_adapts_from_simultaneous_training_and_browser_results(
     assert adjustment[1]["browser_sample_count"] == 1
 
 
+def test_training_waits_for_one_duplicate_free_global_batch(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "standard", tmp_path, 4)
+    runner = ExperimentRunner(tmp_path)
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        for index in range(47):
+            store.put("traces", f"trace-{index}", {"index": index})
+    assert not runner._training_ready()  # type: ignore[attr-defined]
+
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        store.put("traces", "trace-47", {"index": 47})
+    assert runner._training_ready()  # type: ignore[attr-defined]
+
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        store.update(
+            "run",
+            "state",
+            lambda current: {**(current or {}), "training_trace_count": 48},
+        )
+    assert not runner._training_ready()  # type: ignore[attr-defined]
+
+
 def test_adaptation_clamps_bounds_and_skips_empty_browser_window(tmp_path: Path) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 4)
     runner = ExperimentRunner(tmp_path)

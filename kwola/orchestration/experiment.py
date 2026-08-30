@@ -11,6 +11,7 @@ from typing import Any
 
 from kwola.config import load_config
 from kwola.storage import LmdbRunStore
+from kwola.training.replay import minimum_replay_size
 
 from .messages import ArtifactReference, WorkerCommand, WorkerResult
 from .results import RunnerResult
@@ -222,16 +223,25 @@ class ExperimentRunner:
         )
 
     def _training_ready(self) -> bool:
-        return self._trace_count() >= self._config.orchestration.minimum_traces_before_training
+        replay_minimum = minimum_replay_size(
+            self._config.training.batch_size, self._config.training.world_size
+        )
+        required = max(self._config.orchestration.minimum_traces_before_training, replay_minimum)
+        trace_count, trained_trace_count = self._trace_state()
+        return trace_count - trained_trace_count >= required
 
-    def _trace_count(self) -> int:
+    def _trace_state(self) -> tuple[int, int]:
         database = self._run_dir / self._config.storage.database_directory
         with LmdbRunStore(
             database,
             map_size=self._config.storage.database_map_size_bytes,
             readonly=True,
         ) as store:
-            return sum(1 for _ in store.scan("traces"))
+            state = store.get("run", "state") or {}
+            return (
+                sum(1 for _ in store.scan("traces")),
+                int(state.get("training_trace_count", 0)),
+            )
 
     @staticmethod
     def _record_completion(

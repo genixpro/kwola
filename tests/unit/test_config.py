@@ -182,12 +182,6 @@ def test_credential_environment_references_are_validated_and_required(
             lambda data: data["instrumentation"].update(enabled=False, rewrite_javascript=True),
             "requires instrumentation",
         ),
-        (
-            lambda data: data["policy"]["exploration"]["action"].update(
-                start_random_rate=0.2, start_weighted_random_rate=0.3
-            ),
-            "weighted-random",
-        ),
     ),
 )
 def test_all_cross_field_constraints_are_actionable(mutation: object, message: str) -> None:
