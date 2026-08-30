@@ -1,5 +1,6 @@
 """Immutable replay plan shared by all distributed training ranks."""
 
+import resource
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,6 +8,14 @@ from kwola.config import load_config
 
 from .replay import require_replay_budget
 from .replay_state import open_replay_store
+
+
+def raise_open_file_limit(minimum: int = 65_536) -> None:
+    """Raise the inherited soft limit for tensor-backed shared-memory batches."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = max(soft, minimum) if hard == resource.RLIM_INFINITY else min(hard, max(soft, minimum))
+    if target > soft:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
 
 
 @dataclass(frozen=True, slots=True)

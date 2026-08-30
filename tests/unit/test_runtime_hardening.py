@@ -393,6 +393,7 @@ def test_distributed_entry_validation_simulation_and_rank_recording(
         distributed_training.run_distributed_training(rig_run)
 
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setattr(distributed_training, "_raise_open_file_limit", lambda: None)
     monkeypatch.setattr(distributed_training, "_prepare_cache", lambda _path: None)
     monkeypatch.setattr(distributed_training, "_shared_initial_batches", lambda _path, _plan: ())
     monkeypatch.setattr(distributed_training, "_free_port", lambda: 12345)

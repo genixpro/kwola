@@ -9,6 +9,7 @@ from kwola.orchestration.initialize import initialize_run
 from kwola.orchestration.results import RunnerResult
 from kwola.storage import LmdbRunStore
 from kwola.training import distributed as distributed_training
+from kwola.training import distributed_plan
 from kwola.training.optimizer import OptimizerMetrics
 
 
@@ -18,6 +19,22 @@ class Queue:
 
     def put(self, value: str) -> None:
         self.values.append(value)
+
+
+def test_distributed_startup_raises_the_soft_open_file_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    limits: list[tuple[int, int]] = []
+    monkeypatch.setattr(distributed_plan.resource, "getrlimit", lambda _kind: (1024, 524_288))
+    monkeypatch.setattr(
+        distributed_plan.resource,
+        "setrlimit",
+        lambda _kind, value: limits.append(value),
+    )
+
+    distributed_plan.raise_open_file_limit()
+
+    assert limits == [(65_536, 524_288)]
 
 
 class Coordinator:

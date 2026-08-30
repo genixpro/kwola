@@ -29,6 +29,7 @@ from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
 from .ddp import available_tcp_port as _free_port
 from .distributed_plan import TrainingPlan as _TrainingPlan
+from .distributed_plan import raise_open_file_limit as _raise_open_file_limit
 from .distributed_plan import training_plan as _training_plan
 from .optimizer import (
     ModelOptimizer,
@@ -51,6 +52,7 @@ def run_distributed_training(run_dir: Path) -> RunnerResult:
         raise RuntimeError("distributed training requires one device index per rank")
     if torch.cuda.device_count() < config.training.world_size:
         raise RuntimeError("insufficient CUDA devices for configured world size")
+    _raise_open_file_limit()
     _prepare_cache(run_dir)
     plan = _training_plan(run_dir)
     shared_batches = (
