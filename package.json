@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "private": true,
   "dependencies": {
-    "@babel/cli": "7.29.7",
+    "@babel/cli": "8.0.4",
     "@babel/core": "7.29.7",
     "babel-plugin-kwola": "0.0.17"
   },
