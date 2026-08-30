@@ -103,7 +103,7 @@ cadence and do not prove the new learning-hardening requirements.
 
 After the replay, crop-validity, and conservative-Q changes, the macOS working tree passed Ruff
 formatting and linting, strict mypy over 94 Python sources, and the non-network unit,
-characterization, and architecture suite: 194 passed with 87.44% branch-aware coverage. Four
+characterization, and architecture suite: 195 passed with 87.44% branch-aware coverage. Four
 full-suite integration cases that bind local listening sockets could not execute in the restricted
 local sandbox. This is local correctness evidence only; it does not replace the required fresh Linux
 rig acceptance run or its two-GPU/browser performance evidence.

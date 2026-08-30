@@ -113,11 +113,11 @@ def _conservative_q_loss(
 ) -> Tensor:
     """Keep unsupported valid actions below the demonstrated action value."""
     values = outputs["actionValues"]
-    zero = values.sum() * 0
+    valid = batch.request.pixel_action_maps > 0
+    zero = values.masked_select(valid).sum() * 0
     if weights.conservative_q == 0:
         return zero
 
-    valid = batch.request.pixel_action_maps > 0
     indexes = torch.arange(len(batch.sample_ids), device=values.device)
     demonstrated = torch.zeros_like(valid)
     demonstrated_region = (
