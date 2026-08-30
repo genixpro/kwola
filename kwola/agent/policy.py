@@ -9,7 +9,7 @@ import torch
 from kwola.config.models import RunConfig
 from kwola.domain.actions import Action, ActionKind, ActionTarget
 from kwola.domain.observations import Observation
-from kwola.storage import load_manifest, verify_checkpoint
+from kwola.storage import load_manifest, require_learning_schema, verify_checkpoint
 
 from .actions import action_catalog
 from .encoding import ObservationEncoder
@@ -24,9 +24,8 @@ class InferencePolicy:
         self._config = config
         self._random = source
         self._channels = action_catalog(config.policy)
-        self._random_policy = RandomActionPolicy(
-            source, self._channels, weighted=config.policy.weighted_random_actions
-        )
+        self._weighted_random_policy = RandomActionPolicy(source, self._channels, weighted=True)
+        self._uniform_random_policy = RandomActionPolicy(source, self._channels, weighted=False)
         self._schedule = ExplorationSchedule(
             config.policy.exploration, config.policy.testing_sequence_length
         )
@@ -61,8 +60,11 @@ class InferencePolicy:
             session_count=1,
             test_step_index=test_step_index,
         )
-        if force_random or self._model is None or self._random.random() < exploration.random:
-            action = self._random_policy.select(observation.action_map)
+        draw = self._random.random()
+        if force_random or self._model is None or draw < exploration.weighted_random:
+            action = self._weighted_random_policy.select(observation.action_map)
+        elif draw < exploration.random:
+            action = self._uniform_random_policy.select(observation.action_map)
         else:
             action = self._model_action(observation, action_index)
         self._model_actions.append(action)
@@ -98,7 +100,10 @@ class InferencePolicy:
         return sum(
             target.left <= action.x <= target.right
             and target.top <= action.y <= target.bottom
-            and any(channel.kind is action.kind for channel in self._random_policy.allowed(target))
+            and any(
+                channel.kind is action.kind
+                for channel in self._weighted_random_policy.allowed(target)
+            )
             for action in self._repeat_actions
         )
 
@@ -108,8 +113,10 @@ class InferencePolicy:
             return None
         model = TraceNet(self._config.model, len(self._channels))
         checkpoint = verify_checkpoint(self._run_dir, manifest.checkpoint)
-        payload = torch.load(checkpoint, map_location=torch.device("cpu"), weights_only=True)
-        model.load_checkpoint_state_dict(payload["model"])
+        payload = require_learning_schema(
+            torch.load(checkpoint, map_location=torch.device("cpu"), weights_only=True)
+        )
+        model.load_state_dict(payload["model"], strict=True)  # type: ignore[arg-type]
         return model.eval()
 
     def _model_action(self, observation: Observation, action_index: int) -> Action:
@@ -123,9 +130,9 @@ class InferencePolicy:
             step_number=action_index,
         )
         with torch.no_grad():
-            probabilities = self._model(request)["actionProbabilities"][0]
-        flat = int(probabilities.flatten().argmax())
-        height, width = probabilities.shape[-2:]
+            action_values = self._model(request)["actionValues"][0]
+        flat = int(action_values.flatten().argmax())
+        height, width = action_values.shape[-2:]
         pixels = height * width
         channel = self._channels[flat // pixels]
         pixel = flat % pixels
@@ -134,7 +141,9 @@ class InferencePolicy:
         action_x = min(viewport.width - 1, x * viewport.width // width)
         action_y = min(viewport.height - 1, y * viewport.height // height)
         generated = (
-            self._random_policy.typing_text(channel) if channel.kind is ActionKind.TYPE else None
+            self._weighted_random_policy.typing_text(channel)
+            if channel.kind is ActionKind.TYPE
+            else None
         )
         return Action(
             channel.kind,

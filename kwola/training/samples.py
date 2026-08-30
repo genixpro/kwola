@@ -18,7 +18,7 @@ from kwola.storage import LmdbRunStore
 
 from .action_masks import cached_cropped_action_masks
 from .cache import SampleCache
-from .geometry import Crop, action_crop, centered_crop, random_crop
+from .geometry import Crop, action_crop, centered_crop, effective_crop, random_crop
 from .image_cache import DecodedImageCache
 from .sample_features import (
     action_index_for_trace,
@@ -133,14 +133,21 @@ class RecordedSampleAssembler:
         device: torch.device,
         impossible_reward: float,
         offset: int = 0,
+        sample_indexes: Sequence[int] | None = None,
         next_edge: int | None = None,
     ) -> TrainingBatch:
         traces = self._recorded_traces()
         if not traces:
             raise RuntimeError("training requires at least one recorded browser trace")
-        selected = [traces[(offset + index) % len(traces)] for index in range(batch_size)]
+        if sample_indexes is not None and len(sample_indexes) != batch_size:
+            raise ValueError("sample index count must match batch size")
+        indexes = sample_indexes or tuple(offset + index for index in range(batch_size))
+        selected = [traces[index % len(traces)] for index in indexes]
         index = self._trace_index or TraceIndex.build(traces)
         return self._batch(selected, index, edge, next_edge, device, impossible_reward)
+
+    def trace_count(self) -> int:
+        return len(self._recorded_traces())
 
     def prepare_cache(self, workers: int = 0) -> int:
         traces = self._recorded_traces()
@@ -339,7 +346,7 @@ class RecordedSampleAssembler:
             )
         else:
             crop = random_crop(image.shape[1], image.shape[0], *desired, self._random)
-        return _PreparedSample(key, trace, image, _effective_crop(crop))
+        return _PreparedSample(key, trace, image, effective_crop(crop))
 
     @staticmethod
     def _crop_image(item: _PreparedSample) -> Tensor:
@@ -487,14 +494,3 @@ def _attention_symbols(
         device=device,
     )
     return symbol_set, mask
-
-
-def _effective_crop(crop: Crop) -> Crop:
-    return Crop(
-        crop.left,
-        crop.top,
-        min(crop.right, crop.image_width),
-        min(crop.bottom, crop.image_height),
-        crop.image_width,
-        crop.image_height,
-    )

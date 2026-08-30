@@ -26,3 +26,4 @@ class Observation:
     network_symbols: tuple[int, ...] = ()
     console_messages: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
+    branch_trace_available: bool = False

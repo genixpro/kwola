@@ -19,6 +19,7 @@ from kwola.training import distributed as distributed_training
 from kwola.training.benchmark import run_benchmark
 from kwola.training.ddp import DistributedCoordinator, DistributedSettings
 from kwola.training.optimizer import OptimizerMetrics
+from kwola.training.replay import ReplaySampler
 
 
 class FakeAssembler:
@@ -27,7 +28,7 @@ class FakeAssembler:
         self.failure_offset = failure_offset
 
     def assemble(self, **values: Any) -> int:
-        offset = int(values["offset"])
+        offset = int(values["sample_indexes"][0])
         self.offsets.append(offset)
         if offset == self.failure_offset:
             raise ValueError("assembly failed")
@@ -37,18 +38,24 @@ class FakeAssembler:
 def test_batch_stream_offsets_initial_batch_and_prefetch_failures() -> None:
     coordinator = SimpleNamespace(settings=SimpleNamespace(rank=1))
     direct = FakeAssembler()
-    direct_batches = list(batch_stream.batches(direct, coordinator, 3, None, 4, 2, -10.0, False))
-    assert [batch for batch, _duration in direct_batches] == [4, 12, 20]
+    sampler = ReplaySampler(100, 4, 2, 1, seed=1, training_step=0)
+    expected = [sampler.batch_indexes(index)[0] for index in range(3)]
+    direct_batches = list(
+        batch_stream.batches(direct, coordinator, 3, None, 4, sampler, -10.0, False)
+    )
+    assert [batch for batch, _duration in direct_batches] == expected
 
     prefetched = FakeAssembler()
+    sampler = ReplaySampler(100, 4, 2, 1, seed=1, training_step=0)
     prefetched_batches = list(
-        batch_stream.batches(prefetched, coordinator, 3, 99, 4, 2, -10.0, True)
+        batch_stream.batches(prefetched, coordinator, 3, 99, 4, sampler, -10.0, True)
     )
-    assert [batch for batch, _duration in prefetched_batches] == [99, 12, 20]
+    assert [batch for batch, _duration in prefetched_batches] == [99, *expected[1:]]
 
-    failing = FakeAssembler(failure_offset=4)
+    sampler = ReplaySampler(100, 4, 2, 1, seed=1, training_step=0)
+    failing = FakeAssembler(failure_offset=sampler.batch_indexes(0)[0])
     with pytest.raises(ValueError, match="assembly failed"):
-        list(batch_stream.batches(failing, coordinator, 1, None, 4, 2, -10.0, True))
+        list(batch_stream.batches(failing, coordinator, 1, None, 4, sampler, -10.0, True))
 
 
 def test_cpu_distributed_coordinator_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,7 +158,9 @@ def _browser_session(adapter: FakeAdapter, proxy: FakeProxy) -> BrowserSessionCo
     waiter = SimpleNamespace(wait=lambda _page: True)
     screenshots = SimpleNamespace(capture=lambda _page: b"png")
     autologin = SimpleNamespace(run=lambda _page: None)
-    branches = SimpleNamespace(collect=lambda _page: (7, 9))
+    branches = SimpleNamespace(
+        collect=lambda _page: SimpleNamespace(available=True, symbols=(7, 9))
+    )
     return BrowserSessionCoordinator(
         adapter,  # type: ignore[arg-type]
         extractor,  # type: ignore[arg-type]
@@ -176,6 +185,7 @@ def test_browser_session_observes_executes_and_cleans_up() -> None:
     following = session.execute(Action(ActionKind.CLICK, 10, 20))
 
     assert observation.branch_symbols == (7, 9)
+    assert observation.branch_trace_available
     assert following.errors == (
         "console:broken",
         "network:500:https://example.com/api:",
@@ -223,13 +233,11 @@ def test_testing_runner_records_completed_step_with_fake_session(
 
 class FakeOptimizer:
     def __init__(self) -> None:
-        self.indexes: list[int] = []
+        self.calls = 0
 
-    def step_training(
-        self, _batch: object, _target: object, index: int, *_args: object
-    ) -> OptimizerMetrics:
-        self.indexes.append(index)
-        return OptimizerMetrics(float(index), 0.5, 8.0)
+    def step_training(self, _batch: object, _target: object, *_args: object) -> OptimizerMetrics:
+        self.calls += 1
+        return OptimizerMetrics(float(self.calls), 0.5, 8.0)
 
 
 class FakeTarget:
@@ -248,12 +256,26 @@ def test_training_runner_iterations_state_record_and_dispatch(
     optimizer = FakeOptimizer()
     target = FakeTarget()
     model = SimpleNamespace(state_dict=lambda: {"weight": 1})
-    monkeypatch.setattr(runner, "_batch", lambda *_args: object())
+
+    class Assembler:
+        def trace_count(self) -> int:
+            return 1
+
+        def assemble(self, **_values: object) -> object:
+            return object()
+
+    monkeypatch.setattr(runner, "_assembler", lambda *_args, **_values: Assembler())
 
     metrics = runner._iterations(  # type: ignore[arg-type]
-        optimizer, model, target, torch.device("cpu"), training_index=249, iteration_count=2
+        optimizer,
+        model,
+        target,
+        torch.device("cpu"),
+        training_step=0,
+        training_index=249,
+        iteration_count=2,
     )
-    runner._record("training-00000000", metrics.loss, metrics.duration_seconds, 2)
+    runner._record("training-00000000", metrics, 2)
     monkeypatch.setattr(
         runner,
         "_run_single",
@@ -263,7 +285,7 @@ def test_training_runner_iterations_state_record_and_dispatch(
     )
     result = runner.run()
 
-    assert optimizer.indexes == [249, 250]
+    assert optimizer.calls == 2
     assert target.loads == 1
     assert metrics.duration_seconds == 1.0
     assert result.status == "completed"
@@ -310,6 +332,7 @@ def test_distributed_entry_validation_simulation_and_rank_recording(
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     monkeypatch.setattr(distributed_training, "_prepare_cache", lambda _path: None)
     monkeypatch.setattr(distributed_training, "_shared_initial_batches", lambda _path: ())
+    monkeypatch.setattr(distributed_training, "_free_port", lambda: 12345)
     monkeypatch.setattr(
         distributed_training.multiprocessing, "get_context", lambda _kind: FakeSpawnContext()
     )
@@ -333,20 +356,26 @@ def test_distributed_cache_and_iteration_helpers(
         store.put("traces", "trace-1", {"screenshot": "unused"})
     distributed_training._prepare_cache(tmp_path)
     assert (
-        distributed_training._load_model(
+        distributed_training._load_models(
             tmp_path,
             None,
+            SimpleNamespace(),
             SimpleNamespace(),
             torch.device("cpu"),  # type: ignore[arg-type]
         )
         is None
     )
-    assert distributed_training._free_port() > 0
+    monkeypatch.setattr(distributed_training, "_free_port", lambda: 12345)
+    assert distributed_training._free_port() == 12345
 
     batches = [(object(), 0.1), (object(), 0.2)]
     monkeypatch.setattr(distributed_training, "batches", lambda *_args, **_values: iter(batches))
     monkeypatch.setattr(distributed_training, "batch_to_device", lambda batch, _device: batch)
-    monkeypatch.setattr(distributed_training, "_assembler", lambda *_args: object())
+    monkeypatch.setattr(
+        distributed_training,
+        "_assembler",
+        lambda *_args, **_values: SimpleNamespace(trace_count=lambda: 1),
+    )
     progress: list[int] = []
     monkeypatch.setattr(
         distributed_training,
@@ -368,12 +397,13 @@ def test_distributed_cache_and_iteration_helpers(
         model,  # type: ignore[arg-type]
         target,  # type: ignore[arg-type]
         optimizer,  # type: ignore[arg-type]
+        0,
         249,
         2,
         None,
     )
 
-    assert metrics.loss == 249.5
+    assert metrics.loss == 1.5
     assert assembly == pytest.approx(0.3)
     assert transfer >= 0
     assert progress == [1]

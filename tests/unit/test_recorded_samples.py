@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 
 import cv2  # type: ignore[import-untyped]
@@ -107,6 +108,57 @@ def test_recorded_samples_rebuild_from_trace_artifacts(tmp_path: Path) -> None:
             impossible_reward=-10.0,
         )
         assert cached.sample_ids == batch.sample_ids
+
+
+def test_persistent_assembler_varies_crops_for_repeated_samples(tmp_path: Path) -> None:
+    blobs = AtomicBlobStore(tmp_path / "blobs")
+    screenshot = np.arange(128 * 128, dtype=np.uint8).reshape(128, 128)
+    encoded_ok, encoded = cv2.imencode(".png", screenshot)
+    assert encoded_ok
+    path = blobs.write("screenshots", "large.png", encoded.tobytes())
+    trace = _trace(0, str(path.relative_to(tmp_path)))
+    trace["viewport"] = [128, 128]
+    trace["action"] = {"kind": "click", "x": 64, "y": 64}
+    trace["action_targets"] = [
+        {
+            "bounds": [40, 40, 88, 88],
+            "click": True,
+            "right_click": False,
+            "type": False,
+            "scroll": False,
+            "scroll_up": False,
+            "scroll_down": False,
+        }
+    ]
+    with LmdbRunStore(tmp_path / "run.lmdb", map_size=1024**2) as store:
+        store.put("traces", "testing-0-trace-0000", trace)
+        assembler = RecordedSampleAssembler(
+            tmp_path,
+            store,
+            symbol_dictionary_size=100,
+            discount_rate=0.85,
+            max_discounted_reward=10.0,
+            cache_version=3,
+            crop_size=(64, 64),
+            next_crop_size=(64, 64),
+            crop_random=(30, 30),
+            freeze_records=True,
+            source=random.Random(17),
+        )
+
+        crops = {
+            assembler.assemble(
+                batch_size=1,
+                device=torch.device("cpu"),
+                impossible_reward=-10.0,
+                sample_indexes=(0,),
+            )
+            .request.backbone.image.numpy()
+            .tobytes()
+            for _ in range(5)
+        }
+
+    assert len(crops) > 1
 
 
 def test_local_action_circle_matches_full_frame_calculation() -> None:

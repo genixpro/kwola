@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import torch
 
 from .ddp import DistributedCoordinator
+from .replay import ReplaySampler
 from .samples import RecordedSampleAssembler, TrainingBatch
 
 
@@ -16,7 +17,7 @@ def batches(
     count: int,
     initial: TrainingBatch | None,
     batch_size: int,
-    world_size: int,
+    sampler: ReplaySampler,
     impossible_reward: float,
     prefetch: bool,
 ) -> Iterator[tuple[TrainingBatch, float]]:
@@ -30,7 +31,7 @@ def batches(
                     coordinator,
                     iteration,
                     batch_size,
-                    world_size,
+                    sampler,
                     impossible_reward,
                 )
         return
@@ -40,7 +41,7 @@ def batches(
         count,
         initial,
         batch_size,
-        world_size,
+        sampler,
         impossible_reward,
     )
 
@@ -51,7 +52,7 @@ def _prefetched(
     count: int,
     initial: TrainingBatch | None,
     batch_size: int,
-    world_size: int,
+    sampler: ReplaySampler,
     impossible_reward: float,
 ) -> Iterator[tuple[TrainingBatch, float]]:
     future: Future[tuple[TrainingBatch, float]] | None = None
@@ -63,7 +64,7 @@ def _prefetched(
                 coordinator,
                 0,
                 batch_size,
-                world_size,
+                sampler,
                 impossible_reward,
             )
         for iteration in range(count):
@@ -79,7 +80,7 @@ def _prefetched(
                     coordinator,
                     iteration + 1,
                     batch_size,
-                    world_size,
+                    sampler,
                     impossible_reward,
                 )
             yield batch
@@ -90,7 +91,7 @@ def _assemble(
     coordinator: DistributedCoordinator,
     iteration: int,
     batch_size: int,
-    world_size: int,
+    sampler: ReplaySampler,
     impossible_reward: float,
 ) -> tuple[TrainingBatch, float]:
     started = time.perf_counter()
@@ -98,6 +99,6 @@ def _assemble(
         batch_size=batch_size,
         device=torch.device("cpu"),
         impossible_reward=impossible_reward,
-        offset=(coordinator.settings.rank + iteration * world_size) * batch_size,
+        sample_indexes=sampler.batch_indexes(iteration),
     )
     return batch, time.perf_counter() - started

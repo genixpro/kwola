@@ -1,4 +1,4 @@
-"""Mathematically unchanged present and discounted reward calculation."""
+"""Coverage-first immediate reward calculation."""
 
 from dataclasses import dataclass
 
@@ -7,7 +7,7 @@ from kwola.config.models import RewardConfig
 
 @dataclass(frozen=True, slots=True)
 class RewardSignals:
-    action_succeeded: bool
+    branch_trace_available: bool
     code_executed: bool
     new_branches_executed: bool
     network_traffic: bool
@@ -17,7 +17,6 @@ class RewardSignals:
     url_changed: bool
     url_new: bool
     log_output: bool
-    code_prevalence_log_normalized_z_score: float | None = None
 
 
 class RewardCalculator:
@@ -26,9 +25,10 @@ class RewardCalculator:
 
     def present(self, signals: RewardSignals) -> float:
         config = self._config
-        reward = config.action_success if signals.action_succeeded else config.action_failure
-        reward += config.code_executed if signals.code_executed else config.no_code_executed
-        reward += self._new_code_reward(signals)
+        reward = 0.0
+        if signals.branch_trace_available:
+            reward += config.code_executed if signals.code_executed else config.no_code_executed
+            reward += self._new_code_reward(signals)
         reward += config.network_traffic if signals.network_traffic else config.no_network_traffic
         reward += (
             config.new_network_traffic
@@ -60,8 +60,4 @@ class RewardCalculator:
         config = self._config
         if not signals.new_branches_executed:
             return config.no_new_code_executed
-        prevalence = signals.code_prevalence_log_normalized_z_score
-        if prevalence is None:
-            return config.new_code_executed
-        adjusted = float(config.code_prevalence_exponential_base**-prevalence)
-        return (adjusted + 1) * config.new_code_executed * 0.5
+        return config.new_code_executed

@@ -113,6 +113,14 @@ class ExplorationAxisConfig(StrictModel):
     start_weighted_random_rate: float = Field(default=1.0, ge=0, le=1)
     end_weighted_random_rate: float = Field(default=1.0, ge=0, le=1)
 
+    @model_validator(mode="after")
+    def weighted_exploration_is_within_total(self) -> Self:
+        if self.start_weighted_random_rate > self.start_random_rate:
+            raise ValueError("start weighted-random rate cannot exceed total random rate")
+        if self.end_weighted_random_rate > self.end_random_rate:
+            raise ValueError("end weighted-random rate cannot exceed total random rate")
+        return self
+
 
 class ExplorationConfig(StrictModel):
     action: ExplorationAxisConfig = ExplorationAxisConfig(
@@ -132,14 +140,11 @@ class ExplorationConfig(StrictModel):
 
 
 class RewardConfig(StrictModel):
-    action_failure: float = -0.02
-    action_success: float = 0.0
     impossible_action: float = -10.0
     code_executed: float = 0.001
     no_code_executed: float = -0.01
     new_code_executed: float = 0.3
     no_new_code_executed: float = 0.0
-    code_prevalence_exponential_base: float = 2.718
     network_traffic: float = 0.005
     no_network_traffic: float = 0.0
     new_network_traffic: float = 0.05
@@ -215,7 +220,6 @@ class ActionConfig(StrictModel):
 class PolicyConfig(StrictModel):
     exploration: ExplorationConfig = ExplorationConfig()
     rewards: RewardConfig = RewardConfig()
-    weighted_random_actions: bool = True
     repeat_action_override: bool = True
     max_repeat_maps_without_new_branches: int = Field(default=3, ge=0)
     testing_sequence_length: int = Field(default=5, ge=2)
@@ -258,14 +262,11 @@ class ModelConfig(StrictModel):
 
 
 class LossConfig(StrictModel):
-    action_probability: float = Field(default=0.02, ge=0)
-    advantage: float = Field(default=2.0, ge=0)
     cursor_prediction: float = Field(default=1.0, ge=0)
     execution_feature: float = Field(default=1.0, ge=0)
     execution_trace: float = Field(default=1.0, ge=0)
     discounted_future_reward: float = Field(default=8.0, ge=0)
     present_reward: float = Field(default=16.0, ge=0)
-    state_value: float = Field(default=0.1, ge=0)
 
 
 class TrainingConfig(StrictModel):
@@ -279,6 +280,7 @@ class TrainingConfig(StrictModel):
     gradient_beta: float = Field(default=0.97, gt=0, lt=1)
     squared_gradient_beta: float = Field(default=0.999, gt=0, lt=1)
     weight_decay: float = Field(default=0.0, ge=0)
+    gradient_clip_norm: float = Field(default=10.0, gt=0)
     device_indices: tuple[int, ...] = ()
     world_size: int = Field(default=1, ge=1)
     sample_cache_workers: int = Field(default=4, ge=0)
@@ -290,7 +292,6 @@ class TrainingConfig(StrictModel):
     telemetry_every_iterations: int = Field(default=10, ge=1)
     checkpoint_every_iterations: int = Field(default=1, ge=1)
     target_network_update_every: int = Field(default=250, ge=1)
-    action_probability_square_size: int = Field(default=30, ge=1)
     crop_width: int = Field(default=320, ge=8)
     crop_height: int = Field(default=320, ge=8)
     next_crop_width: int = Field(default=448, ge=8)
@@ -360,7 +361,7 @@ class OrchestrationConfig(StrictModel):
 
 
 class RunConfig(StrictModel):
-    schema_version: int = Field(default=1, ge=1)
+    schema_version: int = Field(default=2, ge=2, le=2)
     target: AnyHttpUrl
     profile: ProfileName
     seed: int = Field(ge=0, le=2**63 - 1)

@@ -1,7 +1,7 @@
 """Recorded-trace persistence and reward feature ownership."""
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +15,6 @@ from kwola.training.image_cache import DecodedImageCache
 
 @dataclass(slots=True)
 class NoveltyState:
-    branches: set[int]
     screenshots: set[str]
     urls: set[str]
     errors: set[str]
@@ -24,7 +23,6 @@ class NoveltyState:
     def initial(cls, observation: Observation) -> "NoveltyState":
         digest = hashlib.sha256(observation.screenshot).hexdigest()
         return cls(
-            set(observation.branch_symbols),
             {digest},
             {observation.url},
             set(observation.errors),
@@ -76,27 +74,55 @@ class TraceRecorder:
     ) -> float:
         trace_id = f"{step_id}-trace-{index:04d}"
         features = _features(before, after, novelty)
-        reward = _reward(self._config, after, features)
         screenshots = self._screenshots(trace_id, before, after)
         html_paths = self._html(trace_id, html)
-        self._store.put(
-            "traces",
-            trace_id,
-            self._payload(
+        symbols_by_key = {_symbol_key(symbol): symbol for symbol in after.branch_symbols}
+        claims = {
+            key: {"symbol": symbol, "first_trace_id": trace_id}
+            for key, symbol in symbols_by_key.items()
+        }
+
+        def build(claimed: tuple[str, ...]) -> dict[str, Any]:
+            completed = replace(
+                features,
+                new_branches=tuple(sorted(symbols_by_key[key] for key in claimed)),
+            )
+            reward = _reward(self._config, after, completed)
+            return self._payload(
                 step_id,
                 index,
                 action,
                 before,
                 after,
-                features,
+                completed,
                 reward,
                 cursor,
                 screenshots,
                 html_paths,
-            ),
+            )
+
+        trace = self._store.put_with_claims(
+            "traces",
+            trace_id,
+            "coverage_symbols",
+            claims,
+            build,
         )
         _record_bugs(self._store, trace_id, after.errors)
-        return reward
+        return float(trace["reward"])
+
+    def claim_initial(self, observation: Observation) -> tuple[int, ...]:
+        if not observation.branch_trace_available:
+            return ()
+        symbols_by_key = {_symbol_key(symbol): symbol for symbol in observation.branch_symbols}
+        claimed = self._store.claim_many(
+            "coverage_symbols",
+            {
+                key: {"symbol": symbol, "first_trace_id": None}
+                for key, symbol in symbols_by_key.items()
+            },
+        )
+        return tuple(sorted(symbols_by_key[key] for key in claimed))
 
     def _screenshots(
         self, trace_id: str, before: Observation, after: Observation
@@ -156,6 +182,7 @@ class TraceRecorder:
             "errors": list(after.errors),
             "new_errors": list(features.new_errors),
             "new_branch_symbols": list(features.new_branches),
+            "branch_trace_available": after.branch_trace_available,
             "new_network_symbols": list(features.new_network),
             "screenshot_changed": features.screenshot_changed,
             "screenshot_new": features.screenshot_new,
@@ -172,12 +199,11 @@ class TraceRecorder:
 
 
 def _features(before: Observation, after: Observation, state: NoveltyState) -> TraceFeatures:
-    new_branches = tuple(sorted(set(after.branch_symbols) - state.branches))
     new_network = tuple(sorted(set(after.network_symbols) - set(before.network_symbols)))
     new_errors = tuple(sorted(set(after.errors) - state.errors))
     digest = hashlib.sha256(after.screenshot).hexdigest()
     result = TraceFeatures(
-        new_branches,
+        (),
         new_network,
         new_errors,
         before.screenshot != after.screenshot,
@@ -186,7 +212,6 @@ def _features(before: Observation, after: Observation, state: NoveltyState) -> T
         after.url not in state.urls,
         len(after.console_messages) > len(before.console_messages),
     )
-    state.branches.update(after.branch_symbols)
     state.screenshots.add(digest)
     state.urls.add(after.url)
     state.errors.update(after.errors)
@@ -196,7 +221,7 @@ def _features(before: Observation, after: Observation, state: NoveltyState) -> T
 def _reward(config: RunConfig, after: Observation, features: TraceFeatures) -> float:
     return RewardCalculator(config.policy.rewards).present(
         RewardSignals(
-            action_succeeded=True,
+            branch_trace_available=after.branch_trace_available,
             code_executed=bool(after.branch_symbols),
             new_branches_executed=bool(features.new_branches),
             network_traffic=bool(after.network_symbols),
@@ -208,6 +233,10 @@ def _reward(config: RunConfig, after: Observation, features: TraceFeatures) -> f
             log_output=features.log_output,
         )
     )
+
+
+def _symbol_key(symbol: int) -> str:
+    return f"{int(symbol):016x}"
 
 
 def _action_payload(action: Action) -> dict[str, Any]:

@@ -222,6 +222,7 @@ def test_distributed_diagnostic_validation_and_simulated_rank(
     monkeypatch.setattr(
         distributed_diagnostic.multiprocessing, "get_context", lambda _kind: DiagnosticContext()
     )
+    monkeypatch.setattr(distributed_diagnostic, "_free_port", lambda: 12345)
     monkeypatch.setattr(distributed_diagnostic, "spawn", lambda *_args, **_values: None)
     assert distributed_diagnostic.run_two_rank_diagnostic().passed
 
@@ -320,6 +321,9 @@ class FakeRecorder:
         self.calls += 1
         return 0.5
 
+    def claim_initial(self, *_args: object) -> None:
+        return None
+
 
 class ActionSession:
     def __init__(self, observation: Observation) -> None:
@@ -355,6 +359,16 @@ def test_testing_actions_session_construction_and_sample_preparation(
 
     monkeypatch.setattr(testing_module, "InferencePolicy", FakePolicy)
     monkeypatch.setattr(testing_module, "TraceRecorder", FakeRecorder)
+    monkeypatch.setattr(
+        testing_module,
+        "ProxyService",
+        lambda *_args: SimpleNamespace(
+            start=lambda: None,
+            close=lambda: None,
+            port=12345,
+            server="http://127.0.0.1:12345",
+        ),
+    )
     with LmdbRunStore(tmp_path / "run.lmdb") as store:
         rewards = runner._actions(
             ActionSession(_observation()),  # type: ignore[arg-type]
@@ -402,7 +416,7 @@ class FakeTrainingModel:
     def state_dict(self) -> dict[str, torch.Tensor]:
         return {"weight": self.weight.detach()}
 
-    def load_state_dict(self, _payload: object) -> None:
+    def load_state_dict(self, _payload: object, strict: bool = True) -> None:
         return None
 
     def load_checkpoint_state_dict(self, payload: object) -> None:
@@ -432,7 +446,7 @@ def test_single_training_path_checkpoint_load_and_distributed_dispatch(
     monkeypatch.setattr(
         runner,
         "_assembler",
-        lambda _store: SimpleNamespace(prepare_cache=lambda _workers: 1),
+        lambda _store, **_values: SimpleNamespace(prepare_cache=lambda _workers: 1),
     )
     monkeypatch.setattr(
         runner,
@@ -445,16 +459,24 @@ def test_single_training_path_checkpoint_load_and_distributed_dispatch(
     assert result.metrics["loss"] == 1.0
 
     model = FakeTrainingModel()
+    target = FakeTrainingModel()
     optimizer = FakeTrainingOptimizer()
-    TrainingRunner._load_checkpoint(runner, model, optimizer, None)  # type: ignore[arg-type]
+    TrainingRunner._load_checkpoint(runner, model, target, optimizer, None)  # type: ignore[arg-type]
     metadata = SimpleNamespace(file="checkpoint.pt")
     monkeypatch.setattr(training_module, "verify_checkpoint", lambda *_args: Path("checkpoint.pt"))
     monkeypatch.setattr(
         training_module.torch,
         "load",
-        lambda *_args, **_values: {"model": {}, "optimizer": {}},
+        lambda *_args, **_values: {
+            "learning_schema_version": 2,
+            "model": {},
+            "target_model": {},
+            "optimizer": {},
+        },
     )
-    TrainingRunner._load_checkpoint(runner, model, optimizer, metadata)  # type: ignore[arg-type]
+    TrainingRunner._load_checkpoint(  # type: ignore[arg-type]
+        runner, model, target, optimizer, metadata
+    )
 
     class FakePublisher:
         def __init__(self, *_args: object) -> None:
@@ -467,7 +489,7 @@ def test_single_training_path_checkpoint_load_and_distributed_dispatch(
     monkeypatch.setattr(training_module, "CheckpointPublisher", FakePublisher)
     assert (
         TrainingRunner._maybe_publish(  # type: ignore[arg-type]
-            runner, model, optimizer, load_manifest(run_dir), 1
+            runner, model, target, optimizer, load_manifest(run_dir), 1
         )
         is not None
     )

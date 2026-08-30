@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,15 @@ def test_config_round_trip_is_atomic_and_directory_must_be_empty(tmp_path: Path)
     assert not tuple(run_dir.glob(".kwola.json.*"))
     with pytest.raises(FileExistsError):
         create_run_config("https://example.com", "testing", run_dir, 123)
+
+
+def test_loading_a_version_one_run_requires_fresh_initialization(tmp_path: Path) -> None:
+    config = profile_config("testing", "https://example.com", 1).model_dump(mode="json")
+    config["schema_version"] = 1
+    (tmp_path / "kwola.json").write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="initialize a fresh"):
+        load_config(tmp_path)
 
 
 def test_credentials_use_environment_references_without_persisting_values(
@@ -168,6 +178,12 @@ def test_credential_environment_references_are_validated_and_required(
         (
             lambda data: data["instrumentation"].update(enabled=False, rewrite_javascript=True),
             "requires instrumentation",
+        ),
+        (
+            lambda data: data["policy"]["exploration"]["action"].update(
+                start_random_rate=0.2, start_weighted_random_rate=0.3
+            ),
+            "weighted-random",
         ),
     ),
 )

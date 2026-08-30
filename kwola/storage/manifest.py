@@ -1,5 +1,6 @@
 """Small, inspectable run manifest."""
 
+import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
 
@@ -42,7 +43,7 @@ class CheckpointMetadata(ManifestModel):
 
 
 class RunManifest(ManifestModel):
-    schema_version: int = Field(default=1, ge=1)
+    schema_version: int = Field(default=2, ge=2, le=2)
     kwola_version: str
     target: AnyHttpUrl
     profile: ProfileName
@@ -58,7 +59,7 @@ class RunManifest(ManifestModel):
         profile: ProfileName,
         seed: int,
         enabled_browsers: tuple[BrowserKind, ...],
-        schema_version: int = 1,
+        schema_version: int = 2,
     ) -> "RunManifest":
         try:
             kwola_version = version("kwola")
@@ -75,7 +76,10 @@ class RunManifest(ManifestModel):
 
 
 def load_manifest(run_dir: Path) -> RunManifest:
-    return RunManifest.model_validate_json((run_dir / MANIFEST_NAME).read_bytes())
+    payload = json.loads((run_dir / MANIFEST_NAME).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+        raise ValueError("legacy run schema is unsupported; initialize a fresh schema-v2 run")
+    return RunManifest.model_validate(payload)
 
 
 def save_manifest(manifest: RunManifest, run_dir: Path) -> Path:

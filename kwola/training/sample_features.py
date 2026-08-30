@@ -219,7 +219,7 @@ def execution_features(trace: Mapping[str, Any]) -> tuple[float, ...]:
     if isinstance(raw, list) and len(raw) == 12:
         return tuple(float(bool(value)) for value in raw)
     return (
-        1.0,
+        float(bool(trace.get("branch_trace_available"))),
         float(bool(trace.get("errors"))),
         float(bool(trace.get("new_errors"))),
         float(bool(trace.get("branch_symbols"))),

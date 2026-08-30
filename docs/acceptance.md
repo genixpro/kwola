@@ -50,14 +50,22 @@ confirmed missing Kros asset, not a browser-action, instrumentation, or learning
 All acceptance runs lived under `/home/bradley/kwola-refactor`. The baseline directory timestamp for
 `/home/bradley/kwola` remained `2026-08-29 21:11:20.449445097 -0400` before and after acceptance.
 
-## 1.1.0 release gate
+## Schema-v2 learning release gate
 
 CPU assurance is automated by `.github/workflows/assurance.yml`. Publication remains blocked until
 `therig.local` records a new acceptance run containing both browsers, JavaScript instrumentation, a
-pre-upgrade 1.0 checkpoint load, new checkpoint publication, single-GPU training, and two-rank NCCL
-training concurrent with browser testing. The evidence bundle must include complete command output,
-benchmark output, and a final process scan proving no browser, proxy, Babel, or training workers
-remain.
+fresh schema-v2 run, new online/target/optimizer checkpoint publication and reload, single-GPU
+training, and two-rank NCCL training concurrent with browser testing. Version-1 runs and checkpoints
+must be rejected with the fresh-run instruction; migration is not an acceptance path. The evidence
+bundle must include complete command output, benchmark output, and a final process scan proving no
+browser, proxy, Babel, or training workers remain.
+
+The deterministic learning gate includes a terminal bandit where greedy Q converges on the better
+action and a two-step task where the terminal reward propagates into the first action's future map.
+Unit evidence must also cover exact masked Double-DQN targets, campaign-wide atomic coverage claims,
+instrumentation absence, ordered exploration thresholds, replay coverage/shuffling/rank disjointness,
+varied persistent crop augmentation, and strict checkpoint round trips. Training telemetry records
+the present and future losses, selected Q, bootstrap target, absolute TD error, and gradient norm.
 
 The unchanged performance gates are at least 145 samples/second, no more than 1.35 seconds median
 optimizer time, and no more than 5 GiB peak VRAM. The 1.0.0 measurements above are historical

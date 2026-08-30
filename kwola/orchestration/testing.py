@@ -154,6 +154,7 @@ class TestingRunner:
         )
         recorder = TraceRecorder(self._run_dir, self._config, store, artifacts)
         novelty = NoveltyState.initial(observation)
+        recorder.claim_initial(observation)
         rewards = []
         for trace_index in range(self._config.policy.testing_sequence_length):
             action = policy.select(

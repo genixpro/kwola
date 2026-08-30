@@ -28,7 +28,6 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
         "training": {
             "batch_size": 4,
             "batches_per_iteration": 10,
-            "action_probability_square_size": 6,
             "crop_random_x": 75,
             "crop_random_y": 75,
         },

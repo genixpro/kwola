@@ -1,5 +1,6 @@
 import random
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import cv2
@@ -7,18 +8,40 @@ import numpy as np
 import pytest
 import torch
 
-from kwola.agent import InferencePolicy, TraceNet, action_catalog
+from kwola.agent import ExplorationProbabilities, InferencePolicy, TraceNet, action_catalog
 from kwola.agent.encoding import ACTION_KINDS, ObservationEncoder, action_masks
 from kwola.config import load_config
 from kwola.domain.actions import Action, ActionKind, ActionMap, ActionTarget
 from kwola.domain.observations import Observation, Viewport
 from kwola.orchestration.initialize import initialize_run
-from kwola.storage import CheckpointIntegrityError, CheckpointPublisher, load_manifest
+from kwola.storage import (
+    LEARNING_SCHEMA_VERSION,
+    CheckpointIntegrityError,
+    CheckpointPublisher,
+    load_manifest,
+)
 
 
 class NoExploreRandom(random.Random):
     def random(self) -> float:
         return 0.999999
+
+
+class FixedDrawRandom(random.Random):
+    def __init__(self, draw: float) -> None:
+        super().__init__(0)
+        self._draw = draw
+
+    def random(self) -> float:
+        return self._draw
+
+
+class FixedActionPolicy:
+    def __init__(self, source: str) -> None:
+        self._source = source
+
+    def select(self, _action_map: ActionMap) -> Action:
+        return Action(ActionKind.CLICK, 1, 1, source=self._source, channel="click")
 
 
 def test_action_masks_map_target_capabilities() -> None:
@@ -92,7 +115,15 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
     published = CheckpointPublisher(tmp_path).publish(
         rank=0,
         generation=1,
-        writer=lambda stream: torch.save({"model": model.state_dict(), "optimizer": {}}, stream),
+        writer=lambda stream: torch.save(
+            {
+                "learning_schema_version": LEARNING_SCHEMA_VERSION,
+                "model": model.state_dict(),
+                "target_model": model.state_dict(),
+                "optimizer": {},
+            },
+            stream,
+        ),
         manifest=manifest,
         now=1.0,
     )
@@ -116,6 +147,56 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
     assert second_context["step_number"] == 5
 
 
+@pytest.mark.parametrize(
+    ("draw", "expected"),
+    ((0.1, "weighted"), (0.3, "uniform"), (0.8, "greedy")),
+)
+def test_exploration_uses_ordered_weighted_uniform_and_greedy_intervals(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    draw: float,
+    expected: str,
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 13)
+    config = load_config(tmp_path)
+    policy = InferencePolicy(tmp_path, config, FixedDrawRandom(draw))
+    policy._schedule = SimpleNamespace(  # type: ignore[assignment]
+        probability=lambda **_values: ExplorationProbabilities(0.5, 0.2)
+    )
+    policy._weighted_random_policy = FixedActionPolicy("weighted")  # type: ignore[assignment]
+    policy._uniform_random_policy = FixedActionPolicy("uniform")  # type: ignore[assignment]
+    policy._model = object()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        policy,
+        "_model_action",
+        lambda *_args: Action(ActionKind.CLICK, 1, 1, source="greedy", channel="click"),
+    )
+
+    selected = policy.select(_observation(), action_index=0, test_step_index=0, force_random=False)
+
+    assert selected.source == expected
+
+
+def test_forced_random_always_uses_weighted_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 14)
+    config = load_config(tmp_path)
+    policy = InferencePolicy(tmp_path, config, FixedDrawRandom(0.99))
+    policy._weighted_random_policy = FixedActionPolicy("weighted")  # type: ignore[assignment]
+    policy._uniform_random_policy = FixedActionPolicy("uniform")  # type: ignore[assignment]
+    policy._model = object()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        policy,
+        "_model_action",
+        lambda *_args: Action(ActionKind.CLICK, 1, 1, source="greedy", channel="click"),
+    )
+
+    selected = policy.select(_observation(), action_index=0, test_step_index=0, force_random=True)
+
+    assert selected.source == "weighted"
+
+
 def test_policy_rejects_a_corrupted_checkpoint_before_loading(tmp_path: Path) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 12)
     config = load_config(tmp_path)
@@ -123,7 +204,15 @@ def test_policy_rejects_a_corrupted_checkpoint_before_loading(tmp_path: Path) ->
     published = CheckpointPublisher(tmp_path).publish(
         rank=0,
         generation=1,
-        writer=lambda stream: torch.save({"model": model.state_dict()}, stream),
+        writer=lambda stream: torch.save(
+            {
+                "learning_schema_version": LEARNING_SCHEMA_VERSION,
+                "model": model.state_dict(),
+                "target_model": model.state_dict(),
+                "optimizer": {},
+            },
+            stream,
+        ),
         manifest=load_manifest(tmp_path),
         now=1.0,
     )

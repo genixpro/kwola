@@ -1,10 +1,12 @@
 import hashlib
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
 
 import msgpack  # type: ignore[import-untyped]
 import pytest
+import torch
 import zstandard
 
 from kwola.config import profile_config
@@ -15,11 +17,13 @@ from kwola.storage import (
     CheckpointMetadata,
     CheckpointPublisher,
     CodecError,
+    LearningSchemaError,
     LmdbRunStore,
     RecordCorruptionError,
     RunManifest,
     StorageFullError,
     load_manifest,
+    require_learning_schema,
     save_manifest,
     verify_checkpoint,
 )
@@ -125,6 +129,66 @@ def test_only_rank_zero_publishes_checkpoint_and_manifest(tmp_path: Path) -> Non
     assert updated.checkpoint is not None
     assert load_manifest(tmp_path) == updated
     assert verify_checkpoint(tmp_path, updated.checkpoint) == path
+
+
+def test_loading_a_version_one_manifest_requires_fresh_initialization(tmp_path: Path) -> None:
+    config = profile_config("testing", "https://example.com", 42)
+    payload = RunManifest.create(
+        target=config.target,
+        profile=config.profile,
+        seed=config.seed,
+        enabled_browsers=config.browser.enabled,
+    ).model_dump(mode="json")
+    payload["schema_version"] = 1
+    (tmp_path / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="initialize a fresh"):
+        load_manifest(tmp_path)
+
+
+def test_schema_v2_checkpoint_round_trips_online_target_and_optimizer(tmp_path: Path) -> None:
+    config = profile_config("testing", "https://example.com", 42)
+    manifest = RunManifest.create(
+        target=config.target,
+        profile=config.profile,
+        seed=config.seed,
+        enabled_browsers=config.browser.enabled,
+    )
+    save_manifest(manifest, tmp_path)
+    payload = {
+        "learning_schema_version": 2,
+        "model": {"weight": torch.tensor([1.0])},
+        "target_model": {"weight": torch.tensor([2.0])},
+        "optimizer": {"state": {7: {"step": torch.tensor(3.0)}}},
+    }
+
+    published = CheckpointPublisher(tmp_path).publish(
+        rank=0,
+        generation=1,
+        writer=lambda stream: torch.save(payload, stream),
+        manifest=manifest,
+        now=1.0,
+    )
+
+    assert published is not None
+    loaded = require_learning_schema(torch.load(published[0], weights_only=True))
+    torch.testing.assert_close(loaded["model"]["weight"], torch.tensor([1.0]))  # type: ignore[index]
+    torch.testing.assert_close(loaded["target_model"]["weight"], torch.tensor([2.0]))  # type: ignore[index]
+    assert loaded["optimizer"]["state"][7]["step"] == 3  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"learning_schema_version": 1, "model": {}, "target_model": {}, "optimizer": {}},
+        {"learning_schema_version": 2, "model": {}, "optimizer": {}},
+    ),
+)
+def test_learning_schema_rejects_legacy_and_incomplete_checkpoints(
+    payload: object,
+) -> None:
+    with pytest.raises(LearningSchemaError, match="fresh"):
+        require_learning_schema(payload)
 
 
 def test_checkpoint_verification_rejects_corruption_and_missing_files(tmp_path: Path) -> None:

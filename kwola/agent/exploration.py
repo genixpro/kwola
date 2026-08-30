@@ -11,6 +11,10 @@ class ExplorationProbabilities:
     random: float
     weighted_random: float
 
+    def __post_init__(self) -> None:
+        if self.weighted_random > self.random:
+            raise ValueError("weighted-random probability cannot exceed total random probability")
+
 
 class ExplorationSchedule:
     def __init__(self, config: ExplorationConfig, sequence_length: int) -> None:

@@ -12,7 +12,6 @@ class Trace:
     started_at: float
     finished_at: float
     reward: float
-    action_succeeded: bool
     url_before: str
     url_after: str
     new_branch_symbols: tuple[int, ...] = ()

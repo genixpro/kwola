@@ -58,6 +58,17 @@ def centered_crop(
     return Crop(left, top, left + crop_width, top + crop_height, image_width, image_height)
 
 
+def effective_crop(crop: Crop) -> Crop:
+    return Crop(
+        crop.left,
+        crop.top,
+        min(crop.right, crop.image_width),
+        min(crop.bottom, crop.image_height),
+        crop.image_width,
+        crop.image_height,
+    )
+
+
 def action_crop(
     action_x: float,
     action_y: float,

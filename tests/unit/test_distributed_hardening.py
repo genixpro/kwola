@@ -64,6 +64,7 @@ def test_training_rank_reduces_and_publishes_rank_zero(
             OptimizerMetrics(3.0, 2.0, 4.0),
             object(),
             object(),
+            object(),
             5,
             7,
             0.25,
@@ -87,16 +88,17 @@ def test_training_rank_reduces_and_publishes_rank_zero(
 
 
 class RankModel:
-    def __init__(self) -> None:
-        self.heads = SimpleNamespace(
-            visual_state_value=SimpleNamespace(parameters=lambda: iter(()))
-        )
-
     def to(self, _device: torch.device) -> "RankModel":
         return self
 
     def eval(self) -> "RankModel":
         return self
+
+    def state_dict(self) -> dict[str, object]:
+        return {}
+
+    def load_state_dict(self, _state: object, strict: bool = True) -> None:
+        return None
 
 
 def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
@@ -115,11 +117,11 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
         )
     model = RankModel()
     monkeypatch.setattr(distributed_training, "TraceNet", lambda *_args, **_values: model)
-    monkeypatch.setattr(distributed_training, "_load_model", lambda *_args: None)
+    monkeypatch.setattr(distributed_training, "_load_models", lambda *_args: None)
     monkeypatch.setattr(distributed_training, "DistributedDataParallel", lambda value, **_v: value)
     optimizer = SimpleNamespace(optimizer=SimpleNamespace())
     monkeypatch.setattr(distributed_training, "ModelOptimizer", lambda *_args: optimizer)
-    received: list[tuple[int, int, object]] = []
+    received: list[tuple[int, int, int, object]] = []
 
     def iterations(
         _run: Path,
@@ -127,11 +129,12 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
         _model: object,
         _target: object,
         _optimizer: object,
+        training_step: int,
         training_index: int,
         count: int,
         initial: object,
     ) -> tuple[OptimizerMetrics, float, float]:
-        received.append((training_index, count, initial))
+        received.append((training_step, training_index, count, initial))
         return OptimizerMetrics(1.0, 2.0, 3.0), 0.4, 0.2
 
     monkeypatch.setattr(distributed_training, "_rank_iterations", iterations)
@@ -145,17 +148,21 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
         "initial",  # type: ignore[arg-type]
     )
 
-    assert result[3:] == (4, 3, 0.4, 0.2)
-    assert received == [(20, 3, "initial")]
+    assert result[4:] == (4, 3, 0.4, 0.2)
+    assert received == [(4, 20, 3, "initial")]
 
 
 class BatchAssembler:
     def __init__(self) -> None:
-        self.offsets: list[int] = []
+        self.indexes: list[tuple[int, ...]] = []
+
+    def trace_count(self) -> int:
+        return 1
 
     def assemble(self, **values: Any) -> object:
-        self.offsets.append(int(values["offset"]))
-        return SimpleNamespace(offset=values["offset"])
+        sample_indexes = tuple(values["sample_indexes"])
+        self.indexes.append(sample_indexes)
+        return SimpleNamespace(sample_indexes=sample_indexes)
 
 
 def test_shared_batches_progress_and_checkpoint_publication(
@@ -163,14 +170,14 @@ def test_shared_batches_progress_and_checkpoint_publication(
 ) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 3)
     assembler = BatchAssembler()
-    monkeypatch.setattr(distributed_training, "_assembler", lambda *_args: assembler)
+    monkeypatch.setattr(distributed_training, "_assembler", lambda *_args, **_values: assembler)
     monkeypatch.setattr(
         distributed_training,
         "share_batch",
-        lambda batch: SimpleNamespace(shared=batch.offset),
+        lambda batch: SimpleNamespace(shared=batch.sample_indexes),
     )
     shared = distributed_training._shared_initial_batches(tmp_path)
-    assert [batch.shared for batch in shared] == [0]
+    assert [batch.shared for batch in shared] == [(0, 0, 0, 0)]
 
     progress: list[dict[str, object]] = []
     monkeypatch.setattr(distributed_training.time, "perf_counter", lambda: 12.0)
@@ -197,10 +204,12 @@ def test_shared_batches_progress_and_checkpoint_publication(
     assert progress[0]["gpu_memory_reserved_bytes"] == 20
 
     model = SimpleNamespace(state_dict=lambda: {"weight": torch.tensor([1.0])})
+    target = SimpleNamespace(state_dict=lambda: {"weight": torch.tensor([2.0])})
     optimizer = SimpleNamespace(optimizer=SimpleNamespace(state_dict=lambda: {"state": {}}))
     result = distributed_training._publish_result(
         tmp_path,
         model,  # type: ignore[arg-type]
+        target,  # type: ignore[arg-type]
         optimizer,  # type: ignore[arg-type]
         0,
         OptimizerMetrics(1.5, 0.5, 8.0),
@@ -213,6 +222,11 @@ def test_shared_batches_progress_and_checkpoint_publication(
 
     assert result.status == "completed"
     assert result.artifacts == ("checkpoints/checkpoint-00000001.pt",)
+    payload = torch.load(tmp_path / result.artifacts[0], weights_only=True)
+    assert payload["learning_schema_version"] == 2
+    assert payload["model"]["weight"] == 1
+    assert payload["target_model"]["weight"] == 2
+    assert payload["optimizer"] == {"state": {}}
     with LmdbRunStore(tmp_path / "run.lmdb", readonly=True) as store:
         state = store.get("run", "state")
     assert state is not None

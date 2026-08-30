@@ -2,7 +2,6 @@
 
 import copy
 import multiprocessing
-import random
 import socket
 import time
 from contextlib import closing
@@ -18,16 +17,20 @@ from kwola.agent import TraceNet, action_catalog
 from kwola.config import load_config
 from kwola.orchestration.results import RunnerResult
 from kwola.storage import (
+    LEARNING_SCHEMA_VERSION,
     CheckpointMetadata,
     CheckpointPublisher,
     LmdbRunStore,
     load_manifest,
+    require_learning_schema,
     verify_checkpoint,
 )
 
+from .assembler_factory import recorded_sample_assembler
 from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
-from .optimizer import ModelOptimizer, OptimizerMetrics, load_optimizer_checkpoint
+from .optimizer import ModelOptimizer, OptimizerMetrics, summarize_optimizer_metrics
+from .replay import ReplaySampler
 from .samples import RecordedSampleAssembler, TrainingBatch
 from .spool import batch_to_device, share_batch
 from .telemetry import record_training_progress
@@ -73,13 +76,24 @@ def _shared_initial_batches(run_dir: Path) -> tuple[TrainingBatch, ...]:
     config = load_config(run_dir)
     batches = []
     with _store(run_dir, readonly=True) as store:
-        assembler = _assembler(run_dir, store)
+        state = store.get("run", "state") or {}
+        training_step = int(state.get("training_steps", 0))
+        assembler = _assembler(run_dir, store, random_seed=config.seed + training_step)
+        trace_count = assembler.trace_count()
         for rank in range(config.training.world_size):
+            sampler = ReplaySampler(
+                trace_count,
+                config.training.batch_size,
+                config.training.world_size,
+                rank,
+                config.seed,
+                training_step,
+            )
             batch = assembler.assemble(
                 batch_size=config.training.batch_size,
                 device=torch.device("cpu"),
                 impossible_reward=config.policy.rewards.impossible_action,
-                offset=rank * config.training.batch_size,
+                sample_indexes=sampler.batch_indexes(0),
             )
             batches.append(share_batch(batch))
     return tuple(batches)
@@ -104,9 +118,16 @@ def _training_rank(
     settings = DistributedSettings(rank, world_size, devices[rank], init_method)
     with DistributedCoordinator(settings) as coordinator:
         initial = shared_batches[rank] if shared_batches else None
-        metrics, model, optimizer, step_index, iterations, assembly_seconds, transfer_seconds = (
-            _rank_step(run_dir, coordinator, initial)
-        )
+        (
+            metrics,
+            model,
+            target,
+            optimizer,
+            step_index,
+            iterations,
+            assembly_seconds,
+            transfer_seconds,
+        ) = _rank_step(run_dir, coordinator, initial)
         loss = torch.tensor([metrics.loss], device=coordinator.device)
         distributed.all_reduce(loss, op=distributed.ReduceOp.SUM)
         coordinator.barrier()
@@ -114,6 +135,7 @@ def _training_rank(
             result = _publish_result(
                 run_dir,
                 model,
+                target,
                 optimizer,
                 step_index,
                 metrics,
@@ -130,7 +152,7 @@ def _rank_step(
     run_dir: Path,
     coordinator: DistributedCoordinator,
     initial_batch: TrainingBatch | None = None,
-) -> tuple[OptimizerMetrics, TraceNet, ModelOptimizer, int, int, float, float]:
+) -> tuple[OptimizerMetrics, TraceNet, TraceNet, ModelOptimizer, int, int, float, float]:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
     with _store(run_dir, readonly=True) as store:
@@ -143,8 +165,8 @@ def _rank_step(
     model = TraceNet(config.model, num_actions=len(action_catalog(config.policy))).to(
         coordinator.device
     )
-    payload = _load_model(run_dir, manifest.checkpoint, model, coordinator.device)
     target = copy.deepcopy(model).to(coordinator.device).eval()
+    payload = _load_models(run_dir, manifest.checkpoint, model, target, coordinator.device)
     parallel = DistributedDataParallel(
         model,
         device_ids=[coordinator.settings.local_device],
@@ -152,14 +174,14 @@ def _rank_step(
     )
     optimizer = ModelOptimizer(parallel, config.training)
     if payload is not None:
-        added = model.visual_state_parameter_count
-        load_optimizer_checkpoint(optimizer.optimizer, payload["optimizer"], added)
+        optimizer.optimizer.load_state_dict(payload["optimizer"])
     metrics, assembly_seconds, transfer_seconds = _rank_iterations(
         run_dir,
         coordinator,
         model,
         target,
         optimizer,
+        step_index,
         training_index,
         iteration_count,
         initial_batch,
@@ -167,6 +189,7 @@ def _rank_step(
     return (
         metrics,
         model,
+        target,
         optimizer,
         step_index,
         iteration_count,
@@ -181,6 +204,7 @@ def _rank_iterations(
     model: TraceNet,
     target: TraceNet,
     optimizer: ModelOptimizer,
+    training_step: int,
     training_index: int,
     iteration_count: int,
     initial_batch: TrainingBatch | None,
@@ -192,14 +216,28 @@ def _rank_iterations(
     transfer_seconds = 0.0
     loop_started = time.perf_counter()
     with _store(run_dir, readonly=True) as store:
-        assembler = _assembler(run_dir, store)
+        assembler = _assembler(
+            run_dir,
+            store,
+            random_seed=(
+                config.seed + training_step * config.training.world_size + coordinator.settings.rank
+            ),
+        )
+        sampler = ReplaySampler(
+            assembler.trace_count(),
+            config.training.batch_size,
+            config.training.world_size,
+            coordinator.settings.rank,
+            config.seed,
+            training_step,
+        )
         batch_stream = batches(
             assembler,
             coordinator,
             count,
             initial_batch,
             config.training.batch_size,
-            config.training.world_size,
+            sampler,
             config.policy.rewards.impossible_action,
             config.training.batch_prefetch,
         )
@@ -212,7 +250,6 @@ def _rank_iterations(
             iteration_metrics = optimizer.step_training(
                 batch,
                 target,
-                index,
                 config.policy.rewards.discount_rate,
                 config.policy.rewards.max_discounted_reward,
             )
@@ -234,14 +271,9 @@ def _rank_iterations(
                 )
             if (index + 1) % config.training.target_network_update_every == 0:
                 target.load_state_dict(model.state_dict())
-    duration = sum(result.duration_seconds for result in results)
     samples = count * config.training.batch_size
     return (
-        OptimizerMetrics(
-            sum(result.loss for result in results) / count,
-            duration,
-            samples / duration,
-        ),
+        summarize_optimizer_metrics(results, samples),
         assembly_seconds,
         transfer_seconds,
     )
@@ -274,6 +306,12 @@ def _record_progress(
         assembly_seconds=assembly_seconds,
         transfer_seconds=transfer_seconds,
         end_to_end_samples_per_second=global_samples / elapsed,
+        present_loss=sum(item.present_loss for item in results) / completed,
+        future_loss=sum(item.future_loss for item in results) / completed,
+        mean_selected_q=sum(item.mean_selected_q for item in results) / completed,
+        mean_bootstrap_target=(sum(item.mean_bootstrap_target for item in results) / completed),
+        mean_absolute_td_error=(sum(item.mean_absolute_td_error for item in results) / completed),
+        gradient_norm=sum(item.gradient_norm for item in results) / completed,
         gpu_memory_allocated_bytes=torch.cuda.memory_allocated(coordinator.device),
         gpu_memory_reserved_bytes=torch.cuda.memory_reserved(coordinator.device),
     )
@@ -282,6 +320,7 @@ def _record_progress(
 def _publish_result(
     run_dir: Path,
     model: TraceNet,
+    target: TraceNet,
     optimizer: ModelOptimizer,
     step_index: int,
     metrics: OptimizerMetrics,
@@ -301,7 +340,12 @@ def _publish_result(
             rank=0,
             generation=step_index + 1,
             writer=lambda stream: torch.save(
-                {"model": model.state_dict(), "optimizer": optimizer.optimizer.state_dict()},
+                {
+                    "learning_schema_version": LEARNING_SCHEMA_VERSION,
+                    "model": model.state_dict(),
+                    "target_model": target.state_dict(),
+                    "optimizer": optimizer.optimizer.state_dict(),
+                },
                 stream,
             ),
             manifest=manifest,
@@ -334,21 +378,29 @@ def _publish_result(
             "assembly_seconds": assembly_seconds,
             "transfer_seconds": transfer_seconds,
             "checkpoint_seconds": checkpoint_seconds,
+            "present_loss": metrics.present_loss,
+            "future_loss": metrics.future_loss,
+            "mean_selected_q": metrics.mean_selected_q,
+            "mean_bootstrap_target": metrics.mean_bootstrap_target,
+            "mean_absolute_td_error": metrics.mean_absolute_td_error,
+            "gradient_norm": metrics.gradient_norm,
         },
     )
 
 
-def _load_model(
+def _load_models(
     run_dir: Path,
     checkpoint: CheckpointMetadata | None,
     model: TraceNet,
+    target: TraceNet,
     device: torch.device,
 ) -> dict[str, Any] | None:
     if checkpoint is None:
         return None
     path = verify_checkpoint(run_dir, checkpoint)
-    payload: dict[str, Any] = torch.load(path, map_location=device, weights_only=True)
-    model.load_checkpoint_state_dict(payload["model"])
+    payload = require_learning_schema(torch.load(path, map_location=device, weights_only=True))
+    model.load_state_dict(payload["model"], strict=True)  # type: ignore[arg-type]
+    target.load_state_dict(payload["target_model"], strict=True)  # type: ignore[arg-type]
     return payload
 
 
@@ -392,6 +444,12 @@ def _record_step(
                 "assembly_seconds": assembly_seconds,
                 "transfer_seconds": transfer_seconds,
                 "checkpoint_seconds": checkpoint_seconds,
+                "present_loss": metrics.present_loss,
+                "future_loss": metrics.future_loss,
+                "mean_selected_q": metrics.mean_selected_q,
+                "mean_bootstrap_target": metrics.mean_bootstrap_target,
+                "mean_absolute_td_error": metrics.mean_absolute_td_error,
+                "gradient_norm": metrics.gradient_norm,
                 "iterations": iterations,
                 "status": "completed",
                 "ranks": config.training.world_size,
@@ -399,31 +457,16 @@ def _record_step(
         )
 
 
-def _assembler(run_dir: Path, store: LmdbRunStore) -> RecordedSampleAssembler:
-    config = load_config(run_dir)
-    return RecordedSampleAssembler(
+def _assembler(
+    run_dir: Path, store: LmdbRunStore, *, random_seed: int | None = None
+) -> RecordedSampleAssembler:
+    return recorded_sample_assembler(
         run_dir,
         store,
-        symbol_dictionary_size=config.model.symbol_dictionary_size,
-        discount_rate=config.policy.rewards.discount_rate,
-        max_discounted_reward=config.policy.rewards.max_discounted_reward,
-        cache_version=config.training.sample_cache_version,
-        channels=action_catalog(config.policy),
-        recent_action_history=config.model.recent_action_history,
-        recent_action_radius=config.training.recent_action_image_radius,
-        recent_action_decay=config.training.recent_action_image_decay,
-        image_downscale_ratio=config.model.image_downscale_ratio,
-        crop_size=(config.training.crop_width, config.training.crop_height),
-        next_crop_size=(config.training.next_crop_width, config.training.next_crop_height),
-        crop_random=(config.training.crop_random_x, config.training.crop_random_y),
-        decoded_image_cache_size=config.training.decoded_image_cache_size,
-        decoded_image_cache_directory=(run_dir / config.storage.cache_directory / "decoded-images"),
+        load_config(run_dir),
         compact_cpu_tensors=True,
         freeze_records=True,
-        enable_trace_prediction=config.model.enable_trace_prediction,
-        enable_execution_feature_prediction=config.model.enable_execution_feature_prediction,
-        enable_cursor_prediction=config.model.enable_cursor_prediction,
-        source=random.Random(config.seed),
+        random_seed=random_seed,
     )
 
 

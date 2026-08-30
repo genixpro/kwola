@@ -31,10 +31,12 @@ kwola CLI
 ```
 
 Testing workers immediately receive another browser session when they finish; the trainer has no
-barrier with them. Ranks snapshot recorded metadata for a deterministic step-local shard. The parent
-prepares one shared-memory CPU batch per rank; each rank then keeps a decoded-image LRU and builds the
-next CPU batch on a prefetch thread while the current batch computes. Gradients synchronize through
-DDP. After a final barrier, only rank 0 writes the training record and atomically publishes a
+barrier with them. Each training invocation freezes the current trace snapshot and creates a seeded
+shuffle from the run seed, training-step index, and replay epoch. DDP ranks consume disjoint slices
+of that common permutation, and a new permutation begins only after every trace has been offered.
+The parent prepares one shared-memory CPU batch per rank; each rank then keeps a decoded-image LRU and
+builds the next CPU batch on a prefetch thread while the current batch computes. Gradients synchronize
+through DDP. After a final barrier, only rank 0 writes the training record and atomically publishes a
 checkpoint. Whole traces and image batches never travel through control queues or pickle files.
 
 Each browser slot tracks consecutive worker failures independently. A failed slot retries with
@@ -58,10 +60,19 @@ dimensions rounded upward to a multiple of eight, and values rounded to two deci
 training crops are seeded and action-centred; next-state crops use a separately seeded random centre.
 Images, action masks, reward masks, coordinates, and recent-action features are cropped together.
 
-The reward and loss equations preserve the historical present/future/state/advantage phases and
-auxiliary cursor, execution-feature, and future-symbol heads. Target checkpoints refresh on the
-configured global iteration cadence. Exploration combines the action, session, and test-step axes;
-repeat-action suppression resets when a previously unseen branch symbol appears.
+TraceNet retains separate immediate- and discounted-future reward maps. Their masked sum is the
+action-value map used directly by greedy inference. Training uses masked Double DQN: the online model
+selects the next valid spatial action, the target model evaluates it, terminal transitions receive a
+zero future target, and both reward heads train immediately with Smooth L1 loss. Optional cursor,
+execution-feature, and future-symbol auxiliaries remain; the future-symbol target is detached.
+Gradients are clipped and target checkpoints refresh on the configured global iteration cadence.
+
+Exploration probabilities are ordered thresholds: weighted random occupies the first interval,
+uniform random the remainder of the total-random interval, and greedy Q selection the rest. Forced
+random testing remains weighted. Branch novelty is claimed atomically in a campaign-wide LMDB
+collection before each trace is committed. Initial-page coverage is claimed without reward. Code and
+no-code shaping applies only when branch instrumentation was available; screenshot and URL novelty
+remain session-local.
 
 ## Run layout
 
@@ -86,6 +97,10 @@ Indexed records use MessagePack and Zstandard in LMDB. Resource bodies, screensh
 data, logs, and checkpoints remain external blobs. Blob and checkpoint writes use a temporary file,
 `fsync`, and atomic rename. Prepared-sample cache records include an explicit version and are rebuilt
 from traces when absent, stale, or corrupt.
+
+Run configuration, manifests, and learning checkpoints use learning schema version 2. A checkpoint
+contains the online model, target model, and optimizer together. Loading is strict; version-1 runs
+and checkpoints are intentionally not migrated and must be replaced by a freshly initialized run.
 
 Instrumentation assigns resources a canonical URL identity, hashes bodies into external blobs, and
 realigns branch indexes between rewritten versions by branch signatures. The action-map JavaScript

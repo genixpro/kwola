@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from kwola.domain.actions import Action, ActionMap
 from kwola.domain.observations import Observation, Viewport
-from kwola.instrumentation import BranchTraceCollector, ProxyService
+from kwola.instrumentation import BranchTraceCollector, BranchTraceSnapshot, ProxyService
 from kwola.instrumentation.telemetry import TelemetryBuffer
 
 from .adapter import PlaywrightBrowserAdapter
@@ -101,21 +101,23 @@ class BrowserSessionCoordinator:
         self._adapter.ensure_allowed()
         action_map = self.discover_actions()
         console, network = self._telemetry.snapshot()
+        branches = self._collect_branches()
         return Observation(
             url=self._adapter.page.url,
             screenshot=self._screenshots.capture(self._adapter.page),
             viewport=Viewport(action_map.viewport_width, action_map.viewport_height),
             action_map=action_map,
             timestamp=self._clock(),
-            branch_symbols=self._collect_branches(),
+            branch_symbols=branches.symbols,
             network_symbols=self._telemetry.network_symbols(),
             console_messages=tuple(entry.message for entry in console),
             errors=_errors(console, network),
+            branch_trace_available=branches.available,
         )
 
-    def _collect_branches(self) -> tuple[int, ...]:
+    def _collect_branches(self) -> BranchTraceSnapshot:
         if self._branch_traces is None:
-            return ()
+            return BranchTraceSnapshot(False, ())
         return self._branch_traces.collect(self._adapter.page)
 
 

@@ -14,8 +14,11 @@ CONFIG_NAME = "kwola.json"
 
 def load_config(run_dir: Path) -> RunConfig:
     path = run_dir / CONFIG_NAME
-    with path.open("rb") as stream:
-        return RunConfig.model_validate_json(stream.read())
+    with path.open("r", encoding="utf-8") as stream:
+        payload = json.load(stream)
+    if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+        raise ValueError("legacy run schema is unsupported; initialize a fresh schema-v2 run")
+    return RunConfig.model_validate(payload)
 
 
 def save_config(config: RunConfig, run_dir: Path) -> Path:

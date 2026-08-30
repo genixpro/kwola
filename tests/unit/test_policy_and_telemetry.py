@@ -171,5 +171,6 @@ def test_branch_trace_collector_returns_stable_executed_symbols() -> None:
     first = collector.collect(page)  # type: ignore[arg-type]
     second = collector.collect(CounterPage())  # type: ignore[arg-type]
     assert first == second
-    assert len(first) == 2
+    assert first.available
+    assert len(first.symbols) == 2
     assert page.timeouts == [30_000, 15_000]

@@ -11,10 +11,32 @@ from typing import BinaryIO, TypeVar
 from .manifest import CheckpointMetadata, RunManifest, save_manifest
 
 T = TypeVar("T")
+LEARNING_SCHEMA_VERSION = 2
 
 
 class CheckpointIntegrityError(RuntimeError):
     pass
+
+
+class LearningSchemaError(RuntimeError):
+    pass
+
+
+def require_learning_schema(payload: object) -> dict[str, object]:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("learning_schema_version") != LEARNING_SCHEMA_VERSION
+    ):
+        raise LearningSchemaError(
+            "legacy learning state is unsupported; initialize a fresh schema-v2 run"
+        )
+    required = {"model", "target_model", "optimizer"}
+    missing = sorted(required - payload.keys())
+    if missing:
+        raise LearningSchemaError(
+            f"invalid schema-v2 checkpoint; missing {', '.join(missing)}; initialize a fresh run"
+        )
+    return payload
 
 
 def verify_checkpoint(run_dir: Path, metadata: CheckpointMetadata) -> Path:

@@ -1,10 +1,10 @@
 import torch
 from torch import Tensor, nn
 
+from kwola.agent.model_heads import TraceNetHeads
 from kwola.config import profile_config
-from kwola.config.models import LossConfig
 from kwola.training.batches import diagnostic_batch
-from kwola.training.losses import behavior_loss
+from kwola.training.losses import _double_dqn_targets, _value_losses
 from kwola.training.samples import TrainingBatch
 
 
@@ -17,8 +17,7 @@ class FixedModel(nn.Module):
         return self.outputs
 
 
-def test_masked_multi_head_loss_matches_legacy_equations() -> None:
-    config = profile_config("testing", "https://example.com", 9)
+def _batch(next_valid: Tensor) -> TrainingBatch:
     request = diagnostic_batch(
         batch_size=2,
         num_actions=2,
@@ -28,110 +27,77 @@ def test_masked_multi_head_loss_matches_legacy_equations() -> None:
         impossible_reward=-10.0,
     )
     masks = torch.zeros(2, 8, 8)
-    masks[0, 1:4, 2:5] = 1
-    masks[1, 3:7, 1:6] = 1
-    batch = TrainingBatch(
-        request,
-        request,
-        torch.tensor([0.25, -0.1]),
-        torch.tensor([True, True]),
-        torch.tensor([0, 1]),
-        torch.tensor([3, 2]),
-        torch.tensor([2, 4]),
-        ("a", "b"),
-        masks,
-    )
-    current = _outputs(2, 2, 8, offset=0.01)
-    target = _outputs(2, 2, 8, offset=0.02)
-    result = behavior_loss(
-        FixedModel(current), FixedModel(target), batch, config.training, 6, 1, 0.85, 10.0
-    )
-    expected = _legacy_primary(current, target, batch, config.training.losses)
-    for actual, reference in zip(
-        (
-            result.present_reward,
-            result.discounted_reward,
-            result.state_value,
-            result.advantage,
-            result.action_probability,
-        ),
-        expected,
-        strict=True,
-    ):
-        torch.testing.assert_close(actual, reference, rtol=1e-5, atol=1e-6)
-    torch.testing.assert_close(result.total, sum(expected), rtol=1e-5, atol=1e-6)
-
-
-def _outputs(batch: int, actions: int, edge: int, offset: float) -> dict[str, Tensor]:
-    values = torch.arange(batch * actions * edge * edge, dtype=torch.float32)
-    maps = values.reshape(batch, actions, edge, edge) / 1000 + offset
-    probabilities = torch.softmax(maps.flatten(1), dim=1).reshape_as(maps)
-    return {
-        "presentRewards": maps,
-        "discountFutureRewards": maps * 0.5,
-        "stateValues": torch.tensor([[0.1], [0.2]]),
-        "advantage": maps * 0.25,
-        "actionProbabilities": probabilities,
-    }
-
-
-def _legacy_primary(
-    current: dict[str, Tensor],
-    target: dict[str, Tensor],
-    batch: TrainingBatch,
-    weights: LossConfig,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    indexes = torch.arange(2)
-    selected = (indexes, batch.action_indexes)
-    assert batch.reward_pixel_masks is not None
-    combo = batch.reward_pixel_masks * batch.request.pixel_action_maps[selected]
-    best = (target["presentRewards"] + target["discountFutureRewards"]).flatten(1).max(1).values
-    future_target = torch.clamp(best * 0.85, max=10)
-    expected = batch.present_rewards + future_target
-    count = combo.sum((1, 2)).clamp_min(1)
-    present = (
-        (combo * batch.present_rewards[:, None, None] - current["presentRewards"][selected] * combo)
-        * combo
-    ).square().sum((1, 2)) / count
-    future = (
-        (combo * future_target[:, None, None] - current["discountFutureRewards"][selected] * combo)
-        * combo
-    ).square().sum((1, 2)) / count
-    advantage_target = combo * (
-        expected[:, None, None] - current["stateValues"].detach()[:, :, None]
-    )
-    advantage = ((advantage_target - current["advantage"][selected] * combo) * combo).square().sum(
-        (1, 2)
-    ) / count
-    state = (current["stateValues"][:, 0] - expected).square().mean() * weights.state_value
-    action = _legacy_action_loss(current, batch, weights.action_probability)
-    return (
-        present.mean() * weights.present_reward,
-        future.mean() * weights.discounted_future_reward,
-        state,
-        advantage.mean() * weights.advantage,
-        action,
+    masks[:, 0, 0] = 1
+    return TrainingBatch(
+        request=request,
+        next_request=request,
+        present_rewards=torch.tensor([2.0, -1.0]),
+        next_state_valid=next_valid,
+        action_indexes=torch.tensor([0, 1]),
+        action_x=torch.tensor([0, 0]),
+        action_y=torch.tensor([0, 0]),
+        sample_ids=("a", "b"),
+        reward_pixel_masks=masks,
     )
 
 
-def _legacy_action_loss(outputs: dict[str, Tensor], batch: TrainingBatch, weight: float) -> Tensor:
-    advantage = outputs["advantage"]
-    probabilities = outputs["actionProbabilities"]
-    _, _actions, height, width = advantage.shape
-    best = advantage.flatten(1).argmax(1)
-    action = torch.div(best, height * width, rounding_mode="floor")
-    pixel = best % (height * width)
-    y, x = torch.div(pixel, width, rounding_mode="floor"), pixel % width
-    target = torch.zeros_like(probabilities)
-    for sample in range(2):
-        target[
-            sample,
-            int(action[sample]),
-            max(0, int(y[sample]) - 3) : min(height - 1, int(y[sample]) + 3),
-            max(0, int(x[sample]) - 3) : min(width - 1, int(x[sample]) + 3),
-        ] = 1
-    target *= batch.request.pixel_action_maps
-    target /= target.sum((2, 3)).clamp_min(1)[:, :, None, None]
-    return ((target - probabilities) * batch.request.pixel_action_maps).abs().sum(
-        (1, 2, 3)
-    ).mean() * weight
+def test_double_dqn_selects_online_action_and_evaluates_target() -> None:
+    online = torch.tensor([[[[1.0, 5.0]], [[-10.0, -10.0]]], [[[100.0, 0.0]], [[0.0, 0.0]]]])
+    target = torch.tensor([[[[9.0, 4.0]], [[8.0, 7.0]]], [[[100.0, 0.0]], [[0.0, 0.0]]]])
+    targets = _double_dqn_targets(
+        FixedModel({"actionValues": online}),
+        FixedModel({"actionValues": target}),
+        _batch(torch.tensor([True, False])),
+        discount_rate=0.85,
+        maximum=10.0,
+    )
+
+    torch.testing.assert_close(targets, torch.tensor([3.4, 0.0]))
+
+
+def test_double_dqn_clips_positive_and_negative_bootstraps_symmetrically() -> None:
+    online = torch.tensor([[[[2.0]], [[1.0]]], [[[1.0]], [[2.0]]]])
+    target = torch.tensor([[[[100.0]], [[0.0]]], [[[0.0]], [[-100.0]]]])
+
+    targets = _double_dqn_targets(
+        FixedModel({"actionValues": online}),
+        FixedModel({"actionValues": target}),
+        _batch(torch.tensor([True, True])),
+        discount_rate=0.85,
+        maximum=10.0,
+    )
+
+    torch.testing.assert_close(targets, torch.tensor([10.0, -10.0]))
+
+
+def test_present_reward_trains_on_terminal_and_only_recorded_region() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    present = torch.zeros(2, 2, 8, 8, requires_grad=True)
+    future = torch.zeros(2, 2, 8, 8, requires_grad=True)
+    batch = _batch(torch.tensor([False, False]))
+
+    present_loss, future_loss, _selected_q, _td_error = _value_losses(
+        {"presentRewards": present, "discountFutureRewards": future},
+        batch,
+        torch.zeros(2),
+        config.training.losses,
+    )
+    (present_loss + future_loss).backward()
+
+    assert present_loss > 0
+    assert future_loss == 0
+    assert present.grad is not None
+    assert torch.count_nonzero(present.grad) == 2
+    assert present.grad[0, 0, 0, 0] != 0
+    assert present.grad[1, 1, 0, 0] != 0
+
+
+def test_action_values_mask_impossible_actions_once() -> None:
+    present = torch.tensor([[[[2.0, 100.0]]]])
+    future = torch.tensor([[[[3.0, 100.0]]]])
+    masks = torch.tensor([[[[1.0, 0.0]]]])
+
+    values = TraceNetHeads.action_values(present, future, masks, -10.0)
+
+    assert values[0, 0, 0, 0] == 5
+    assert values[0, 0, 0, 1] == torch.finfo(values.dtype).min
