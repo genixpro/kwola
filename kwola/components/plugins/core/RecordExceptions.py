@@ -1,5 +1,4 @@
 from kwola.components.plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
-import selenium.common.exceptions
 import os
 from kwola.config.logger import getLogger
 from kwola.datamodels.errors.ExceptionError import ExceptionError

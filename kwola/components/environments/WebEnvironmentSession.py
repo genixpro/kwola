@@ -20,18 +20,8 @@ from ..plugins.base.ProxyPluginBase import ProxyPluginBase
 from ..plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
 from ...errors import AutologinFailure
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver.edge.options import Options as EdgeOptions
-from selenium.webdriver.common.proxy import Proxy
-from selenium.webdriver.common.keys import Keys
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from .PlaywrightBrowserSession import PlaywrightBrowserSession, PlaywrightError, PlaywrightTimeoutError
 from ..utils.video import chooseBestFfmpegVideoCodec
-from selenium.webdriver.common.proxy import Proxy, ProxyType
 from ..proxy.ProxyProcess import ProxyProcess
 from ..utils.retry import autoretry
 from bs4 import BeautifulSoup
@@ -49,7 +39,6 @@ from pprint import pprint
 import os
 import shutil
 import os.path
-import selenium.common.exceptions
 import subprocess
 import tempfile
 import time
@@ -95,8 +84,6 @@ class WebEnvironmentSession:
         self.proxy = None
         self.driver = None
 
-        self.edgeUserDataDir = None
-
         self.tabNumber = tabNumber
         self.traceNumber = 0
         self.noActivityTimeout = self.config['web_session_no_network_activity_timeout']
@@ -139,84 +126,21 @@ class WebEnvironmentSession:
             self.executionSession.userAgent = self.proxy.getUserAgent()
 
     def enforceMemoryLimits(self):
-        if self.driver.service.process.returncode is not None:
-            try:
-                pid = self.driver.service.process.pid  # is a Popen instance for the chromedriver process
-                p = psutil.Process(pid)
-
-                p.rlimit(psutil.RLIMIT_AS, (1024*1024*1024, 1024*1024*1024))
-                for child in p.children(recursive=True):
-                    child.rlimit(psutil.RLIMIT_AS, (1024*1024*1024, 1024*1024*1024))
-            except OSError:
-                pass
+        # Playwright owns its browser process tree. Applying limits to an
+        # implementation-private child process is unsafe and was WebDriver-only.
+        return
 
     def initializeWebBrowser(self):
-        if self.browser is None or self.browser == "chrome":
-            chrome_options = ChromeOptions()
-            chrome_options.headless = self.config['web_session_headless']
-            if self.config['web_session_enable_shared_chrome_cache']:
-                chrome_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('chrome_cache')}")
-                chrome_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
-
-            # chrome_options.add_argument(f"--disable-gpu")
-            # chrome_options.add_argument(f"--disable-features=VizDisplayCompositor")
-            chrome_options.add_argument(f"--no-sandbox")
-            chrome_options.add_argument(f"--temp-profile")
-            chrome_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
-            if sys.platform == "win32" or sys.platform == "win64":
-                chrome_options.add_argument(f"--disable-dev-shm-usage")
-
-            capabilities = webdriver.DesiredCapabilities.CHROME
-            capabilities['loggingPrefs'] = {'browser': 'ALL'}
-
-            self.driver = webdriver.Chrome(desired_capabilities=capabilities, options=chrome_options)
-        elif self.browser == "edge":
-            edge_options = EdgeOptions()
-            edge_options.use_chromium = True
-            edge_options.headless = self.config['web_session_headless']
-            if self.config['web_session_enable_shared_edge_cache']:
-                edge_options.add_argument(f"--disk-cache-dir={self.config.getKwolaUserDataDirectory('edge_cache')}")
-                edge_options.add_argument(f"--disk-cache-size={1024*1024*1024}")
-
-            self.edgeUserDataDir = tempfile.mkdtemp()
-            edge_options.add_argument(f"--user-data-dir={self.edgeUserDataDir}")
-
-            edge_options.add_argument(f"--proxy-server=localhost:{self.proxy.port}")
-
-            capabilities = webdriver.DesiredCapabilities.EDGE
-            capabilities['loggingPrefs'] = {'browser': 'ALL'}
-
-            self.driver = webdriver.Edge(capabilities=capabilities, options=edge_options)
-        elif self.browser == 'firefox':
-            firefox_options = FirefoxOptions()
-            firefox_options.headless = self.config['web_session_headless']
-
-            proxy = Proxy()
-            proxy.http_proxy = f"localhost:{self.proxy.port}"
-            firefox_options.proxy = proxy
-
-            firefox_options.log.level = "info"
-
-            capabilities = webdriver.DesiredCapabilities.FIREFOX
-            capabilities['loggingPrefs'] = {'browser': 'ALL'}
-
-            self.driver = webdriver.Firefox(desired_capabilities=capabilities,
-                                            options=firefox_options,
-                                            service_log_path=tempfile.mkstemp()[1])
-        else:
-            raise ValueError(f"Unsupported value for browser '{self.browser}'. Valid values are 'firefox', 'chrome' or 'edge'.")
-
-        self.updateWindowSize()
-        self.driver.set_script_timeout(self.config['web_session_script_execution_timeout'])
-        self.driver.set_page_load_timeout(self.config['web_session_page_load_timeout'])
+        browser = self.browser or "chrome"  # chrome remains the historical config/data label.
+        cache_dir = self.config.getKwolaUserDataDirectory('chrome_cache') if browser == "chrome" and self.config['web_session_enable_shared_chrome_cache'] else None
+        self.driver = PlaywrightBrowserSession(
+            browser, headless=self.config['web_session_headless'], proxy_port=self.proxy.port,
+            width=self.config['web_session_width'][self.windowSize], height=self.config['web_session_height'][self.windowSize],
+            script_timeout=self.config['web_session_script_execution_timeout'], page_timeout=self.config['web_session_page_load_timeout'], cache_dir=cache_dir)
 
     def updateWindowSize(self):
-        window_size = self.driver.execute_script("""
-            return [window.outerWidth - window.innerWidth + arguments[0],
-              window.outerHeight - window.innerHeight + arguments[1]];
-            """, self.config['web_session_width'][self.windowSize], self.config['web_session_height'][self.windowSize])
-
-        self.driver.set_window_size(*window_size)
+        # The viewport is set when the Playwright context is created.
+        return
 
     def fetchTargetWebpage(self):
         try:
@@ -227,7 +151,7 @@ class WebEnvironmentSession:
                     self.driver.get("data:,")
                     raise RuntimeError(f"Received a fatal network error while attempting to load the starting page.")
 
-        except selenium.common.exceptions.TimeoutException:
+        except PlaywrightTimeoutError:
             self.driver.get("data:,")
             raise RuntimeError(f"The web-browser timed out while attempting to load the target URL {self.targetURL}")
 
@@ -279,10 +203,6 @@ class WebEnvironmentSession:
 
             self.driver = None
 
-        if hasattr(self, "edgeUserDataDir"):
-            if self.edgeUserDataDir is not None:
-                shutil.rmtree(self.edgeUserDataDir)
-                self.edgeUserDataDir = None
 
     def waitUntilDocumentReadyState(self):
         startTime = datetime.now()
@@ -552,7 +472,7 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during autologin: {traceback.format_exc()}"
             return None
-        except selenium.common.exceptions.WebDriverException:
+        except PlaywrightError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during autologin: {traceback.format_exc()}"
             return None
@@ -872,7 +792,7 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred while fetching action maps: {traceback.format_exc()}"
             return []
-        except selenium.common.exceptions.WebDriverException:
+        except PlaywrightError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred while fetching action maps: {traceback.format_exc()}"
             return []
@@ -885,103 +805,49 @@ class WebEnvironmentSession:
         success = True
 
         try:
-            element = self.driver.execute_script("""
-            return document.elementFromPoint(arguments[0], arguments[1]);
-            """, action.x, action.y)
-
             if isinstance(action, ClickTapAction):
-                if self.config['web_session_click_mode'] == "fast":
-                    if action.times == 1:
-                        if self.config['web_session_print_every_action']:
-                            getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                        element.click()
-                    else:
-                        if self.config['web_session_print_every_action']:
-                            getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                        element.double_click()
-                    time.sleep(self.config.web_session_perform_action_wait_time)
-                else:
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(element, 0, 0)
-                    if action.times == 1:
-                        if self.config['web_session_print_every_action']:
-                            getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                        actionChain.click(on_element=element)
-                        actionChain.pause(self.config.web_session_perform_action_wait_time)
-                    elif action.times == 2:
-                        if self.config['web_session_print_every_action']:
-                            getLogger().info(f"Double Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                        actionChain.double_click(on_element=element)
-                        actionChain.pause(self.config.web_session_perform_action_wait_time)
-
-                    actionChain.perform()
+                if self.config['web_session_print_every_action']:
+                    getLogger().info(f"Clicking {action.x} {action.y} from {action.source} as {action.type}")
+                delay = 0 if self.config['web_session_click_mode'] == "fast" else int(self.config.web_session_perform_action_wait_time * 1000)
+                self.driver.click_at(action.x, action.y, count=action.times, delay=delay)
+                time.sleep(self.config.web_session_perform_action_wait_time)
 
             if isinstance(action, RightClickAction):
                 if self.config['web_session_print_every_action']:
                     getLogger().info(f"Right Clicking {action.x} {action.y} from {action.source} as {action.type}")
-                actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                actionChain.move_to_element_with_offset(element, 0, 0)
-                actionChain.context_click(on_element=element)
-                actionChain.pause(self.config.web_session_perform_action_wait_time)
-                actionChain.perform()
+                self.driver.click_at(action.x, action.y, button="right")
+                time.sleep(self.config.web_session_perform_action_wait_time)
 
             if isinstance(action, TypeAction):
                 if self.config['web_session_print_every_action']:
                     getLogger().info(f"Typing {action.text} at {action.x} {action.y} from {action.source} as {action.type}")
 
-                if self.config['web_session_type_mode'] == "fast":
-                    element.send_keys(action.text)
-                    time.sleep(self.config.web_session_perform_action_wait_time)
-                else:
-                    actionChain = webdriver.common.action_chains.ActionChains(self.driver)
-                    actionChain.move_to_element_with_offset(element, 0, 0)
-                    actionChain.click(on_element=element)
-                    actionChain.pause(self.config.web_session_perform_action_wait_time)
-                    actionChain.send_keys_to_element(element, action.text)
-                    actionChain.pause(self.config.web_session_perform_action_wait_time)
-                    actionChain.perform()
+                delay = 0 if self.config['web_session_type_mode'] == "fast" else int(self.config.web_session_perform_action_wait_time * 1000)
+                self.driver.type_at(action.x, action.y, action.text, delay=delay)
+                time.sleep(self.config.web_session_perform_action_wait_time)
 
             if isinstance(action, ScrollingAction):
                 if self.config['web_session_print_every_action']:
                     getLogger().info(f"Scrolling {action.direction} at {action.x} {action.y} from {action.source} as {action.type}")
 
                 if action.direction == "down":
-                    self.driver.execute_script("window.scrollTo(0, window.scrollY + 400)")
+                    self.driver.scroll(400)
                 else:
-                    self.driver.execute_script("window.scrollTo(0, Math.max(0, window.scrollY - 400))")
+                    self.driver.scroll(-400)
                 time.sleep(self.config.web_session_perform_action_wait_time)
 
             if isinstance(action, ClearFieldAction):
                 if self.config['web_session_print_every_action']:
                     getLogger().info(f"Clearing field at {action.x} {action.y} from {action.source} as {action.type}")
-                element.clear()
+                self.driver.clear_at(action.x, action.y)
 
             if isinstance(action, WaitAction):
                 getLogger().info(f"Waiting for {action.time} at {action.x} {action.y} from {action.source} as {action.type}")
                 time.sleep(action.time)
 
-        except selenium.common.exceptions.MoveTargetOutOfBoundsException as e:
+        except PlaywrightError as e:
             if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a MoveTargetOutOfBoundsException exception!")
-
-            success = False
-        except selenium.common.exceptions.StaleElementReferenceException as e:
-            if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a StaleElementReferenceException!")
-            success = False
-        except selenium.common.exceptions.InvalidElementStateException as e:
-            if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a InvalidElementStateException!")
-
-            success = False
-        except selenium.common.exceptions.TimeoutException as e:
-            if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a TimeoutException!")
-
-            success = False
-        except selenium.common.exceptions.JavascriptException as e:
-            if self.config['web_session_print_every_action_failure']:
-                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a JavascriptException!")
+                getLogger().warning(f"Running {action.source} action {action.type} at {action.x},{action.y} failed due to a Playwright error: {e}")
 
             success = False
         except urllib3.exceptions.MaxRetryError as e:
@@ -995,11 +861,7 @@ class WebEnvironmentSession:
 
             success = False
 
-        # If there was an alert generated as a result of the action, then try to close it.
-        try:
-            self.driver.switch_to.alert.accept()
-        except selenium.common.exceptions.NoAlertPresentException:
-            pass
+        # Dialogs are accepted synchronously by the adapter's Page event handler.
 
         networkWaitTime = self.waitUntilNoNetworkActivity()
 
@@ -1057,7 +919,7 @@ class WebEnvironmentSession:
                 return networkWaitTime
             else:
                 return 0
-        except selenium.common.exceptions.TimeoutException:
+        except PlaywrightTimeoutError:
             return 0
 
     def checkLoadFailure(self, priorURL):
@@ -1073,7 +935,7 @@ class WebEnvironmentSession:
                 getLogger().warning(f"The browser session needed to be reset back to the prior url {priorURL} from the current url {self.driver.current_url}")
                 self.driver.get(priorURL)
                 self.waitUntilNoNetworkActivity()
-        except selenium.common.exceptions.TimeoutException:
+        except PlaywrightTimeoutError:
             pass
 
     def runAction(self, action):
@@ -1158,7 +1020,7 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during runAction: {traceback.format_exc()}"
             return None, actionExecutionTimes
-        except selenium.common.exceptions.WebDriverException:
+        except PlaywrightError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during runAction: {traceback.format_exc()}"
             return None, actionExecutionTimes
@@ -1209,7 +1071,7 @@ class WebEnvironmentSession:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
             return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
-        except selenium.common.exceptions.WebDriverException:
+        except PlaywrightError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during getImage: {traceback.format_exc()}"
             return numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])

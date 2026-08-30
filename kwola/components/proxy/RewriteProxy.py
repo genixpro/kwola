@@ -5,7 +5,6 @@
 
 
 from ...config.logger import getLogger
-from mitmproxy.script import concurrent
 import datetime
 import os
 import os.path
@@ -89,7 +88,6 @@ class RewriteProxy:
         parsed = list(urllib.parse.urlparse(url))
 
         parsed[3] = ""
-        parsed[4] = ""
         parsed[5] = ""
 
         path = parsed[2]
@@ -100,6 +98,7 @@ class RewriteProxy:
         path = RewriteProxy.pathNumericalIdSegmentRegex.sub(f"/{leftChar}{leftChar}ID{rightChar}{rightChar}", path)
 
         parsed[2] = path
+        parsed[4] = deuniqueString(parsed[4], addSubstituteReferences=True, deuniqueMode="url", substituteReferenceWrapperCharacters=substituteReferenceWrapperCharacters)
 
         return urllib.parse.urlunparse(parsed)
 
@@ -204,7 +203,6 @@ class RewriteProxy:
         return resourceId
 
 
-    @concurrent
     def response(self, flow):
         """
             The full HTTP response has been read.

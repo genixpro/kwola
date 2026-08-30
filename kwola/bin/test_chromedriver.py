@@ -7,8 +7,7 @@ from ..diagnostics.test_chromedriver import testChromedriver
 
 def main():
     """
-        This is the entry for the command which tests your chrome & chromedriver installation to see if
-        Selenium is able to interact with it successfully.
+        Deprecated compatibility alias for the Playwright Chromium/Firefox diagnostic.
     """
 
     success = testChromedriver(verbose=True)
@@ -16,4 +15,3 @@ def main():
         exit(0)
     else:
         exit(1)
-

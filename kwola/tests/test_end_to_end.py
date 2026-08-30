@@ -6,6 +6,7 @@ import shutil
 import traceback
 from ..config.logger import getLogger, setupLocalLogging
 
+@unittest.skip("Public third-party sites are optional manual smoke tests; local Kros is the maintained acceptance suite.")
 class TestEndToEnd(unittest.TestCase):
     def run_click_only_test(self, url):
         getLogger().info(f"\nStarting a click-only test targeting the URL {url}")
@@ -156,4 +157,3 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_zillow(self):
         self.run_click_only_test("https://zillow.com/")
-

@@ -1,0 +1,33 @@
+# Kwola-owned acceptance harness. The two applications remain independent,
+# frozen repositories; set KROS*_DIR if they are not sibling checkouts.
+services:
+  kros1-mongo:
+    image: mongo:4.4.29-focal@sha256:6bc3499641b42402dee48aecd722f4a04f76aced40f62dd1640a5dfa0f238616
+    command: ["mongod", "--bind_ip_all"]
+    tmpfs: [/data/db]
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  kros1:
+    build:
+      context: ${KROS1_DIR:-../kros-1-restaurant-backend}
+      dockerfile: ../kwola/docker/kros1.Dockerfile
+    environment:
+      # The frozen Grunt `serve` command is its original development mode;
+      # production expects a separately generated `public/` tree.
+      NODE_ENV: development
+      PORT: "3000"
+      MONGODB_URI: mongodb://kros1-mongo/news
+    depends_on:
+      kros1-mongo:
+        condition: service_healthy
+    ports: ["127.0.0.1:3001:3000"]
+
+  kros3:
+    build:
+      context: ${KROS3_DIR:-../kros-3-code-maze}
+      dockerfile: ../kwola/docker/kros3.Dockerfile
+    ports: ["127.0.0.1:3003:80"]

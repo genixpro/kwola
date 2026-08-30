@@ -51,75 +51,19 @@ def checkIfProcessRunning(processName):
 
 
 def getAvailableBrowsers(config):
+    """Return configured Playwright engines whose pinned payload is installed."""
+    from playwright.sync_api import sync_playwright
+
     browsers = []
-    if config['web_session_enable_chrome']:
-        try:
-            result = subprocess.run(['chromedriver', '-v'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result = None
-
-        try:
-            result2 = subprocess.run(['chromium-browser', '--version'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result2 = None
-
-        try:
-            chromeCmd = "google-chrome"
-            if sys.platform == "win32" or sys.platform == "win64":
-                chromeCmd = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-
-                if not os.path.exists(chromeCmd):
-                    chromeCmd = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-            if sys.platform == "darwin":
-                chromeCmd = "open /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome -F -n -g --args"
-
-            result3 = subprocess.run([chromeCmd, '--headless', '--version'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result3 = None
-
-        if result is not None and (result2 is not None or result3 is not None):
-            browsers.append("chrome")
-        else:
-            getLogger().error(f"The Chrome browser is enabled in the configuration, but the executables for either chromedriver or google-chrome/chromium-browser can not be found in $PATH. PATH is:\n{os.getenv('PATH')}")
-
-    if config['web_session_enable_firefox']:
-        try:
-            result = subprocess.run(['geckodriver', '--version'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result = None
-
-        try:
-            firefoxCmd = "firefox"
-            if sys.platform == "win32" or sys.platform == "win64":
-                firefoxCmd = "C:\Program Files\Mozilla Firefox\firefox.exe"
-            result2 = subprocess.run([firefoxCmd, '--version'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result2 = None
-
-        if result is not None and result2 is not None:
-            browsers.append("firefox")
-        else:
-            getLogger().error(f"The Firefox browser is enabled in the configuration, but the executables for either geckodriver or firefox can not be found in $PATH. PATH is:\n{os.getenv('PATH')}")
-
-    if config['web_session_enable_edge']:
-        try:
-            result = subprocess.run(['msedgedriver', '--version'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result = None
-
-        try:
-            edgeCmd = "microsoft-edge"
-            if sys.platform == "win32" or sys.platform == "win64":
-                edgeCmd = "C:\Program Files (x86)\Microsoft\Edge\Application\edge.exe"
-
-            result2 = subprocess.run([edgeCmd, '--version'], stdout=subprocess.PIPE)
-        except FileNotFoundError:
-            result2 = None
-
-        if result is not None and result2 is not None:
-            browsers.append("edge")
-        else:
-            getLogger().error(f"The Microsoft Edge browser is enabled in the configuration, but the executables for either msedgedriver or microsoft-edge can not be found in $PATH. PATH is:\n{os.getenv('PATH')}")
+    with sync_playwright() as playwright:
+        executables = {"chrome": playwright.chromium.executable_path, "firefox": playwright.firefox.executable_path}
+    for name, enabled in (("chrome", config['web_session_enable_chrome']), ("firefox", config['web_session_enable_firefox'])):
+        if enabled and executables[name] and os.path.exists(executables[name]):
+            browsers.append(name)
+        elif enabled:
+            getLogger().error("The pinned Playwright %s package is missing. Run `uv run playwright install chromium firefox`." % name)
+    if 'web_session_enable_edge' in config and config['web_session_enable_edge']:
+        getLogger().warning("Edge is no longer supported; enable Chrome (Playwright Chromium) or Firefox instead.")
 
     return browsers
 
@@ -330,11 +274,14 @@ def runMainTrainingLoop(config, trainingSequence, exitOnFail=False):
                 enableDebugVideosThisLoop = True
 
             if torch.cuda.device_count() > 0:
+                # All GPU ranks participate in one coordinated training step.
+                # They must share the same step identity and file-store slot.
+                trainingStepIndex = trainingSequence.trainingStepsLaunched
                 for gpu in range(numberOfTrainingStepsInParallel):
-                    trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingSequence.trainingStepsLaunched, gpuNumber=gpu, coordinatorTempFileName=coordinatorTempFileName)
+                    trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingStepIndex, gpuNumber=gpu, coordinatorTempFileName=coordinatorTempFileName)
                     allFutures.append(trainingFuture)
                     trainStepFutures.append(trainingFuture)
-                    trainingSequence.trainingStepsLaunched += 1
+                trainingSequence.trainingStepsLaunched += 1
             else:
                 trainingFuture = executor.submit(runTrainingSubprocess, config, trainingSequence, trainingStepIndex=trainingSequence.trainingStepsLaunched, gpuNumber=None, coordinatorTempFileName=coordinatorTempFileName)
                 allFutures.append(trainingFuture)

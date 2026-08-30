@@ -6,7 +6,6 @@
 
 from datetime import datetime
 from ...config.logger import getLogger
-from mitmproxy.script import concurrent
 import hashlib
 import os
 import os.path
@@ -64,7 +63,6 @@ class JSRewriteProxy:
         flow.request.headers['Accept-Encoding'] = 'identity'
 
 
-    @concurrent
     def responseheaders(self, flow):
         """
             The full HTTP response has been read.
@@ -278,7 +276,6 @@ class JSRewriteProxy:
 
         return bytesData
 
-    @concurrent
     def response(self, flow):
         """
             The full HTTP response has been read.

@@ -8,7 +8,7 @@ import urllib3
 import requests
 import traceback
 import bz2
-import selenium.common.exceptions
+from kwola.components.environments.PlaywrightBrowserSession import PlaywrightError
 
 
 
@@ -213,7 +213,7 @@ class RecordPageHTML(WebEnvironmentPluginBase):
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during saveHTML: {traceback.format_exc()}"
             return
-        except selenium.common.exceptions.WebDriverException:
+        except PlaywrightError:
             self.hasBrowserDied = True
             self.browserDeathReason = f"Following fatal error occurred during saveHTML: {traceback.format_exc()}"
             return

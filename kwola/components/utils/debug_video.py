@@ -13,7 +13,7 @@ import os
 import traceback
 from .retry import autoretry
 import skimage.io
-import pkg_resources
+from importlib import resources
 import numpy
 
 
@@ -47,16 +47,16 @@ def createDebugVideoSubProcess(config, executionSessionId, name="", includeNeura
 
 def addDebugActionCursorToImage(image, position, actionType):
     if actionType.startswith("type"):
-        cursorImage = skimage.io.imread(pkg_resources.resource_filename("kwola", "images/type.png"))
+        cursorImage = skimage.io.imread(str(resources.files("kwola").joinpath("images", "type.png")))
         cursorImageOriginPos = (16, 16)
     elif actionType.startswith("scroll"):
-        cursorImage = skimage.io.imread(pkg_resources.resource_filename("kwola", "images/scroll.png"))
+        cursorImage = skimage.io.imread(str(resources.files("kwola").joinpath("images", "scroll.png")))
         cursorImageOriginPos = (16, 16)
     elif actionType.startswith("clear"):
-        cursorImage = skimage.io.imread(pkg_resources.resource_filename("kwola", "images/clear.png"))
+        cursorImage = skimage.io.imread(str(resources.files("kwola").joinpath("images", "clear.png")))
         cursorImageOriginPos = (16, 19)
     else:
-        cursorImage = skimage.io.imread(pkg_resources.resource_filename("kwola", "images/click.png"))
+        cursorImage = skimage.io.imread(str(resources.files("kwola").joinpath("images", "click.png")))
         cursorImageOriginPos = (9, 9)
 
     pointerTop = (position[0] - cursorImageOriginPos[0])

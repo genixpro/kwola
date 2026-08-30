@@ -1,5 +1,5 @@
 from kwola.components.plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
-import selenium.common.exceptions
+from kwola.components.environments.PlaywrightBrowserSession import PlaywrightError
 
 
 class RecordCursorAtAction(WebEnvironmentPluginBase):
@@ -9,16 +9,9 @@ class RecordCursorAtAction(WebEnvironmentPluginBase):
 
     def beforeActionRuns(self, webDriver, proxy, executionSession, executionTrace, actionToExecute):
         try:
-            element = webDriver.execute_script("""
-            return document.elementFromPoint(arguments[0], arguments[1]);
-            """, actionToExecute.x, actionToExecute.y)
+            executionTrace.cursor = webDriver.css_property_at(actionToExecute.x, actionToExecute.y, "cursor")
 
-            if element is not None:
-                executionTrace.cursor = element.value_of_css_property("cursor")
-            else:
-                executionTrace.cursor = None
-
-        except selenium.common.exceptions.StaleElementReferenceException as e:
+        except PlaywrightError:
             executionTrace.cursor = None
 
 
@@ -33,6 +26,5 @@ class RecordCursorAtAction(WebEnvironmentPluginBase):
 
     def cleanup(self, webDriver, proxy, executionSession):
         pass
-
 
 

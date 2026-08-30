@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools==75.8.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kwola"
+version = "0.1.52"
+description = "AI powered software testing"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "playwright==1.62.0",
+  "torch==2.7.0+cu126 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "torchvision==0.22.0+cu126 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "torch==2.7.0 ; sys_platform != 'linux' or platform_machine != 'x86_64'",
+  "torchvision==0.22.0 ; sys_platform != 'linux' or platform_machine != 'x86_64'",
+  "mitmproxy==11.0.2", "mongoengine==0.29.1", "numpy==2.2.3", "opencv-python==4.11.0.86", "matplotlib==3.10.1",
+  "pandas==2.2.3", "psutil==7.0.0", "questionary==2.1.0", "requests==2.32.3",
+  "scikit-image==0.25.2", "scikit-learn==1.6.1", "scipy==1.15.2", "testtools==2.7.2",
+  "filetype==1.2.0", "billiard==4.2.1", "StringDist==1.0.9", "beautifulsoup4==4.13.3",
+  "google-cloud-storage==3.0.0", "Faker==36.1.1", "giturlparse==0.12.0", "edlib==1.3.9.post1", "python-snappy==0.7.3",
+]
+
+[project.scripts]
+kwola = "kwola.bin.main:main"
+kwola_init = "kwola.bin.initialize:main"
+kwola_train_agent = "kwola.bin.train_agent:main"
+kwola_run_train_step = "kwola.bin.run_train_step:main"
+kwola_run_test_step = "kwola.bin.run_test_step:main"
+kwola_rapid_local_test_suite = "kwola.bin.rapid_local_test_suite:main"
+kwola_reset = "kwola.bin.reset:main"
+kwola_full_internal_test_suite = "kwola.bin.full_internal_test_suite:main"
+kwola_test_browser = "kwola.bin.test_chromedriver:main"
+kwola_test_chromedriver = "kwola.bin.test_chromedriver:main"
+kwola_test_installation = "kwola.bin.test_installation:main"
+kwola_test_javascript_rewriting = "kwola.bin.test_javascript_rewriting:main"
+kwola_test_ffmpeg = "kwola.bin.test_ffmpeg:main"
+kwola_test_neural_network = "kwola.bin.test_neural_network:main"
+kwola_install_proxy_cert = "kwola.bin.install_proxy_cert:main"
+kwola_website_check = "kwola.bin.website_check:main"
+kwola_regenerate_charts = "kwola.bin.regenerate_charts:main"
+kwola_run_multiple = "kwola.bin.run_multiple:main"
+kwola_create_kros3_experiment = "kwola.bin.create_kros3_experiment:main"
+kwola_benchmark_neural_network = "kwola.bin.benchmark_neural_network:main"
+
+[tool.setuptools.packages.find]
+include = ["kwola*"]
+
+[tool.setuptools.package-data]
+kwola = ["config/prebuilt_configs/*.json", "images/*.png"]
+
+[tool.uv]
+index-url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]
+torchvision = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]

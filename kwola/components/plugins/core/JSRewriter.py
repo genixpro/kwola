@@ -9,6 +9,7 @@ import sys
 import urllib.parse
 from kwola.config.logger import getLogger
 import functools
+from pathlib import Path
 import tempfile
 
 
@@ -166,17 +167,26 @@ class JSRewriter(ProxyPluginBase):
         if noLineCountingKeyword is not None:
             environment['KWOLA_ENABLE_LINE_COUNTING'] = 'false'
 
-        babelCmd = 'babel'
-        if sys.platform == "win32" or sys.platform == "win64":
-            babelCmd = 'babel.cmd'
+        # Babel is a committed local Node dependency.  Do not rely on a
+        # deprecated global install or the caller having manually extended
+        # PATH.  NODE_PATH also makes the pinned babel-plugin-kwola resolvable
+        # when this code runs in the spawned proxy process.
+        repositoryRoot = Path(__file__).resolve().parents[4]
+        babelCmd = repositoryRoot / "node_modules" / ".bin" / ("babel.cmd" if sys.platform in ("win32", "win64") else "babel")
+        if not babelCmd.exists():
+            raise RuntimeError(
+                "Pinned Babel is missing. Run `npm ci` from %s before starting Kwola." % repositoryRoot
+            )
+        nodePath = str(repositoryRoot / "node_modules")
+        environment['NODE_PATH'] = nodePath + (os.pathsep + environment['NODE_PATH'] if environment.get('NODE_PATH') else '')
 
         result = subprocess.run(
-            [babelCmd, '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
+            [str(babelCmd), '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
              "script"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
 
         if result.returncode != 0 and "'import' and 'export' may appear only with" in str(result.stderr, 'utf8'):
             result = subprocess.run(
-                [babelCmd, '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
+                [str(babelCmd), '-f', fileNameForBabel, '--plugins', 'babel-plugin-kwola', '--retain-lines', '--source-type',
                  "module"], input=jsFileContents, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
 
         if result.returncode != 0:

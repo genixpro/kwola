@@ -130,7 +130,8 @@ class ProxyProcess:
             'https': f'http://127.0.0.1:{self.port}',
         }
 
-        testUrl = "http://kros3.kwola.io/"
+        # Test the configured application, never a retired public Kwola host.
+        testUrl = self.config['url']
         response = requests.get(testUrl, proxies=proxies, verify=False)
         if response.status_code != 200:
             raise ProxyVerificationFailed(f"Error in the proxy - unable to connect to the testing url at {testUrl} through the local proxy. Status code: {response.status_code}. Body: {response.content}")
@@ -223,27 +224,20 @@ class ProxyProcess:
 
     @staticmethod
     def runProxyServerOnce(mitmProxyPlugins, resultQueue):
-        from mitmproxy import proxy, options
+        from mitmproxy import options
         from mitmproxy.tools.dump import DumpMaster
-        import mitmproxy.exceptions
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        # We have a retry mechanism here because it may take multiple attempts to get a free port
-        while True:
-            try:
-                port = ProxyProcess.findFreePort()
-                opts = options.Options(listen_port=port, http2=False, ssl_insecure=True)
-                pconf = proxy.config.ProxyConfig(opts)
-
-                m = DumpMaster(opts, with_termlog=False, with_dumper=False)
-                m.server = proxy.server.ProxyServer(pconf)
-                for plugin in mitmProxyPlugins:
-                    m.addons.add(plugin)
-                break
-            except mitmproxy.exceptions.ServerException:
-                getLogger().warning(f"Had to restart the mitmproxy due to an exception: {traceback.format_exc()}")
+        # Since mitmproxy 10, DumpMaster owns the proxy server.  The removed
+        # proxy.config.ProxyConfig/proxy.server.ProxyServer APIs must not be
+        # constructed by addons.  Options are applied when `run()` starts.
+        port = ProxyProcess.findFreePort()
+        opts = options.Options(listen_port=port, http2=False, ssl_insecure=True)
+        m = DumpMaster(opts, loop=loop, with_termlog=False, with_dumper=False)
+        for plugin in mitmProxyPlugins:
+            m.addons.add(plugin)
 
         resultQueue.put(port)
-        m.run()
+        loop.run_until_complete(m.run())

@@ -1,5 +1,4 @@
 from kwola.components.plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
-import selenium.common.exceptions
 
 
 class RecordAllPaths(WebEnvironmentPluginBase):
@@ -33,6 +32,5 @@ class RecordAllPaths(WebEnvironmentPluginBase):
 
     def cleanup(self, webDriver, proxy, executionSession):
         pass
-
 
 

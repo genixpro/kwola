@@ -16,8 +16,64 @@ Newsletter (https://share.hsforms.com/11VTba-QcSYC6cS38VtFxUQ45177).
 Installation
 ============
 
-Dependencies
-------------
+Revival bootstrap (Linux / Python 3.12)
+---------------------------------------
+
+Kwola is now installed reproducibly with `uv`. The checked-in `uv.lock` pins
+the Python dependency graph, including PyTorch `2.7.0+cu126`; `chrome` remains
+the historical Kwola configuration/data label and means Playwright Chromium.
+Edge is not supported.
+
+```sh
+uv python install 3.12
+uv sync --locked --python 3.12
+uv run playwright install chromium firefox
+npm ci
+uv run kwola_test_browser
+```
+
+The pinned Playwright release is 1.62.0.  The Linux acceptance target also
+pins ffmpeg 8.0.1; install that exact package version from the target's
+distribution repository before enabling video output.
+
+On the dual RTX 2070 target, verify the host before starting a run:
+
+```sh
+nvidia-smi --query-gpu=name,driver_version,compute_cap --format=csv
+uv run python -c 'import torch; print(torch.cuda.is_available(), torch.cuda.device_count(), torch.version.cuda)'
+uv run kwola_test_neural_network
+```
+
+Both cards must report compute capability 7.5 and `torch.version.cuda` must be
+12.6. Multi-GPU training uses a two-rank NCCL process group; rank 0 is the only
+checkpoint writer. Existing historical checkpoints are archival and are not a
+supported input to new Python 3.12 runs.
+
+For HTTPS instrumentation, run `uv run kwola_install_proxy_cert` once to open
+the mitmproxy certificate page in Playwright Chromium and install its CA into
+the browser trust store. If proxy verification fails, Kwola reports the target
+URL and proxy failure directly rather than repeatedly restarting a browser.
+
+The maintained acceptance applications are local. With the original Kros
+repositories checked out beside this repository, run:
+
+```sh
+docker compose -f docker-compose.kros.yml up --build
+```
+
+This exposes Kros 1 at `http://127.0.0.1:3001` and Kros 3 at
+`http://127.0.0.1:3003`. Kros 1 uses a throwaway Mongo volume (`tmpfs`) so each
+`down`/`up` cycle is resettable. Override `KROS1_DIR` and `KROS3_DIR` when the
+frozen application checkouts live elsewhere. Public `kros*.kwola.io` endpoints
+are not part of the required suite.
+
+Historical installation notes — do not use
+------------------------------------------
+
+The instructions below describe the pre-revival Selenium/Python-3.6 package
+and are retained only as historical context. Do not follow them for a revived
+installation: use the pinned `uv` bootstrap above. In particular, do not
+install ChromeDriver or a global Babel toolchain.
 
 1) Python
 
@@ -173,10 +229,10 @@ Kwola. These tools are provided as diagnostics that seperately test each of the 
 We also provide a single command that runs a short, preconfigured end-to-end test of Kwola. These tests are intended
 to be used to check that you have installed everything correctly.
 
-First, check to make sure that Kwola is able to start headless browsers. This command tests that Chrome & 
-chomedriver are installed and Kwola is correctly finding and running the binaries.
+First, check that Kwola is able to start its pinned headless Playwright
+Chromium and Firefox browsers.
 
-`[user@localhost]$ kwola_test_chromedriver`
+`[user@localhost]$ kwola_test_browser`
 
 Next, check to make sure that NodeJS, Babel and the javascript code transpiling is working correctly.
 
@@ -283,4 +339,3 @@ Project status
 ==============
 
 As of February 2020, the project is just getting started. We are open to anyone who wants to join!
-

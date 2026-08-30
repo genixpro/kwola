@@ -490,12 +490,18 @@ class SymbolMapper:
                 trace.cachedStartCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedEndCumulativeBranchTrace)
                 trace.cachedEndCumulativeBranchTrace = copy.deepcopy(lastTrace.cachedEndCumulativeBranchTrace)
 
+                # MongoEngine's tracked DictField compares assigned values.
+                # SciPy sparse matrices deliberately reject boolean equality,
+                # so construct a replacement mapping instead of mutating its
+                # BaseDict entries in place.
+                cumulative = dict(trace.cachedEndCumulativeBranchTrace)
                 for fileName in trace.branchTrace.keys():
-                    if fileName in trace.cachedEndCumulativeBranchTrace:
-                        if trace.branchTrace[fileName].shape[0] == trace.cachedEndCumulativeBranchTrace[fileName].shape[0]:
-                            trace.cachedEndCumulativeBranchTrace[fileName] += trace.branchTrace[fileName]
+                    if fileName in cumulative:
+                        if trace.branchTrace[fileName].shape[0] == cumulative[fileName].shape[0]:
+                            cumulative[fileName] = cumulative[fileName] + trace.branchTrace[fileName]
                     else:
-                        trace.cachedEndCumulativeBranchTrace[fileName] = trace.branchTrace[fileName]
+                        cumulative[fileName] = trace.branchTrace[fileName]
+                trace.cachedEndCumulativeBranchTrace = cumulative
             lastTrace = trace
 
 
@@ -520,21 +526,24 @@ class SymbolMapper:
                 trace.cachedStartDecayingBranchTrace = copy.deepcopy(lastTrace.cachedEndDecayingBranchTrace)
                 trace.cachedEndDecayingBranchTrace = copy.deepcopy(lastTrace.cachedEndDecayingBranchTrace)
 
-                for fileName in trace.cachedEndDecayingBranchTrace.keys():
-                    trace.cachedEndDecayingBranchTrace[fileName] *= self.config['symbol_decaying_branch_trace_decay_rate']
+                decaying = {
+                    fileName: value * self.config['symbol_decaying_branch_trace_decay_rate']
+                    for fileName, value in trace.cachedEndDecayingBranchTrace.items()
+                }
 
                 for fileName in trace.branchTrace.keys():
                     branchesExecuted = SymbolMapper.createSparseTraceArray(trace.branchTrace[fileName].minimum(1) * self.config['symbol_decaying_branch_trace_scale'])
 
-                    if fileName in trace.cachedEndDecayingBranchTrace:
-                        if trace.branchTrace[fileName].shape[0] == trace.cachedEndDecayingBranchTrace[fileName].shape[0]:
-                            trace.cachedEndDecayingBranchTrace[fileName] += branchesExecuted
+                    if fileName in decaying:
+                        if trace.branchTrace[fileName].shape[0] == decaying[fileName].shape[0]:
+                            decaying[fileName] = decaying[fileName] + branchesExecuted
                     else:
-                        trace.cachedEndDecayingBranchTrace[fileName] = branchesExecuted
+                        decaying[fileName] = branchesExecuted
 
                 # Cap the decaying branch trace at a value of 1
-                for fileName in trace.cachedEndDecayingBranchTrace.keys():
-                    trace.cachedEndDecayingBranchTrace[fileName] = trace.cachedEndDecayingBranchTrace[fileName].minimum(1)
+                trace.cachedEndDecayingBranchTrace = {
+                    fileName: value.minimum(1) for fileName, value in decaying.items()
+                }
 
             lastTrace = trace
 
@@ -575,19 +584,23 @@ class SymbolMapper:
 
                 trace.cachedEndDecayingFutureBranchTrace = copy.deepcopy(nextTrace.cachedStartDecayingFutureBranchTrace)
 
-                for fileName in trace.cachedStartDecayingFutureBranchTrace.keys():
-                    trace.cachedStartDecayingFutureBranchTrace[fileName] *= self.config['symbol_decaying_future_execution_trace_decay_rate']
+                future = {
+                    fileName: value * self.config['symbol_decaying_future_execution_trace_decay_rate']
+                    for fileName, value in trace.cachedStartDecayingFutureBranchTrace.items()
+                }
 
                 for fileName in trace.branchTrace.keys():
                     traceNumpyArray = trace.branchTrace[fileName]
 
                     branchesExecuted = SymbolMapper.createSparseTraceArray(traceNumpyArray.minimum(numpy.ones_like(traceNumpyArray, dtype=numpy.float64, shape=traceNumpyArray.shape)) * self.config['symbol_decaying_future_branch_trace_scale'])
 
-                    if fileName in trace.cachedStartDecayingFutureBranchTrace:
-                        if trace.branchTrace[fileName].shape[0] == trace.cachedStartDecayingFutureBranchTrace[fileName].shape[0]:
-                            trace.cachedStartDecayingFutureBranchTrace[fileName] += branchesExecuted
+                    if fileName in future:
+                        if trace.branchTrace[fileName].shape[0] == future[fileName].shape[0]:
+                            future[fileName] = future[fileName] + branchesExecuted
                     else:
-                        trace.cachedStartDecayingFutureBranchTrace[fileName] = branchesExecuted
+                        future[fileName] = branchesExecuted
+
+                trace.cachedStartDecayingFutureBranchTrace = future
 
             nextTrace = trace
 

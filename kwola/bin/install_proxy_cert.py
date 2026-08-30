@@ -7,8 +7,7 @@ import asyncio
 import socket
 from contextlib import closing
 from mitmproxy.tools.dump import DumpMaster
-from selenium import webdriver
-from selenium.webdriver.common.proxy import Proxy, ProxyType
+from playwright.sync_api import sync_playwright
 import threading
 import time
 import sys
@@ -23,18 +22,14 @@ def findFreePort():
 
 
 def runProxy(port):
-    from mitmproxy import proxy, options
+    from mitmproxy import options
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    opts = options.Options(listen_port=port)
-    pconf = proxy.config.ProxyConfig(opts)
-
-    m = DumpMaster(opts, with_termlog=False, with_dumper=False)
-    m.server = proxy.server.ProxyServer(pconf)
-
-    m.run()
+    opts = options.Options(listen_port=port, http2=False, ssl_insecure=True)
+    m = DumpMaster(opts, loop=loop, with_termlog=False, with_dumper=False)
+    loop.run_until_complete(m.run())
 
 
 def main():
@@ -49,29 +44,14 @@ def main():
     proxyThread = threading.Thread(target=runProxy, args=[proxyPort], daemon=True)
     proxyThread.start()
 
-    capabilities = webdriver.DesiredCapabilities.CHROME
-    capabilities['loggingPrefs'] = {'browser': 'ALL'}
-    proxyConfig = Proxy()
-    proxyConfig.proxy_type = ProxyType.MANUAL
-    proxyConfig.http_proxy = f"localhost:{proxyPort}"
-    proxyConfig.add_to_capabilities(capabilities)
-
-    chrome_options = webdriver.chrome.options.Options()
-    if len(commandArgs) > 0:
-        chrome_options.headless = True
-    chrome_options.add_argument(f"--no-sandbox")
-
-    driver = webdriver.Chrome(desired_capabilities=capabilities, chrome_options=chrome_options)
-
-    driver.get("http://mitm.it/")
-
-    print("Please kill the command with Ctrl-C or (Cmd-C on macOS) when you are finished installing the certificates. Timeout in 600 seconds...")
-
-    timeout = 600
-    if len(commandArgs) > 0:
-        timeout = int(str(commandArgs[0]))
-    
-    time.sleep(timeout)
-
-
-
+    # Use Playwright's bundled Chromium; no system Chrome/WebDriver is needed.
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=len(commandArgs) > 0, args=["--no-sandbox"], proxy={"server": f"http://127.0.0.1:{proxyPort}"})
+        try:
+            page = browser.new_page()
+            page.goto("http://mitm.it/", wait_until="domcontentloaded")
+            timeout_seconds = int(str(commandArgs[0])) if commandArgs else 600
+            print(f"Install the mitmproxy certificate shown in Playwright Chromium, then stop this command. Timeout in {timeout_seconds} seconds...")
+            time.sleep(timeout_seconds)
+        finally:
+            browser.close()

@@ -29,7 +29,7 @@ import os
 import pickle
 import tempfile
 import traceback
-import selenium.common.exceptions
+from ..environments.PlaywrightBrowserSession import PlaywrightError
 import concurrent.futures
 from kwola.components.utils.retry import autoretry
 from pprint import pformat
@@ -458,7 +458,7 @@ class TestingStepManager:
                 for fileName in traceList:
                     os.unlink(fileName)
 
-        except selenium.common.exceptions.WebDriverException:
+        except PlaywrightError:
             # This error just happens sometimes. It has something to do with the chrome process failing to interact correctly
             # with mitmproxy. Its not at all clear what causes it, but the system can't auto retry from it unless the whole container
             # is killed. So we just explicitly catch it here so we don't trigger an error level log message, which gets sent to slack.

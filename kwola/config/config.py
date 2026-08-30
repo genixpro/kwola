@@ -7,7 +7,7 @@
 import json
 import os
 import os.path
-import pkg_resources
+from importlib import resources
 import re
 import time
 import pymongo.errors
@@ -206,7 +206,9 @@ class KwolaCoreConfiguration:
                 globalCachedPrebuiltConfigs[prebuild] = data
                 return data
         else:
-            data = json.loads(pkg_resources.resource_string("kwola", os.path.join("config", "prebuilt_configs", f"{prebuild}.json")))
+            data = json.loads(
+                resources.files("kwola").joinpath("config", "prebuilt_configs", f"{prebuild}.json").read_text()
+            )
             globalCachedPrebuiltConfigs[prebuild] = data
             return data
 
@@ -389,4 +391,3 @@ def getSharedGCSStorageClient():
         globalStorageClient = storage.Client()
 
     return globalStorageClient
-

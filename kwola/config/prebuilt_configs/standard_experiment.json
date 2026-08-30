@@ -304,7 +304,7 @@
     "web_session_block_private_networks": false,
     "web_session_click_mode": "fast",
     "web_session_enable_chrome": true,
-    "web_session_enable_edge": true,
+    "web_session_enable_edge": false,
     "web_session_enable_firefox": true,
     "web_session_enable_html_rewriting": true,
     "web_session_enable_js_rewriting": true,

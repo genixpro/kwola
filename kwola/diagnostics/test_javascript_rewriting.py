@@ -5,10 +5,11 @@
 
 import subprocess
 import sys
+from pathlib import Path
 
 def testJavascriptRewriting(verbose=True):
     """
-        This is the entry for the selenium testing command.
+        Verify the pinned project-local Babel/Kwola rewrite toolchain.
     """
 
     if verbose:
@@ -23,11 +24,14 @@ def testJavascriptRewriting(verbose=True):
     }
     """
 
-    babelCmd = 'babel'
-    if sys.platform == "win32" or sys.platform == "win64":
-        babelCmd = 'babel.cmd'
+    repositoryRoot = Path(__file__).resolve().parents[2]
+    babelCmd = repositoryRoot / "node_modules" / ".bin" / ("babel.cmd" if sys.platform.startswith("win") else "babel")
+    if not babelCmd.exists():
+        if verbose:
+            print("Pinned Babel is absent. Run `npm ci` in the Kwola repository.")
+        return False
 
-    result = subprocess.run([babelCmd, '-f', "test.js", '--plugins', 'babel-plugin-kwola'], input=bytes(testFile, "utf8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = subprocess.run([str(babelCmd), '-f', "test.js", '--plugins', 'babel-plugin-kwola'], input=bytes(testFile, "utf8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=repositoryRoot)
 
     failure = None
 

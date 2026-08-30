@@ -34,9 +34,7 @@ class ProxyPluginBase:
             if path.endswith("/"):
                 path = path[:-1]
 
-            fileName = path.replace("/", "_")
-
-        fileName = parts.hostname + "_" + fileName
+            fileName = path.rsplit("/", 1)[-1]
 
         fileName = fileName.replace(".", "_")
         fileName = re.sub(r"\W", "_", fileName)

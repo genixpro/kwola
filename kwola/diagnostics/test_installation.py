@@ -36,12 +36,12 @@ def testInstallation(verbose=True):
 
     subprocessPool = multiprocessing.Pool(4)
 
-    chromedriverWorking = subprocessPool.apply_async(testChromedriver, kwds={"verbose": False})
+    browserWorking = subprocessPool.apply_async(testChromedriver, kwds={"verbose": False})
     ffmpegWorking = subprocessPool.apply_async(testFfmpeg, kwds={"verbose": False})
     neuralNetworkWorking = subprocessPool.apply_async(testNeuralNetworkAllGPUs, kwds={"verbose": False})
     jsRewritingWorking = subprocessPool.apply_async(testJavascriptRewriting, kwds={"verbose": False})
 
-    chromedriverWorking = chromedriverWorking.get()
+    browserWorking = browserWorking.get()
     ffmpegWorking = ffmpegWorking.get()
     neuralNetworkWorking = neuralNetworkWorking.get()
     jsRewritingWorking = jsRewritingWorking.get()
@@ -49,7 +49,7 @@ def testInstallation(verbose=True):
     subprocessPool.close()
     subprocessPool.join()
 
-    if chromedriverWorking and ffmpegWorking and neuralNetworkWorking and jsRewritingWorking:
+    if browserWorking and ffmpegWorking and neuralNetworkWorking and jsRewritingWorking:
         if verbose:
             print("Everything in your Kwola installation appears to be working! Excellent.")
 
@@ -59,9 +59,9 @@ def testInstallation(verbose=True):
         return True
     else:
         if verbose:
-            if not chromedriverWorking:
-                print("Your Chrome & Chromedriver installation does not appear to be working. Please check your "
-                      "Chrome & Chromedriver installation and ensure you can run kwola_test_chromedriver successfully.")
+            if not browserWorking:
+                print("Your pinned Playwright Chromium/Firefox browsers are not available. Run "
+                      "`uv run playwright install chromium firefox`, then run kwola_test_browser.")
             if not ffmpegWorking:
                 print("Your ffmpeg installation does not appear to be working. Please ensure you have ffmpeg installed"
                       "and it is accessible via PATH. You can test your installation using kwola_test_ffmpeg")

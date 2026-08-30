@@ -85,6 +85,10 @@ class TrainingManager:
         else:
             self.plugins = plugins
 
+    @property
+    def isPersistenceRank(self):
+        """Only CPU workers and DDP rank zero own externally visible state."""
+        return self.gpu in (None, 0)
 
     def createTrainingStep(self):
         trainingStep = TrainingStep(id=str(self.trainingSequenceId) + "_training_step_" + str(self.trainingStepIndex))
@@ -103,13 +107,15 @@ class TrainingManager:
         trainingStep.totalLosses = []
         trainingStep.totalRebalancedLosses = []
         trainingStep.hadNaN = False
-        trainingStep.saveToDisk(self.config)
+        if self.isPersistenceRank:
+            trainingStep.saveToDisk(self.config)
         self.trainingStep = trainingStep
 
     def initializeGPU(self):
         torch.backends.cudnn.benchmark = True
 
         if self.gpu is not None:
+            torch.cuda.set_device(self.gpu)
             for subprocessIndex in range(10):
                 try:
                     init_method = f"file://{os.path.join(tempfile.gettempdir(), self.coordinatorTempFileName)}"
@@ -117,7 +123,9 @@ class TrainingManager:
                     if sys.platform == "win32" or sys.platform == "win64":
                         init_method = f"file:///{os.path.join(tempfile.gettempdir(), self.coordinatorTempFileName)}"
 
-                    torch.distributed.init_process_group(backend="gloo",
+                    # CUDA training is one NCCL coordinated job; CPU remains
+                    # process-free and does not initialize a process group.
+                    torch.distributed.init_process_group(backend="nccl",
                                                          world_size=self.gpuWorldSize,
                                                          rank=self.gpu,
                                                          init_method=init_method)
@@ -126,7 +134,6 @@ class TrainingManager:
                     time.sleep(1)
                     if subprocessIndex == 9:
                         raise
-            torch.cuda.set_device(self.gpu)
             getLogger().info(f"Cuda Ready on GPU {self.gpu}")
 
     def loadTestingSteps(self):
@@ -166,12 +173,14 @@ class TrainingManager:
             except RuntimeError as e:
                 getLogger().error(
                     f"Warning! DeepLearningAgent was unable to load the model file from disk, and so is instead using a freshly random initialized neural network. The original error is: {traceback.format_exc()}")
-                self.agent.save()
+                if self.isPersistenceRank:
+                    self.agent.save()
 
             self.createSubproccesses()
 
-            for plugin in self.plugins:
-                plugin.trainingStepStarted(self.trainingStep)
+            if self.isPersistenceRank:
+                for plugin in self.plugins:
+                    plugin.trainingStepStarted(self.trainingStep)
 
         except Exception as e:
             errorMessage = f"Error occurred during initiation of training! {traceback.format_exc()}"
@@ -201,32 +210,35 @@ class TrainingManager:
                 self.trainingStep.numberOfIterationsCompleted += 1
 
                 if self.trainingStep.numberOfIterationsCompleted % self.config['training_print_loss_iterations'] == (self.config['training_print_loss_iterations'] - 1):
-                    if self.gpu is None or self.gpu == 0:
+                    if self.isPersistenceRank:
                         getLogger().info(f"Completed {self.trainingStep.numberOfIterationsCompleted + 1} batches. Overall average time per batch: {numpy.average(self.loopTimes[-25:]):.3f}. Core learning time: {numpy.average(self.coreLearningTimes[-25:]):.3f}")
                         self.printMovingAverageLosses()
                         if self.config['training_print_cache_hit_rate']:
                             getLogger().info(f"Batch cache hit rate {100 * numpy.mean(self.recentCacheHits[-self.config['training_print_cache_hit_rate_moving_average_length']:]):.0f}%")
 
                 if self.trainingStep.numberOfIterationsCompleted % self.config['training_iterations_between_db_saves'] == (self.config['training_iterations_between_db_saves'] - 1):
-                    if self.gpu is None or self.gpu == 0:
+                    if self.isPersistenceRank:
                         self.trainingStep.saveToDisk(self.config)
 
-                for plugin in self.plugins:
-                    plugin.iterationCompleted(self.trainingStep)
+                if self.isPersistenceRank:
+                    for plugin in self.plugins:
+                        plugin.iterationCompleted(self.trainingStep)
 
                 loopEnd = datetime.now()
                 self.loopTimes.append((loopEnd - loopStart).total_seconds())
 
-            getLogger().info(f"Finished the core training loop. Saving the training step {self.trainingStep.id}")
+            getLogger().info(f"Finished the core training loop. {'Persisting' if self.isPersistenceRank else 'Waiting for rank 0 to persist'} training step {self.trainingStep.id}")
             self.trainingStep.endTime = datetime.now()
             self.trainingStep.averageTimePerIteration = (self.trainingStep.endTime - self.trainingStep.startTime).total_seconds() / max(1, self.trainingStep.numberOfIterationsCompleted)
             self.trainingStep.averageLoss = float(numpy.mean(self.trainingStep.totalLosses))
             self.trainingStep.status = "completed"
 
-            for plugin in self.plugins:
-                plugin.trainingStepFinished(self.trainingStep)
+            if self.isPersistenceRank:
+                for plugin in self.plugins:
+                    plugin.trainingStepFinished(self.trainingStep)
 
-            self.trainingStep.saveToDisk(self.config)
+            if self.isPersistenceRank:
+                self.trainingStep.saveToDisk(self.config)
 
             self.threadExecutor.shutdown(wait=True)
 
@@ -407,7 +419,7 @@ class TrainingManager:
     def saveAgent(self):
         # Safe guard, don't save the model if any nan's were detected
         if not self.trainingStep.hadNaN:
-            if self.gpu is None or self.gpu == 0:
+            if self.isPersistenceRank:
                 getLogger().info(f"Saving the core training model.")
                 self.agent.save()
                 if self.config['training_save_model_checkpoints']:

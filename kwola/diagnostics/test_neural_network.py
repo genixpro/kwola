@@ -1,108 +1,99 @@
-#
-#     This file is copyright 2023 Bradley Allen Arsenault & Genixpro Technologies Corporation
-#     See license file in the root of the project for terms & conditions.
-#
+"""CPU, CUDA, and NCCL diagnostics for fresh Kwola experiments."""
 
-from ..config.config import KwolaCoreConfiguration
-from ..components.agents.DeepLearningAgent import DeepLearningAgent
+import os
+import shutil
+import tempfile
+import traceback
+import uuid
+from pathlib import Path
+
 import torch
 import torch.distributed
-import traceback
-import shutil
-import os
-import tempfile
-import sys
+import torch.multiprocessing
 
-def runNeuralNetworkTestOnGPU(gpu, config, verbose=True):
+from ..components.agents.DeepLearningAgent import DeepLearningAgent
+from ..config.config import KwolaCoreConfiguration
+
+
+def _new_test_config():
+    config_dir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir(
+        "testing", url="http://127.0.0.1:3003/", email="", password="", name="", paragraph="",
+        enableTypeEmail=True, enableTypePassword=True, enableRandomNumberCommand=False,
+        enableRandomBracketCommand=False, enableRandomMathCommand=False,
+        enableRandomOtherSymbolCommand=False, enableDoubleClickCommand=False,
+        enableRightClickCommand=False,
+    )
+    return config_dir, KwolaCoreConfiguration.loadConfigurationFromDirectory(config_dir)
+
+
+def _run_step(config, gpu=None, world_size=1):
+    agent = DeepLearningAgent(config=config, whichGpu=gpu, gpuWorldSize=world_size)
+    agent.initialize(enableTraining=True)
+    results = agent.learnFromBatches([agent.prepareEmptyBatch()], trainingStepIndex=100)
+    # The first eleven tuple entries are aggregate losses; the remaining
+    # fields include batch metadata and per-sample arrays.
+    if not results or any(not torch.isfinite(torch.as_tensor(value)).all() for value in results[0][:11]):
+        raise RuntimeError("Kwola training diagnostic produced a NaN or infinite loss")
+    agent.save()
+
+
+def _nccl_worker(rank, world_size, coordinator_path):
+    config_dir, config = _new_test_config()
     try:
-        agent = DeepLearningAgent(config=config, whichGpu=gpu)
-
-        agent.initialize(enableTraining=True)
-
-        if verbose:
-            print("Saving and loading the network to disk")
-        agent.save()
-        agent.load()
-
-        if verbose:
-            print("Running a test training iteration")
-
-        batches = [agent.prepareEmptyBatch()]
-        agent.learnFromBatches(batches, trainingStepIndex=100)
-
-        return True
-    except Exception:
-        traceback.print_exc()
-        return False
-
-
-def testNeuralNetworkAllGPUs(verbose=True):
-    """
-        This method is used to test whether or not the pytorch and the neural network is installed.
-        If GPU's are detected, it will try to train using them, ensuring that everything is working
-        there.
-    """
-
-
-    configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
-                                                                    url="http://demo.kwolatesting.com/",
-                                                                    email="",
-                                                                    password="",
-                                                                    name="",
-                                                                    paragraph="",
-                                                                    enableTypeEmail=True,
-                                                                    enableTypePassword=True,
-                                                                    enableRandomNumberCommand=False,
-                                                                    enableRandomBracketCommand=False,
-                                                                    enableRandomMathCommand=False,
-                                                                    enableRandomOtherSymbolCommand=False,
-                                                                    enableDoubleClickCommand=False,
-                                                                    enableRightClickCommand=False
-                                                                    )
-    try:
-        config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
-
-        allSuccess = True
-
-        if verbose:
-            print("Initializing the deep neural network on the CPU.")
-        success = runNeuralNetworkTestOnGPU(gpu=None, config=config, verbose=verbose)
-        if success:
-            if verbose:
-                print("We have successfully initialized a neural network on the CPU and run a few a training batches through it.")
-        else:
-            if verbose:
-                print("Neural network training appears to have failed on the CPU.")
-            allSuccess = False
-
-        gpus = torch.cuda.device_count()
-        if gpus > 0:
-            init_method = f"file://{os.path.join(tempfile.gettempdir(), 'kwola_distributed_coordinator')}"
-
-            if sys.platform == "win32" or sys.platform == "win64":
-                init_method = f"file:///{os.path.join(tempfile.gettempdir(), 'kwola_distributed_coordinator')}"
-
-            torch.distributed.init_process_group(backend="gloo",
-                                                 world_size=1,
-                                                 rank=0,
-                                                 init_method=init_method)
-
-            for gpu in range(gpus):
-                if verbose:
-                    print(f"Initializing the deep neural network on your CUDA GPU #{gpu}")
-                success = runNeuralNetworkTestOnGPU(gpu=gpu, config=config, verbose=verbose)
-                if success:
-                    if verbose:
-                        print(f"We have successfully initialized a neural network on GPU #{gpu} and run a few a training batches through it.")
-                else:
-                    if verbose:
-                        print(f"Neural network training appears to have failed on GPU #{gpu}")
-                    allSuccess = False
-
-        if allSuccess:
-            if verbose:
-                print("Everything worked! Kwola deep learning appears to be fully working.")
-
-        return allSuccess
+        torch.cuda.set_device(rank)
+        torch.distributed.init_process_group(
+            backend="nccl", init_method="file://" + coordinator_path,
+            world_size=world_size, rank=rank,
+        )
+        _run_step(config, gpu=rank, world_size=world_size)
+        torch.distributed.barrier()
     finally:
-        shutil.rmtree(configDir)
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+        shutil.rmtree(config_dir, ignore_errors=True)
+
+
+def testTwoGPUNCCL(verbose=True):
+    """Exercise a coordinated two-rank forward/backward/optimizer step."""
+    if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+        raise RuntimeError("Two CUDA devices are required for the NCCL diagnostic; found %d." % torch.cuda.device_count())
+    capabilities = [torch.cuda.get_device_capability(index) for index in range(2)]
+    if capabilities != [(7, 5), (7, 5)]:
+        raise RuntimeError("Expected two RTX 2070 (compute capability 7.5) devices, found %r." % capabilities)
+    coordinator = str(Path(tempfile.gettempdir()) / ("kwola-nccl-" + uuid.uuid4().hex))
+    if verbose:
+        print("Running a two-rank NCCL forward/backward/optimizer diagnostic on CUDA devices 0 and 1.")
+    try:
+        torch.multiprocessing.spawn(_nccl_worker, args=(2, coordinator), nprocs=2, join=True)
+    finally:
+        Path(coordinator).unlink(missing_ok=True)
+
+
+def testNeuralNetworkAllGPUs(verbose=True, require_two_gpus=False):
+    """Run CPU and single-GPU diagnostics; optionally require the dual-GPU gate."""
+    config_dir, config = _new_test_config()
+    try:
+        if verbose:
+            print("Running CPU forward/backward/optimizer diagnostic.")
+        _run_step(config, gpu=None)
+        if torch.cuda.is_available():
+            if verbose:
+                print("Running single-GPU forward/backward/optimizer diagnostic on CUDA device 0.")
+            _run_step(config, gpu=0)
+        elif require_two_gpus:
+            raise RuntimeError("CUDA is unavailable; the dual-GPU diagnostic cannot run.")
+    except Exception:
+        if verbose:
+            traceback.print_exc()
+        return False
+    finally:
+        shutil.rmtree(config_dir, ignore_errors=True)
+
+    if require_two_gpus:
+        try:
+            testTwoGPUNCCL(verbose=verbose)
+        except Exception:
+            if verbose:
+                traceback.print_exc()
+            return False
+    return True

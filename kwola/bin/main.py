@@ -132,8 +132,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
 
             browserChoices = [
                 questionary.Choice("Chrome", checked=True),
-                questionary.Choice("Firefox", checked=False),
-                questionary.Choice("Edge", checked=False)
+                questionary.Choice("Firefox", checked=False)
             ]
 
             results = questionary.checkbox("Please select which browsers you want to enable", choices=browserChoices).ask()
@@ -142,7 +141,6 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
 
             enableChrome = bool(browserChoices[0].title in results)
             enableFirefox = bool(browserChoices[1].title in results)
-            enableEdge = bool(browserChoices[2].title in results)
 
             windowSizeChoices = [
                 questionary.Choice("Desktop", checked=True),
@@ -210,7 +208,7 @@ def getConfigurationDirFromCommandLineArgs(askTuneQuestion=True):
                                                                             web_session_prevent_offsite_links=web_session_prevent_offsite_links,
                                                                             web_session_enable_chrome=enableChrome,
                                                                             web_session_enable_firefox=enableFirefox,
-                                                                            web_session_enable_edge=enableEdge,
+                                                                            web_session_enable_edge=False,
                                                                             web_session_enable_window_size_desktop=enableDesktop,
                                                                             web_session_enable_window_size_tablet=enableTablet,
                                                                             web_session_enable_window_size_mobile=enableSmartphone

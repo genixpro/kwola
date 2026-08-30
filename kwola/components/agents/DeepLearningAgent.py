@@ -30,7 +30,6 @@ import numpy
 import os
 import os.path
 import os.path
-import pkg_resources
 import scipy.signal
 import scipy.special
 import shutil
@@ -448,6 +447,11 @@ class DeepLearningAgent:
             :param saveName: A string containing the prefix for the model file names when the model is saved.
         """
 
+        # Coordinated DDP jobs have one filesystem writer. This also prevents
+        # checkpoints and aggregate metrics from being torn by concurrent ranks.
+        if torch.distributed.is_available() and torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+            return
+
         if saveName:
             saveName = "_" + saveName
 
@@ -517,7 +521,7 @@ class DeepLearningAgent:
         # training across multiple separate GPU processes.
         if self.whichGpu == "all":
             self.model = self.model.cuda()
-            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=devices, output_device=outputDevice, find_unused_parameters=True)
+            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=[device.index for device in devices], output_device=outputDevice.index, find_unused_parameters=True)
             if enableTraining:
                 self.targetNetwork = self.targetNetwork.cuda()
         elif self.whichGpu is None:
@@ -527,7 +531,18 @@ class DeepLearningAgent:
                 self.targetNetwork = self.targetNetwork.cpu()
         else:
             self.model = self.model.cuda(device=devices[0])
-            self.modelParallel = nn.parallel.DistributedDataParallel(module=self.model, device_ids=devices, output_device=outputDevice, find_unused_parameters=True)
+            # A numbered GPU is also used for the single-device diagnostic and
+            # inference.  DDP requires an already initialized process group;
+            # wrap only the coordinated ranks launched by TrainingManager.
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                self.modelParallel = nn.parallel.DistributedDataParallel(
+                    module=self.model,
+                    device_ids=[outputDevice.index],
+                    output_device=outputDevice.index,
+                    find_unused_parameters=True,
+                )
+            else:
+                self.modelParallel = self.model
             if enableTraining:
                 self.targetNetwork = self.targetNetwork.cuda(device=devices[0])
 
@@ -2138,8 +2153,8 @@ class DeepLearningAgent:
                 rewardChartFigure.canvas.draw()
 
                 # Now we can save it to a numpy array.
-                rewardChart = numpy.fromstring(rewardChartFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-                rewardChart = rewardChart.reshape(rewardChartFigure.canvas.get_width_height()[::-1] + (debugVideoImageChannels,))
+                rewardChart = numpy.asarray(rewardChartFigure.canvas.buffer_rgba(), dtype=numpy.uint8)
+                rewardChart = rewardChart[:, :, :debugVideoImageChannels]
 
                 image[topSize + imageHeight:-self.config.debug_video_bottom_reward_chart_bottom_margin, leftSize:(leftSize + rewardChart.shape[1])] = rewardChart
 
@@ -2473,8 +2488,8 @@ class DeepLearningAgent:
                 mainFigure.canvas.draw()
 
                 # Now we can save it to a numpy array and paste it into the image
-                mainChart = numpy.fromstring(mainFigure.canvas.tostring_rgb(), dtype=numpy.uint8, sep='')
-                mainChart = mainChart.reshape(mainFigure.canvas.get_width_height()[::-1] + (debugVideoImageChannels,))
+                mainChart = numpy.asarray(mainFigure.canvas.buffer_rgba(), dtype=numpy.uint8)
+                mainChart = mainChart[:, :, :debugVideoImageChannels]
                 plotImage[chartTopMargin:, (-rightSize):] = mainChart
                 plt.close(mainFigure)
 

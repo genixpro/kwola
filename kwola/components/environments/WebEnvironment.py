@@ -21,7 +21,6 @@ import time
 import os
 import traceback
 import psutil
-from kwola.components.utils.asyncthreadfuture import AsyncThreadFuture
 from ..utils.retry import autoretry
 from ..plugins.core.RecordAllPaths import RecordAllPaths
 from ..plugins.core.RecordBranchTrace import RecordBranchTrace
@@ -101,23 +100,20 @@ class WebEnvironment:
         else:
             self.executionSessions = executionSessions
 
-        getLogger().info(f"Starting up {sessionCount} parallel browser sessions.")
+        getLogger().info(f"Starting up {sessionCount} browser sessions.")
 
         self.sessions = []
         for sessionNumber in range(sessionCount):
             self.sessions.append(createSession(sessionNumber))
 
-        futures = []
-        for sessionNumber in range(sessionCount):
-            future = AsyncThreadFuture(initializeSession, [self.sessions[sessionNumber]], timeout=self.config['web_session_initialization_timeout'])
-            futures.append((future, self.sessions[sessionNumber]))
-
-        for future, session in futures:
-            try:
-                result = future.result()
-            except TimeoutError:
-                session.hasBrowserDied = True
-                session.browserDeathReason = f"A fatal error occurred during session initialization: {traceback.format_exc()}"
+        # The synchronous Playwright API owns a greenlet/event loop in the
+        # thread that creates it.  WebDriver tolerated creating a session in
+        # one thread and navigating it from another, but Playwright correctly
+        # rejects that pattern.  Initialize each session on its owning thread;
+        # parallel interaction is still coordinated by WebEnvironment rather
+        # than crossing a browser object's thread boundary.
+        for session in self.sessions:
+            initializeSession(session)
 
 
     def shutdown(self):
@@ -130,15 +126,10 @@ class WebEnvironment:
 
     def getImages(self):
         results = []
-        imageFutures = []
         for session in self.sessions:
-            future = AsyncThreadFuture(session.getImage, [], timeout=self.config['testing_get_image_timeout'])
-            imageFutures.append(future)
-
-        for future, session in zip(imageFutures, self.sessions):
             try:
-                result = future.result()
-            except TimeoutError:
+                result = session.getImage()
+            except Exception:
                 getLogger().warning("Warning: timeout exceeded in WebEnvironment.getImages")
                 result = numpy.zeros(shape=[self.config['web_session_height'][self.windowSize], self.config['web_session_width'][self.windowSize], 3])
                 session.hasBrowserDied = True
@@ -149,16 +140,10 @@ class WebEnvironment:
 
     def getActionMaps(self):
         results = []
-
-        actionMapFutures = []
         for session in self.sessions:
-            future = AsyncThreadFuture(session.getActionMaps, [], timeout=self.config['testing_fetch_action_map_timeout'])
-            actionMapFutures.append(future)
-
-        for future, session in zip(actionMapFutures, self.sessions):
             try:
-                result = future.result()
-            except TimeoutError:
+                result = session.getActionMaps()
+            except Exception:
                 getLogger().warning("Warning: timeout exceeded in WebEnvironment.getActionMaps")
                 result = []
                 session.hasBrowserDied = True
@@ -179,23 +164,11 @@ class WebEnvironment:
         """
 
         startTime = datetime.now()
-        resultFutures = []
-
         results = []
         for session, action in zip(self.sessions, actions):
-            if action is not None:
-                future = AsyncThreadFuture(session.runAction, [action], timeout=self.config['testing_run_action_timeout'])
-                resultFutures.append(future)
-            else:
-                resultFutures.append(None)
-
-        for session, future in zip(self.sessions, resultFutures):
             try:
-                if future is not None:
-                    result = future.result()
-                else:
-                    result = (None, {})
-            except TimeoutError:
+                result = session.runAction(action) if action is not None else (None, {})
+            except Exception:
                 getLogger().warning("Warning: timeout exceeded in WebEnvironment.runActions")
                 result = (None, {})
                 session.hasBrowserDied = True

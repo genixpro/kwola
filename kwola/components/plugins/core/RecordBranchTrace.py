@@ -1,9 +1,8 @@
 from kwola.components.plugins.base.WebEnvironmentPluginBase import WebEnvironmentPluginBase
-import selenium.common.exceptions
 from kwola.config.logger import getLogger
 import numpy
 import os
-from selenium.webdriver import Firefox, Chrome, Edge
+from kwola.components.environments.PlaywrightBrowserSession import PlaywrightTimeoutError
 
 
 
@@ -83,28 +82,11 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
 
     def extractBranchTrace(self, webDriver):
         # The JavaScript that we want to inject. This will extract out the Kwola debug information.
-        if isinstance(webDriver, Firefox):
-            injected_javascript = (
-                'const newCounters = {};'
-                'if (window.kwolaCounters)'
-                '{'
-                '   for (const [key, value] of Object.entries(window.kwolaCounters))'
-                '   {'
-                '       newCounters[key] = Array.from(value);'
-                '   }'
-                '   return newCounters;'
-                '}'
-                'else'
-                '{'
-                '    return null;'
-                '}'
-            )
-        elif isinstance(webDriver, Chrome) or isinstance(webDriver, Edge):
-            injected_javascript = (
-                'return window.kwolaCounters;'
-            )
-        else:
-            raise RuntimeError("Unrecognized web driver class.")
+        injected_javascript = (
+            'if (!window.kwolaCounters) return null;'
+            'const counters = {}; for (const [key, value] of Object.entries(window.kwolaCounters)) '
+            '{ counters[key] = Array.from(value); } return counters;'
+        )
 
         result = webDriver.execute_script(injected_javascript)
 
@@ -121,7 +103,7 @@ class RecordBranchTrace(WebEnvironmentPluginBase):
 
         try:
             webDriver.execute_script(injected_javascript)
-        except selenium.common.exceptions.TimeoutException:
+        except PlaywrightTimeoutError:
             getLogger().warning(f"Warning, timeout while running the script to reset the kwola line counters.")
 
         if result is not None:

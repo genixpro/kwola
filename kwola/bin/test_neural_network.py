@@ -11,9 +11,8 @@ def main():
         This is the entry for the neural network testing command.
     """
 
-    success = testNeuralNetworkAllGPUs(verbose=True)
+    success = testNeuralNetworkAllGPUs(verbose=True, require_two_gpus=True)
     if success:
         exit(0)
     else:
         exit(1)
-

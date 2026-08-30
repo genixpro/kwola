@@ -3,11 +3,16 @@ import unittest
 from ..tasks import TrainAgentLoop
 from ..config.config import KwolaCoreConfiguration
 import shutil
+import os
 
+KROS1_URL = os.environ.get("KWOLA_KROS1_URL", "http://127.0.0.1:3001/")
+KROS3_URL = os.environ.get("KWOLA_KROS3_URL", "http://127.0.0.1:3003/")
+
+@unittest.skipUnless(os.environ.get("KWOLA_RUN_KROS_E2E") == "1", "requires the local Kros Compose harness")
 class TestTrainingLoop(unittest.TestCase):
     def test_restaurant_click_only(self):
         configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
-                                                                        url="http://kros1.kwola.io/",
+                                                                        url=KROS1_URL,
                                                                         email="test1@test.com",
                                                                         password="test1",
                                                                         web_session_autologin=True,
@@ -26,6 +31,8 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         )
 
         config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+        config['web_session_initialization_timeout'] = 240
+        config['web_session_page_load_timeout'] = 180
 
         try:
             TrainAgentLoop.trainAgent(config, exitOnFail=True)
@@ -34,7 +41,7 @@ class TestTrainingLoop(unittest.TestCase):
 
     def test_restaurant_all_actions(self):
         configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
-                                                                        url="http://kros1.kwola.io/",
+                                                                        url=KROS1_URL,
                                                                         email="test1@test.com",
                                                                         password="test1",
                                                                         web_session_autologin=True,
@@ -55,6 +62,8 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         )
 
         config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+        config['web_session_initialization_timeout'] = 240
+        config['web_session_page_load_timeout'] = 180
 
         try:
             TrainAgentLoop.trainAgent(config, exitOnFail=True)
@@ -63,7 +72,7 @@ class TestTrainingLoop(unittest.TestCase):
 
     def test_kros3_all_actions(self):
         configDir = KwolaCoreConfiguration.createNewLocalKwolaConfigDir("testing",
-                                                                        url="http://kros3.kwola.io/",
+                                                                        url=KROS3_URL,
                                                                         email=None,
                                                                         password=None,
                                                                         web_session_autologin=False,
@@ -86,6 +95,8 @@ class TestTrainingLoop(unittest.TestCase):
                                                                         )
 
         config = KwolaCoreConfiguration.loadConfigurationFromDirectory(configDir)
+        config['web_session_initialization_timeout'] = 240
+        config['web_session_page_load_timeout'] = 180
 
         try:
             TrainAgentLoop.trainAgent(config, exitOnFail=True)
