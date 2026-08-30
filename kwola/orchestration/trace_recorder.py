@@ -177,6 +177,8 @@ class TraceRecorder:
             "url_before": before.url,
             "url_after": after.url,
             "reward": reward,
+            "application_fitness_before": before.application_fitness,
+            "application_fitness_after": after.application_fitness,
             "branch_symbols": list(after.branch_symbols),
             "network_symbols": list(after.network_symbols),
             "errors": list(after.errors),

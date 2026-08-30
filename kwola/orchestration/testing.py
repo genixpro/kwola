@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from kwola.agent import InferencePolicy, action_catalog
+from kwola.agent import InferenceDiagnostics, InferencePolicy, action_catalog
 from kwola.browser import (
     ActionExecutor,
     ActionMapExtractor,
@@ -18,7 +18,7 @@ from kwola.browser import (
 from kwola.browser.network import NetworkWaiter
 from kwola.browser.screenshots import ScreenshotService
 from kwola.config import load_config
-from kwola.config.models import ViewportConfig
+from kwola.config.models import RunConfig, ViewportConfig
 from kwola.domain.actions import BrowserKind
 from kwola.domain.observations import Observation
 from kwola.hooks import HookRegistry, LifecycleEventName, testing_core_hooks
@@ -95,11 +95,12 @@ class TestingRunner:
         step_id = f"testing-{step_index:08d}"
         session = self._session(browser_kind, viewport, store)
         artifacts: list[str] = []
+        diagnostics: list[InferenceDiagnostics | None] = []
         primary_error: BaseException | None = None
         try:
             observation = session.start(str(self._config.target))
             self._dispatch(LifecycleEventName.SESSION_STARTED, step_id)
-            rewards = self._actions(
+            rewards, fitness = self._actions(
                 session,
                 store,
                 step_id,
@@ -108,14 +109,23 @@ class TestingRunner:
                 artifacts,
                 random_policy,
                 environment_index,
+                diagnostics,
+                _debug_video_due(self._config, step_index),
             )
-            self._complete_step(store, step_id, browser_kind, rewards, random_policy)
+            best_fitness = max(fitness) if fitness else None
+            _complete_step(store, step_id, browser_kind, rewards, random_policy, best_fitness)
+            metrics: dict[str, int | float] = {
+                "traces": len(rewards),
+                "reward": sum(rewards),
+            }
+            if best_fitness is not None:
+                metrics["application_fitness"] = best_fitness
             return RunnerResult(
                 status="completed",
                 step_id=step_id,
                 duration_seconds=self._clock() - started,
                 artifacts=tuple(artifacts),
-                metrics={"traces": len(rewards), "reward": sum(rewards)},
+                metrics=metrics,
             )
         except BaseException as error:
             primary_error = error
@@ -133,6 +143,7 @@ class TestingRunner:
                 (
                     ("store", store),
                     ("prepare_samples", lambda: self._prepare_samples(store, step_id)),
+                    ("diagnostics", tuple(diagnostics)),
                 ),
             )
 
@@ -146,7 +157,9 @@ class TestingRunner:
         artifacts: list[str],
         random_policy: bool,
         environment_index: int,
-    ) -> list[float]:
+        diagnostics: list[InferenceDiagnostics | None],
+        capture_diagnostics: bool,
+    ) -> tuple[list[float], list[float]]:
         policy = InferencePolicy(
             self._run_dir,
             self._config,
@@ -155,14 +168,18 @@ class TestingRunner:
         recorder = TraceRecorder(self._run_dir, self._config, store, artifacts)
         novelty = NoveltyState.initial(observation)
         recorder.claim_initial(observation)
-        rewards = []
+        rewards: list[float] = []
+        fitness = _fitness_values(observation)
         for trace_index in range(self._config.policy.testing_sequence_length):
             action = policy.select(
                 observation,
                 action_index=trace_index,
                 test_step_index=step_index,
                 force_random=random_policy,
+                capture_diagnostics=capture_diagnostics,
             )
+            if capture_diagnostics:
+                diagnostics.append(policy.take_diagnostics())
             trace_id = f"{step_id}-trace-{trace_index:04d}"
             self._dispatch(LifecycleEventName.BEFORE_ACTION, trace_id)
             before = observation
@@ -195,7 +212,8 @@ class TestingRunner:
                 (("store", store), ("reward", reward)),
             )
             rewards.append(reward)
-        return rewards
+            fitness.extend(_fitness_values(observation))
+        return rewards, fitness
 
     def _session(
         self,
@@ -305,34 +323,6 @@ class TestingRunner:
     ) -> None:
         self._lifecycle.dispatch(name, subject_id, payload)
 
-    @staticmethod
-    def _complete_step(
-        store: LmdbRunStore,
-        step_id: str,
-        browser: BrowserKind,
-        rewards: list[float],
-        random_policy: bool,
-    ) -> None:
-        def complete(current: dict[str, Any] | None) -> dict[str, Any]:
-            state = dict(current or {})
-            completed = int(step_id.rsplit("-", maxsplit=1)[1]) + 1
-            state["testing_steps"] = max(
-                int(cast(int | str, state.get("testing_steps", 0))), completed
-            )
-            return state
-
-        store.update("run", "state", complete)
-        store.put(
-            "testing_steps",
-            step_id,
-            {
-                "browser": browser.value,
-                "random": random_policy,
-                "trace_count": len(rewards),
-                "reward": sum(rewards),
-            },
-        )
-
 
 def _reserve_step_index(store: LmdbRunStore) -> int:
     def reserve(current: dict[str, Any] | None) -> dict[str, Any]:
@@ -343,3 +333,40 @@ def _reserve_step_index(store: LmdbRunStore) -> int:
 
     state = store.update("run", "state", reserve)
     return int(state["next_testing_step"]) - 1
+
+
+def _fitness_values(observation: Observation) -> list[float]:
+    return [observation.application_fitness] if observation.application_fitness is not None else []
+
+
+def _debug_video_due(config: RunConfig, step_index: int) -> bool:
+    reporting = config.reporting
+    return reporting.debug_videos and step_index % reporting.debug_video_every_testing_steps == 0
+
+
+def _complete_step(
+    store: LmdbRunStore,
+    step_id: str,
+    browser: BrowserKind,
+    rewards: list[float],
+    random_policy: bool,
+    application_fitness: float | None,
+) -> None:
+    def complete(current: dict[str, Any] | None) -> dict[str, Any]:
+        state = dict(current or {})
+        completed = int(step_id.rsplit("-", maxsplit=1)[1]) + 1
+        state["testing_steps"] = max(int(cast(int | str, state.get("testing_steps", 0))), completed)
+        return state
+
+    store.update("run", "state", complete)
+    store.put(
+        "testing_steps",
+        step_id,
+        {
+            "browser": browser.value,
+            "random": random_policy,
+            "trace_count": len(rewards),
+            "reward": sum(rewards),
+            "application_fitness": application_fitness,
+        },
+    )

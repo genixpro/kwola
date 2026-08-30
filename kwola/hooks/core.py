@@ -65,11 +65,21 @@ def testing_core_hooks(run_dir: Path, config: RunConfig) -> tuple[LifecycleHook,
             lambda event: _record_metric(run_dir, config, event, "trace"),
         ),
     ]
-    if config.reporting.debug_videos or config.reporting.annotated_videos:
+    if config.reporting.debug_videos:
         hooks.append(
             CoreHook(
                 "videos",
                 60,
+                False,
+                frozenset({LifecycleEventName.SESSION_FINISHED}),
+                lambda event: _generate_debug_video(run_dir, config, event),
+            )
+        )
+    if config.reporting.annotated_videos:
+        hooks.append(
+            CoreHook(
+                "annotated-videos",
+                70,
                 False,
                 frozenset({LifecycleEventName.RUN_FINISHED}),
                 lambda _event: _generate_reports(run_dir),
@@ -156,3 +166,34 @@ def _generate_reports(run_dir: Path) -> None:
     from kwola.reporting.service import ReportService
 
     ReportService(run_dir).generate(scheduled=True)
+
+
+def _generate_debug_video(
+    run_dir: Path,
+    config: RunConfig,
+    event: LifecycleEvent,
+) -> None:
+    from kwola.agent import InferenceDiagnostics
+    from kwola.reporting import RichDebugVideoRenderer
+
+    if event.subject_id is None:
+        raise ValueError("debug video event is missing its testing step id")
+    supplied = event.values().get("diagnostics")
+    if not isinstance(supplied, tuple) or not supplied:
+        return
+    if not all(value is None or isinstance(value, InferenceDiagnostics) for value in supplied):
+        raise ValueError("debug video event has invalid inference diagnostics")
+    store = _event_store(event)
+    traces = [record for _key, record in store.scan_prefix("traces", event.subject_id)]
+    traces.sort(key=lambda trace: int(trace["index"]))
+    if len(traces) != len(supplied):
+        raise ValueError("debug video traces and inference diagnostics are not aligned")
+    relative = Path("reports") / "videos" / f"{event.subject_id}-debug.mp4"
+    RichDebugVideoRenderer(run_dir, config).render(run_dir / relative, traces, supplied)
+
+    def attach_video(current: dict[str, Any] | None) -> dict[str, Any]:
+        record = dict(current or {})
+        record["debug_video"] = str(relative)
+        return record
+
+    store.update("testing_steps", event.subject_id, attach_video)

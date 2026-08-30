@@ -16,8 +16,15 @@ from kwola.storage import LmdbRunStore
 def test_trace_recorder_persists_features_blobs_and_bugs(tmp_path: Path) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 1)
     config = load_config(tmp_path)
-    before = _observation(b"before", "https://example.com", (), ())
-    after = _observation(b"after", "https://example.com/next", (4,), (8,), ("console:broken",))
+    before = _observation(b"before", "https://example.com", (), (), fitness=2.0)
+    after = _observation(
+        b"after",
+        "https://example.com/next",
+        (4,),
+        (8,),
+        ("console:broken",),
+        fitness=3.0,
+    )
     final = _observation(b"final", "https://example.com/final", (4, 5), (8,))
     artifacts: list[str] = []
     with LmdbRunStore(tmp_path / "run.lmdb", map_size=1024**2) as store:
@@ -38,6 +45,8 @@ def test_trace_recorder_persists_features_blobs_and_bugs(tmp_path: Path) -> None
         assert trace["reward"] == reward
         assert trace["new_branch_symbols"] == [4]
         assert trace["cursor"] == "pointer"
+        assert trace["application_fitness_before"] == 2.0
+        assert trace["application_fitness_after"] == 3.0
         assert store.scan("bugs")
         recorder.record(
             "testing-00000000",
@@ -123,6 +132,7 @@ def _observation(
     branches: tuple[int, ...],
     network: tuple[int, ...],
     errors: tuple[str, ...] = (),
+    fitness: float | None = None,
 ) -> Observation:
     target = ActionTarget(0, 0, 10, 10, "button", can_click=True)
     encoded_ok, encoded = cv2.imencode(".png", np.full((10, 10), screenshot[0], dtype=np.uint8))
@@ -138,4 +148,5 @@ def _observation(
         ("message",),
         errors,
         True,
+        application_fitness=fitness,
     )

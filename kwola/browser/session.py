@@ -113,12 +113,21 @@ class BrowserSessionCoordinator:
             console_messages=tuple(entry.message for entry in console),
             errors=_errors(console, network),
             branch_trace_available=branches.available,
+            application_fitness=self._application_fitness(),
         )
 
     def _collect_branches(self) -> BranchTraceSnapshot:
         if self._branch_traces is None:
             return BranchTraceSnapshot(False, ())
         return self._branch_traces.collect(self._adapter.page)
+
+    def _application_fitness(self) -> float | None:
+        value = self._adapter.page.evaluate(
+            "() => { const value = window.kwolaCumulativeFitness; "
+            "return typeof value === 'number' && Number.isFinite(value) ? value : null; }",
+            None,
+        )
+        return float(value) if isinstance(value, int | float) else None
 
 
 def _errors(console: tuple[object, ...], network: tuple[object, ...]) -> tuple[str, ...]:

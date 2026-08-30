@@ -27,3 +27,4 @@ class Observation:
     console_messages: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     branch_trace_available: bool = False
+    application_fitness: float | None = None

@@ -98,8 +98,9 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
         "storage": {"codec_compression_level": 0},
         "reporting": {
             "chart_every_testing_steps": 25,
-            "debug_videos": False,
+            "debug_videos": True,
             "annotated_videos": False,
+            "debug_video_every_testing_steps": 25,
         },
         "orchestration": {
             "browser_workers": 8,

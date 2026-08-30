@@ -126,7 +126,9 @@ class FakePage:
     def wait_for_timeout(self, milliseconds: float) -> None:
         self.waits.append(milliseconds)
 
-    def evaluate(self, _script: str, _coordinates: list[int]) -> str:
+    def evaluate(self, script: str, _coordinates: list[int] | None) -> str | float:
+        if "kwolaCumulativeFitness" in script:
+            return 14.0
         return "pointer"
 
     def content(self) -> str:
@@ -205,6 +207,7 @@ def test_browser_session_observes_executes_and_cleans_up() -> None:
 
     assert observation.branch_symbols == (7, 9)
     assert observation.branch_trace_available
+    assert observation.application_fitness == 14.0
     assert following.errors == (
         "console:broken",
         "network:500:https://example.com/api:",
@@ -236,17 +239,18 @@ def test_testing_runner_records_completed_step_with_fake_session(
     proxy = FakeProxy()
     session = _browser_session(adapter, proxy)
     monkeypatch.setattr(runner, "_session", lambda *_args: session)
-    monkeypatch.setattr(runner, "_actions", lambda *_args: [1.0, -0.25])
+    monkeypatch.setattr(runner, "_actions", lambda *_args: ([1.0, -0.25], [14.0]))
 
     result = runner.run(browser=BrowserKind.CHROMIUM, random_policy=True, viewport=(800, 600))
 
-    assert result.metrics == {"traces": 2, "reward": 0.75}
+    assert result.metrics == {"traces": 2, "reward": 0.75, "application_fitness": 14.0}
     with LmdbRunStore(tmp_path / "run.lmdb", readonly=True) as store:
         assert store.get("testing_steps", "testing-00000000") == {
             "browser": "chromium",
             "random": True,
             "trace_count": 2,
             "reward": 0.75,
+            "application_fitness": 14.0,
         }
 
 

@@ -134,12 +134,24 @@ def test_policy_uses_checkpoint_unless_random_is_forced(tmp_path: Path) -> None:
     observation = _observation()
     with patch.object(policy._encoder, "encode", wraps=policy._encoder.encode) as encode:
         modeled = policy.select(
-            observation, action_index=4, test_step_index=999, force_random=False
+            observation,
+            action_index=4,
+            test_step_index=999,
+            force_random=False,
+            capture_diagnostics=True,
         )
+        diagnostics = policy.take_diagnostics()
         policy.select(observation, action_index=5, test_step_index=999, force_random=False)
     forced = policy.select(observation, action_index=4, test_step_index=999, force_random=True)
     assert modeled.source == "model"
     assert forced.source == "weighted_random"
+    assert diagnostics is not None
+    assert diagnostics.checkpoint_generation == 1
+    assert diagnostics.present_rewards is not None
+    assert diagnostics.future_rewards is not None
+    assert diagnostics.stamp is not None
+    assert diagnostics.predicted_channel is not None
+    assert diagnostics.action_masks.shape[0] == len(action_catalog(config.policy))
     second_context = encode.call_args_list[1].kwargs
     assert len(second_context["recent_actions"]) == 1
     assert second_context["coverage_symbols"] == (1, 2)

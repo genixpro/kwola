@@ -370,7 +370,7 @@ def test_testing_actions_session_construction_and_sample_preparation(
         ),
     )
     with LmdbRunStore(tmp_path / "run.lmdb") as store:
-        rewards = runner._actions(
+        rewards, fitness = runner._actions(
             ActionSession(_observation()),  # type: ignore[arg-type]
             store,
             "testing-00000000",
@@ -379,6 +379,8 @@ def test_testing_actions_session_construction_and_sample_preparation(
             [],
             True,
             0,
+            [],
+            False,
         )
         session = runner._session(BrowserKind.CHROMIUM, runner._viewport(None), store)
         session.close()
@@ -397,6 +399,7 @@ def test_testing_actions_session_construction_and_sample_preparation(
         runner._prepare_samples(store, "testing-00000000")
 
     assert len(rewards) == runner._config.policy.testing_sequence_length
+    assert fitness == []
     assert prepared == [("testing-00000000", runner._config.training.sample_cache_workers)]
 
 

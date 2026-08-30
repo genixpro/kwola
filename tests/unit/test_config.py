@@ -27,6 +27,8 @@ def test_profiles_are_fresh_and_preserve_expected_topologies() -> None:
     assert rig.training.cpu_threads_per_rank == 4
     assert rig.training.decoded_image_cache_size == 4096
     assert rig.orchestration.browser_cpu_threads == 2
+    assert rig.reporting.debug_videos
+    assert rig.reporting.debug_video_every_testing_steps == 25
 
 
 def test_unknown_keys_are_rejected() -> None:

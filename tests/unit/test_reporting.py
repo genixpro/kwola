@@ -5,8 +5,10 @@ import cv2
 import numpy as np
 import pytest
 
+from kwola.agent import InferenceDiagnostics
 from kwola.config import load_config
 from kwola.orchestration.initialize import initialize_run
+from kwola.reporting import RichDebugVideoRenderer
 from kwola.reporting.service import ReportService, _reward, _trace_index
 from kwola.reporting.videos import VideoRenderer
 from kwola.storage import LmdbRunStore
@@ -89,3 +91,63 @@ def test_scheduled_report_skips_artifacts_that_are_not_due(tmp_path: Path) -> No
     artifacts = ReportService(tmp_path).generate(scheduled=True)
 
     assert artifacts == (tmp_path / "reports" / "summary.json",)
+
+
+def test_rich_debug_video_composes_frame_and_requests_h264(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 2)
+    config = load_config(tmp_path)
+    screenshot = tmp_path / "blobs" / "screenshots" / "debug.png"
+    screenshot.parent.mkdir(parents=True, exist_ok=True)
+    image = np.zeros((64, 96, 3), dtype=np.uint8)
+    image[:, :48] = (15, 30, 220)
+    image[:, 48:] = (220, 80, 15)
+    assert cv2.imwrite(str(screenshot), image)
+    trace = {
+        "step_id": "testing-00000000",
+        "index": 0,
+        "reward": 1.25,
+        "application_fitness_after": 14.0,
+        "screenshot_before": "blobs/screenshots/debug.png",
+        "viewport": [96, 64],
+        "action": {"channel": "click", "source": "model", "x": 48, "y": 32},
+    }
+    diagnostic = InferenceDiagnostics(
+        channel_names=("click",),
+        present_rewards=np.full((1, 8, 12), 0.25, dtype=np.float32),
+        future_rewards=np.linspace(-1, 1, 96, dtype=np.float32).reshape(1, 8, 12),
+        action_masks=np.ones((1, 8, 12), dtype=np.float32),
+        recent_actions_image=np.zeros((1, 8, 12), dtype=np.float32),
+        recent_actions_vector=np.zeros(1, dtype=np.float32),
+        stamp=np.ones((2, 8, 12), dtype=np.float32),
+        checkpoint_generation=3,
+        predicted_channel="click",
+        predicted_x=40,
+        predicted_y=30,
+        predicted_value=1.5,
+        coverage_symbol_count=12,
+        recent_symbol_count=4,
+    )
+    destination = tmp_path / "reports" / "videos" / "rich.mp4"
+    commands: list[list[str]] = []
+
+    def transcode(command: list[str], *, check: bool) -> None:
+        assert check
+        commands.append(command)
+        Path(command[-1]).write_bytes(Path(command[6]).read_bytes())
+
+    monkeypatch.setattr("kwola.reporting.debug_video.subprocess.run", transcode)
+
+    RichDebugVideoRenderer(tmp_path, config).render(destination, [trace], [diagnostic])
+
+    capture = cv2.VideoCapture(str(destination))
+    decoded, frame = capture.read()
+    capture.release()
+    assert destination.stat().st_size > 0
+    assert decoded
+    assert frame.shape == (960, 1920, 3)
+    assert not np.all(frame[:, :, 1] > frame[:, :, (0, 2)].max(axis=2))
+    assert "libx264" in commands[0]
+    assert "yuv420p" in commands[0]

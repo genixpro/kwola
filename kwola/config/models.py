@@ -340,6 +340,9 @@ class ReportingConfig(StrictModel):
     annotated_videos: bool = True
     bug_reports: bool = True
     chart_every_testing_steps: int = Field(default=5, ge=1)
+    debug_video_every_testing_steps: int = Field(default=5, ge=1)
+    debug_video_frames_per_second: float = Field(default=2.0, gt=0)
+    debug_video_map_downscale: int = Field(default=8, ge=1)
     video_timeout_seconds: float = Field(default=900.0, gt=0)
 
 

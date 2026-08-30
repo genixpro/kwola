@@ -120,5 +120,39 @@ def test_core_hook_reports_missing_event_context(tmp_path: Path) -> None:
         screenshots.dispatch(missing_subject)
 
 
+def test_debug_video_hook_renders_sampled_session_and_attaches_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 5)
+    config = load_config(tmp_path)
+    videos = HookRegistry(
+        tuple(hook for hook in build_testing_core_hooks(tmp_path, config) if hook.name == "videos")
+    )
+    rendered: list[tuple[Path, int, int]] = []
+
+    def render(_renderer: object, path: Path, traces: object, diagnostics: object) -> Path:
+        rendered.append((path, len(traces), len(diagnostics)))  # type: ignore[arg-type]
+        return path
+
+    monkeypatch.setattr("kwola.reporting.RichDebugVideoRenderer.render", render)
+    with LmdbRunStore(tmp_path / "run.lmdb", map_size=1024**2) as store:
+        store.put("traces", "testing-00000000-trace-0000", {"index": 0})
+        store.put("testing_steps", "testing-00000000", {"status": "completed"})
+        event = LifecycleEvent(
+            LifecycleEventName.SESSION_FINISHED,
+            1.0,
+            "run",
+            "testing-00000000",
+            (("store", store), ("diagnostics", (None,))),
+        )
+        assert videos.dispatch(event) == ()
+        record = store.get("testing_steps", "testing-00000000")
+
+    assert rendered == [(tmp_path / "reports" / "videos" / "testing-00000000-debug.mp4", 1, 1)]
+    assert record is not None
+    assert record["debug_video"] == "reports/videos/testing-00000000-debug.mp4"
+
+
 def _event(name: LifecycleEventName, store: LmdbRunStore, subject: str) -> LifecycleEvent:
     return LifecycleEvent(name, 1.0, "run", subject, (("store", store), ("value", 1)))
