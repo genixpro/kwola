@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,44 @@ def test_core_screenshot_hook_is_fatal_and_training_metrics_open_store(
     )
     with LmdbRunStore(tmp_path / "run.lmdb", map_size=1024**2, readonly=True) as store:
         assert store.get("hook_metrics", "training:training-1") == {"loss": 1.5}
+
+
+def test_core_bug_and_precompute_failure_contracts(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 3)
+    config = load_config(tmp_path)
+    hooks = build_testing_core_hooks(tmp_path, config)
+    bugs = HookRegistry(tuple(hook for hook in hooks if hook.name == "bugs"))
+    precompute = HookRegistry(tuple(hook for hook in hooks if hook.name == "sample-precomputation"))
+    message = "failure"
+    fingerprint = hashlib.sha256(message.encode()).hexdigest()
+    with LmdbRunStore(tmp_path / "run.lmdb", map_size=1024**2) as store:
+        store.put(
+            "traces",
+            "trace",
+            {"screenshot_before": "before", "screenshot": "after", "errors": [message]},
+        )
+        store.put("bugs", fingerprint, {"fingerprint": fingerprint})
+        assert bugs.dispatch(_event(LifecycleEventName.TRACE_RECORDED, store, "trace")) == ()
+        store.delete("bugs", fingerprint)
+        failures = bugs.dispatch(_event(LifecycleEventName.TRACE_RECORDED, store, "trace"))
+        assert len(failures) == 1 and failures[0].hook == "bugs"
+        with pytest.raises(HookExecutionError, match="sample-precomputation"):
+            precompute.dispatch(_event(LifecycleEventName.SESSION_FINISHED, store, "session"))
+
+
+def test_core_hook_reports_missing_event_context(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "testing", tmp_path, 4)
+    config = load_config(tmp_path)
+    screenshots = HookRegistry(
+        tuple(
+            hook
+            for hook in build_testing_core_hooks(tmp_path, config)
+            if hook.name == "screenshots"
+        )
+    )
+    missing_subject = LifecycleEvent(LifecycleEventName.TRACE_RECORDED, 1.0, "run", None, ())
+    with pytest.raises(HookExecutionError, match="subject id"):
+        screenshots.dispatch(missing_subject)
 
 
 def _event(name: LifecycleEventName, store: LmdbRunStore, subject: str) -> LifecycleEvent:

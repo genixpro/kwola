@@ -1,6 +1,8 @@
 import random
 from typing import Any
 
+import pytest
+
 from kwola.agent import RandomActionPolicy, action_catalog
 from kwola.config import profile_config
 from kwola.domain.actions import ActionChannel, ActionKind, ActionMap, ActionTarget
@@ -70,6 +72,72 @@ def test_random_policy_selects_each_single_capability() -> None:
             ActionMap((target,), 2, 2, "1")
         )
         assert action.kind is channel.kind
+
+
+def test_random_policy_all_typing_strategies_and_unweighted_mode() -> None:
+    policy = RandomActionPolicy(random.Random(8), (), weighted=False)
+    strategies = (
+        "letters",
+        "number",
+        "brackets",
+        "math",
+        "symbol",
+        "email",
+        "phone",
+        "address",
+        "paragraph",
+        "date",
+        "credit_card",
+        "url",
+    )
+    values = {
+        strategy: policy.typing_text(
+            ActionChannel(f"type-{strategy}", ActionKind.TYPE, 1, text_strategy=strategy)
+        )
+        for strategy in strategies
+    }
+    assert values["email"].endswith("@kwola.io")
+    assert len(values["phone"]) == 10
+    assert values["address"].endswith(" Test Street")
+    assert values["url"].startswith("https://")
+    with pytest.raises(ValueError, match="unknown typing strategy"):
+        policy.typing_text(ActionChannel("bad", ActionKind.TYPE, 1, text_strategy="bad"))
+
+    click = ActionChannel("click", ActionKind.CLICK, 1)
+    selected = RandomActionPolicy(random.Random(2), (click,), weighted=False).select(
+        ActionMap((ActionTarget(0, 0, 2, 2, "unknown", can_click=True),), 2, 2, "1")
+    )
+    assert selected.source == "random"
+
+
+def test_random_policy_type_password_and_clear_constraints() -> None:
+    channels = (
+        ActionChannel("clear", ActionKind.CLEAR, 1),
+        ActionChannel("typePassword", ActionKind.TYPE, 1, fixed_text="secret"),
+        ActionChannel("typeLetters", ActionKind.TYPE, 1, text_strategy="letters"),
+    )
+    policy = RandomActionPolicy(random.Random(1), channels)
+    password = ActionTarget(
+        0,
+        0,
+        2,
+        2,
+        "input",
+        can_type=True,
+        attributes=(("type", "password"),),
+    )
+    filled = ActionTarget(
+        0,
+        0,
+        2,
+        2,
+        "input",
+        can_type=True,
+        attributes=(("value", "present"),),
+    )
+
+    assert tuple(channel.name for channel in policy.allowed(password)) == ("typePassword",)
+    assert tuple(channel.name for channel in policy.allowed(filled)) == ("clear",)
 
 
 def test_telemetry_snapshot_symbols_and_drain() -> None:
