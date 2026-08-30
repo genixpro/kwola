@@ -2,9 +2,7 @@
 
 import copy
 import multiprocessing
-import socket
 import time
-from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +27,10 @@ from kwola.storage import (
 from .assembler_factory import recorded_sample_assembler
 from .batch_stream import batches
 from .ddp import DistributedCoordinator, DistributedSettings
+from .ddp import available_tcp_port as _free_port
 from .optimizer import ModelOptimizer, OptimizerMetrics, summarize_optimizer_metrics
-from .replay import ReplaySampler, require_replay_iterations
+from .replay import ReplaySampler, require_replay_budget
+from .replay_state import open_replay_store as _store
 from .replay_state import require_new_replay as _prepare_cache
 from .samples import RecordedSampleAssembler, TrainingBatch
 from .spool import batch_to_device, share_batch
@@ -121,6 +121,7 @@ def _training_rank(
             step_index,
             trace_count,
             iterations,
+            replay_sample_credit,
             assembly_seconds,
             transfer_seconds,
         ) = _rank_step(run_dir, coordinator, initial)
@@ -141,6 +142,7 @@ def _training_rank(
                 iterations,
                 assembly_seconds,
                 transfer_seconds,
+                replay_sample_credit,
             )
             results.put(result.model_dump_json())
 
@@ -149,7 +151,7 @@ def _rank_step(
     run_dir: Path,
     coordinator: DistributedCoordinator,
     initial_batch: TrainingBatch | None = None,
-) -> tuple[OptimizerMetrics, TraceNet, TraceNet, ModelOptimizer, int, int, int, float, float]:
+) -> tuple[OptimizerMetrics, TraceNet, TraceNet, ModelOptimizer, int, int, int, int, float, float]:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
     with _store(run_dir, readonly=True) as store:
@@ -161,13 +163,17 @@ def _rank_step(
         )
         trace_count = sum(1 for _ in store.scan("traces"))
         trained_trace_count = int(state.get("training_trace_count", 0))
-        iteration_count = require_replay_iterations(
+        budget = require_replay_budget(
             trace_count - trained_trace_count,
             requested_iterations,
             config.training.batch_size,
             config.training.world_size,
+            config.training.replay_samples_per_new_trace,
+            int(state.get("replay_sample_credit", 0)),
+            trace_count,
             "distributed training",
         )
+        iteration_count = budget.iterations
     model = TraceNet(config.model, num_actions=len(action_catalog(config.policy))).to(
         coordinator.device
     )
@@ -200,6 +206,7 @@ def _rank_step(
         step_index,
         trace_count,
         iteration_count,
+        budget.remaining_sample_credit,
         assembly_seconds,
         transfer_seconds,
     )
@@ -338,6 +345,7 @@ def _publish_result(
     iterations: int,
     assembly_seconds: float,
     transfer_seconds: float,
+    replay_sample_credit: int = 0,
 ) -> RunnerResult:
     config = load_config(run_dir)
     manifest = load_manifest(run_dir)
@@ -372,6 +380,7 @@ def _publish_result(
         assembly_seconds,
         transfer_seconds,
         checkpoint_seconds,
+        replay_sample_credit,
     )
     global_samples = iterations * config.training.batch_size * config.training.world_size
     return RunnerResult(
@@ -426,6 +435,7 @@ def _record_step(
     assembly_seconds: float,
     transfer_seconds: float,
     checkpoint_seconds: float,
+    replay_sample_credit: int = 0,
 ) -> None:
     config = load_config(run_dir)
     with _store(run_dir) as store:
@@ -435,6 +445,7 @@ def _record_step(
             state["training_steps"] = index + 1
             state["training_iterations"] = int(state.get("training_iterations", 0)) + iterations
             state["training_trace_count"] = trace_count
+            state["replay_sample_credit"] = replay_sample_credit
             return state
 
         store.update("run", "state", complete)
@@ -482,19 +493,3 @@ def _assembler(
         freeze_records=True,
         random_seed=random_seed,
     )
-
-
-def _store(run_dir: Path, readonly: bool = False) -> LmdbRunStore:
-    config = load_config(run_dir)
-    return LmdbRunStore(
-        run_dir / config.storage.database_directory,
-        map_size=config.storage.database_map_size_bytes,
-        compression_level=config.storage.codec_compression_level,
-        readonly=readonly,
-    )
-
-
-def _free_port() -> int:
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as connection:
-        connection.bind(("127.0.0.1", 0))
-        return int(connection.getsockname()[1])

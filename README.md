@@ -52,15 +52,19 @@ action catalog. Their sum drives inference. Training uses masked Double DQN, wit
 selecting the next valid action and the target network evaluating it. Terminal transitions and next
 states with no valid action receive no bootstrap value.
 
-Automatic training starts only after the greater of `orchestration.minimum_traces_before_training`
-and one configured global batch (`training.batch_size * training.world_size`) of new traces has
-arrived. New traces determine the maximum number of duplicate-free updates in that invocation, while
-those updates sample from the entire frozen replay snapshot. A successful step persists the
-snapshot's trace-count high-water mark, so the same unchanged replay set cannot trigger training
-again. An explicit single-GPU `train-step` uses one local batch as its minimum.
+Automatic training requires at least one configured global batch
+(`training.batch_size * training.world_size`) in the replay buffer. Each fresh trace earns
+`training.replay_samples_per_new_trace` sample credits (eight by default); complete global batches
+consume those credits while sampling the entire frozen replay snapshot. Partial-batch credit and
+work deferred by the adaptive iteration cap persist for later training steps instead of being
+discarded. After startup, retained credit may continue training an unchanged replay snapshot until
+that earned work is exhausted.
 
 Current-state crops remain action-centred with configured jitter. Next-state crops are sampled
 randomly, retried until at least one valid action is visible, and fall back to an action-centred crop.
+Both default to the same dimensions. TraceNet uses mode-independent spatial GroupNorm, and inference
+blends overlapping training-sized tiles into full-viewport reward maps instead of applying
+crop-trained heads to the whole page in one pass.
 The default conservative-Q term (`training.losses.conservative_q = 0.1`, margin `0.1`) penalizes the
 highest valid action outside the demonstrated region when it exceeds the demonstrated Q value minus
 the margin; set its weight to `0` to disable it.

@@ -57,6 +57,8 @@ def pipeline_status(run_dir: Path) -> dict[str, Any]:
         "scheduled_training_iterations": int(
             state.get("scheduled_training_iterations", config.training.batches_per_iteration)
         ),
+        "replay_sample_credit": int(state.get("replay_sample_credit", 0)),
+        "replay_samples_per_new_trace": config.training.replay_samples_per_new_trace,
         "resources": latest_resources,
         "recent_resource_averages": _resource_averages(events),
         "latest_training_progress": progress[-1] if progress else None,

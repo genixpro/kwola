@@ -1,11 +1,20 @@
 """Explicit distributed process-group ownership."""
 
+import socket
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Self
 
 import torch
 from torch import distributed
+
+
+def available_tcp_port() -> int:
+    """Reserve and release a loopback port for process-group rendezvous."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as connection:
+        connection.bind(("127.0.0.1", 0))
+        return int(connection.getsockname()[1])
 
 
 @dataclass(frozen=True, slots=True)

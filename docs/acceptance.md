@@ -64,15 +64,16 @@ The deterministic learning gate includes a terminal bandit where greedy Q conver
 action and a two-step task where the terminal reward propagates into the first action's future map.
 Unit evidence must also cover exact masked Double-DQN targets, campaign-wide atomic coverage claims,
 instrumentation absence, independent two-stage exploration, replay coverage/shuffling/rank
-disjointness, fresh-global-batch gating and high-water persistence, bounded update counts,
-validity-preserving next-state crops, zero bootstrap for empty next-action masks, conservative-Q
-margin behavior, varied persistent crop augmentation, and strict checkpoint round trips. Training
+disjointness, replay-credit accumulation/consumption and high-water persistence, scheduled update
+caps, validity-preserving next-state crops, zero bootstrap for empty next-action masks,
+mode-independent normalization, tiled inference, conservative-Q margin behavior, varied persistent
+crop augmentation, and strict checkpoint round trips. Training
 telemetry records the present, future, and conservative-Q losses, selected Q, bootstrap target,
 absolute TD error, and gradient norm.
 
 ## Schema-v2 measured results (2026-08-30)
 
-These measurements predate the fresh-trace replay budget described above. The 600-iteration steps are
+These measurements predate the replay-credit budget described above. The 600-iteration steps are
 retained as historical throughput evidence; they do not describe the current per-invocation training
 cadence and do not prove the new learning-hardening requirements.
 
@@ -111,3 +112,6 @@ rig acceptance run or its two-GPU/browser performance evidence.
 The unchanged performance gates are at least 145 samples/second, no more than 1.35 seconds median
 optimizer time, and no more than 5 GiB peak VRAM. The 1.0.0 measurements above are historical
 baseline evidence and do not satisfy the 1.1.0 release gate.
+
+The later replay-ratio, GroupNorm, equal-default-crop, and tiled-inference changes have local unit and
+static-analysis coverage but do not yet have a fresh Linux two-GPU/browser acceptance measurement.

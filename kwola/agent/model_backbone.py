@@ -8,6 +8,8 @@ from torch import Tensor, nn
 
 from kwola.config.models import ModelConfig
 
+from .normalization import SpatialGroupNorm
+
 
 @dataclass(frozen=True, slots=True)
 class BackboneInput:
@@ -144,7 +146,7 @@ def _visual_layers(config: ModelConfig, num_actions: int) -> nn.Sequential:
                     layer.dilation,
                 ),
                 nn.ELU(),
-                nn.BatchNorm2d(layer.kernels),
+                SpatialGroupNorm(layer.kernels),
             ]
         )
         inputs = layer.kernels

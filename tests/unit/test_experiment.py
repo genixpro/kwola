@@ -68,6 +68,25 @@ def test_training_waits_for_one_duplicate_free_global_batch(tmp_path: Path) -> N
     assert not runner._training_ready()  # type: ignore[attr-defined]
 
 
+def test_training_can_consume_carried_replay_credit_without_new_traces(tmp_path: Path) -> None:
+    initialize_run("https://example.com", "standard", tmp_path, 4)
+    runner = ExperimentRunner(tmp_path)
+    with LmdbRunStore(tmp_path / "run.lmdb") as store:
+        for index in range(48):
+            store.put("traces", f"trace-{index}", {"index": index})
+        store.update(
+            "run",
+            "state",
+            lambda current: {
+                **(current or {}),
+                "training_trace_count": 48,
+                "replay_sample_credit": 48,
+            },
+        )
+
+    assert runner._training_ready()  # type: ignore[attr-defined]
+
+
 def test_adaptation_clamps_bounds_and_skips_empty_browser_window(tmp_path: Path) -> None:
     initialize_run("https://example.com", "testing", tmp_path, 4)
     runner = ExperimentRunner(tmp_path)

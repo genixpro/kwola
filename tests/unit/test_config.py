@@ -24,6 +24,9 @@ def test_profiles_are_fresh_and_preserve_expected_topologies() -> None:
     assert rig.training.batch_prefetch
     assert rig.training.batch_size == 48
     assert rig.training.batches_per_iteration == 600
+    assert rig.training.replay_samples_per_new_trace == 8
+    assert rig.training.next_crop_width == rig.training.crop_width
+    assert rig.training.next_crop_height == rig.training.crop_height
     assert rig.training.cpu_threads_per_rank == 4
     assert rig.training.decoded_image_cache_size == 4096
     assert rig.orchestration.browser_cpu_threads == 2

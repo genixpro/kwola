@@ -33,14 +33,14 @@ kwola CLI
 Testing workers immediately receive another browser session when they finish; the trainer has no
 barrier with them. Each training invocation freezes the current trace snapshot and creates a seeded
 shuffle from the run seed, training-step index, and replay epoch. DDP ranks consume disjoint slices
-of that common permutation. Automatic training waits for at least the greater of
-`orchestration.minimum_traces_before_training` and one complete configured global batch of newly
-recorded traces. New traces provide the update budget, while sample indexes come from the complete
-frozen replay snapshot. The invocation runs no more than
-`floor(new_traces / (batch_size * world_size))` updates or the scheduled count, whichever is smaller,
-so it never crosses a permutation boundary. After success, the current trace count is persisted as a
-high-water mark; an unchanged replay set cannot train again. Explicit single-device training applies
-the same rule with a world size of one.
+of that common permutation. The replay buffer must contain at least one complete configured global
+batch. Each newly recorded trace earns `training.replay_samples_per_new_trace` sample credits, eight
+by default, while sample indexes come from the complete frozen replay snapshot. Each global update
+consumes `batch_size * world_size` credits; partial-batch credit and work deferred by the scheduled
+iteration cap are persisted. Consequently an unchanged replay snapshot may continue training only
+while previously earned credit remains. The trace-count high-water mark prevents fresh traces from
+being credited twice. Explicit single-device training applies the same accounting with world size
+one.
 The parent prepares one shared-memory CPU batch per rank; each rank then keeps a decoded-image LRU and
 builds the next CPU batch on a prefetch thread while the current batch computes. Gradients synchronize
 through DDP. After a final barrier, only rank 0 writes the training record and atomically publishes a
@@ -68,6 +68,10 @@ training crops are seeded and action-centred; next-state crops use a separately 
 Next-state augmentation makes up to eight random attempts to keep at least one valid action visible,
 then uses an action-centred fallback. A trace with no valid action even in that fallback is rejected.
 Images, action masks, reward masks, coordinates, and recent-action features are cropped together.
+Current and next crops have equal default dimensions. Convolutional blocks use mode-independent
+spatial GroupNorm; their legacy BatchNorm-shaped state keeps schema-v2 checkpoints strictly
+loadable, but crop-specific running statistics no longer affect predictions. Inference evaluates
+overlapping training-sized tiles and center-weights their overlap into full-viewport maps.
 
 TraceNet retains separate immediate- and discounted-future reward maps. Their masked sum is the
 action-value map used directly by greedy inference. Training uses masked Double DQN: the online model

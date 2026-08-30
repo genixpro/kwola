@@ -68,6 +68,7 @@ def test_training_rank_reduces_and_publishes_rank_zero(
             5,
             100,
             7,
+            11,
             0.25,
             0.5,
         ),
@@ -151,7 +152,7 @@ def test_rank_step_builds_model_optimizer_and_uses_scheduled_iterations(
         "initial",  # type: ignore[arg-type]
     )
 
-    assert result[4:] == (4, 12, 3, 0.4, 0.2)
+    assert result[4:] == (4, 12, 3, 84, 0.4, 0.2)
     assert received == [(4, 20, 3, "initial")]
 
 

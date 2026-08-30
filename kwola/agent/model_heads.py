@@ -5,6 +5,8 @@ from torch import Tensor, nn
 
 from kwola.config.models import ModelConfig
 
+from .normalization import SpatialGroupNorm
+
 
 class TraceNetHeads(nn.Module):
     def __init__(
@@ -55,7 +57,7 @@ def _map_head(config: ModelConfig, inputs: int, outputs: int) -> nn.Sequential:
             layer.dilation,
         ),
         nn.ELU(),
-        nn.BatchNorm2d(layer.kernels),
+        SpatialGroupNorm(layer.kernels),
         nn.Conv2d(
             layer.kernels,
             outputs,

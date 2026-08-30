@@ -11,7 +11,7 @@ from typing import Any
 
 from kwola.config import load_config
 from kwola.storage import LmdbRunStore
-from kwola.training.replay import minimum_replay_size
+from kwola.training.replay import minimum_replay_size, replay_budget
 
 from .messages import ArtifactReference, WorkerCommand, WorkerResult
 from .results import RunnerResult
@@ -223,14 +223,28 @@ class ExperimentRunner:
         )
 
     def _training_ready(self) -> bool:
-        replay_minimum = minimum_replay_size(
+        global_batch_size = minimum_replay_size(
             self._config.training.batch_size, self._config.training.world_size
         )
-        required = max(self._config.orchestration.minimum_traces_before_training, replay_minimum)
-        trace_count, trained_trace_count = self._trace_state()
-        return trace_count - trained_trace_count >= required
+        trace_count, trained_trace_count, sample_credit = self._trace_state()
+        if trace_count < global_batch_size:
+            return False
+        new_traces = trace_count - trained_trace_count
+        if sample_credit < global_batch_size and (
+            new_traces < self._config.orchestration.minimum_traces_before_training
+        ):
+            return False
+        budget = replay_budget(
+            new_traces,
+            1,
+            self._config.training.batch_size,
+            self._config.training.world_size,
+            self._config.training.replay_samples_per_new_trace,
+            sample_credit,
+        )
+        return budget.iterations == 1
 
-    def _trace_state(self) -> tuple[int, int]:
+    def _trace_state(self) -> tuple[int, int, int]:
         database = self._run_dir / self._config.storage.database_directory
         with LmdbRunStore(
             database,
@@ -241,6 +255,7 @@ class ExperimentRunner:
             return (
                 sum(1 for _ in store.scan("traces")),
                 int(state.get("training_trace_count", 0)),
+                int(state.get("replay_sample_credit", 0)),
             )
 
     @staticmethod

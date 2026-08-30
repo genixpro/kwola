@@ -16,6 +16,7 @@ from .diagnostics import InferenceDiagnostics, capture_inference_diagnostics
 from .encoding import ObservationEncoder
 from .exploration import ExplorationSchedule
 from .random_policy import RandomActionPolicy
+from .tiled_inference import evaluate_tiled
 from .tracenet import TraceNet, TraceNetRequest
 
 
@@ -159,7 +160,11 @@ class InferencePolicy:
         if output_stamp:
             request = replace(request, output_stamp=True)
         with torch.no_grad():
-            output = self._model(request)
+            output = evaluate_tiled(
+                self._model,
+                request,
+                (self._config.training.crop_width, self._config.training.crop_height),
+            )
         return request, output
 
     def _diagnostic_evaluation(

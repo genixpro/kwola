@@ -4,6 +4,8 @@ import pytest
 import torch
 
 from kwola.agent.model_backbone import BackboneInput
+from kwola.agent.normalization import SpatialGroupNorm
+from kwola.agent.tiled_inference import evaluate_tiled
 from kwola.agent.tracenet import TraceNet, TraceNetRequest
 from kwola.config import profile_config
 
@@ -110,3 +112,37 @@ def test_reward_only_profile_has_no_trainable_parameters_detached_from_loss() ->
     (outputs["presentRewards"].mean() + outputs["discountFutureRewards"].mean()).backward()
 
     assert [name for name, parameter in model.named_parameters() if parameter.grad is None] == []
+
+
+def test_spatial_normalization_is_mode_independent_and_checkpoint_compatible() -> None:
+    layer = SpatialGroupNorm(16)
+    before = dict(layer.state_dict())
+    layer.load_state_dict(torch.nn.BatchNorm2d(16).state_dict(), strict=True)
+    values = torch.rand(2, 16, 8, 8)
+
+    training = layer.train()(values)
+    evaluation = layer.eval()(values)
+
+    torch.testing.assert_close(training, evaluation)
+    assert layer.state_dict().keys() == before.keys()
+    torch.testing.assert_close(layer.running_mean, before["running_mean"])
+    torch.testing.assert_close(layer.running_var, before["running_var"])
+
+
+def test_tiled_inference_reconstructs_full_sized_masked_maps() -> None:
+    config = profile_config("testing", "https://example.com", 1)
+    model = TraceNet(config.model, 4).eval()
+    request = inputs(2, 4)
+    masks = request.pixel_action_maps.clone()
+    masks[:, 0, 0, 0] = 0
+    request = replace(request, pixel_action_maps=masks)
+
+    with torch.no_grad():
+        output = evaluate_tiled(model, request, (32, 32))
+
+    assert output["presentRewards"].shape == (2, 4, 64, 64)
+    assert output["discountFutureRewards"].shape == (2, 4, 64, 64)
+    assert output["stamp"].shape == (2, 5, 2, 2)
+    assert torch.all(
+        output["actionValues"][:, 0, 0, 0] == torch.finfo(output["actionValues"].dtype).min
+    )

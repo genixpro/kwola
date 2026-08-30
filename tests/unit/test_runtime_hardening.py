@@ -21,8 +21,8 @@ from kwola.training.ddp import DistributedCoordinator, DistributedSettings
 from kwola.training.optimizer import OptimizerMetrics
 from kwola.training.replay import (
     ReplaySampler,
-    bounded_replay_iterations,
     minimum_replay_size,
+    replay_budget,
 )
 
 
@@ -39,12 +39,35 @@ class FakeAssembler:
         return offset
 
 
-def test_replay_training_is_bounded_to_one_duplicate_free_global_pass() -> None:
+def test_replay_budget_counts_complete_global_batches() -> None:
     assert minimum_replay_size(batch_size=48, world_size=2) == 96
-    assert bounded_replay_iterations(95, 600, 48, 2) == 0
-    assert bounded_replay_iterations(96, 600, 48, 2) == 1
-    assert bounded_replay_iterations(240, 600, 48, 2) == 2
-    assert bounded_replay_iterations(240, 1, 48, 2) == 1
+    assert replay_budget(95, 600, 48, 2, 1).iterations == 0
+    assert replay_budget(96, 600, 48, 2, 1).iterations == 1
+    assert replay_budget(240, 600, 48, 2, 1).iterations == 2
+    assert replay_budget(240, 1, 48, 2, 1).iterations == 1
+
+
+def test_replay_ratio_and_partial_batch_credit_survive_step_boundaries() -> None:
+    first = replay_budget(10, 100, 48, 2, samples_per_new_trace=8)
+    assert first.iterations == 0
+    assert first.remaining_sample_credit == 80
+
+    second = replay_budget(
+        2,
+        100,
+        48,
+        2,
+        samples_per_new_trace=8,
+        carried_sample_credit=first.remaining_sample_credit,
+    )
+    assert second.iterations == 1
+    assert second.remaining_sample_credit == 0
+
+
+def test_replay_budget_retains_work_limited_by_the_scheduled_cap() -> None:
+    budget = replay_budget(100, 2, 4, 1, samples_per_new_trace=8)
+    assert budget.iterations == 2
+    assert budget.remaining_sample_credit == 792
 
 
 def test_batch_stream_offsets_initial_batch_and_prefetch_failures() -> None:
@@ -404,7 +427,7 @@ def test_distributed_cache_and_iteration_helpers(
             "state",
             lambda current: {**(current or {}), "training_trace_count": 4},
         )
-    with pytest.raises(RuntimeError, match="at least 4"):
+    with pytest.raises(RuntimeError, match="4 replay-sample credits"):
         distributed_training._prepare_cache(tmp_path)
     assert (
         distributed_training._load_models(

@@ -1,6 +1,15 @@
-"""Fresh-data-bounded shuffled replay with disjoint distributed-rank slices."""
+"""Credit-budgeted shuffled replay with disjoint distributed-rank slices."""
 
 import random
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayBudget:
+    """Optimizer work earned by fresh traces and retained across training steps."""
+
+    iterations: int
+    remaining_sample_credit: int
 
 
 def minimum_replay_size(batch_size: int, world_size: int) -> int:
@@ -8,26 +17,53 @@ def minimum_replay_size(batch_size: int, world_size: int) -> int:
     return batch_size * world_size
 
 
-def bounded_replay_iterations(size: int, requested: int, batch_size: int, world_size: int) -> int:
-    """Limit updates to complete global batches covered by the new-data budget."""
-    complete_global_batches = size // minimum_replay_size(batch_size, world_size)
-    return min(requested, complete_global_batches)
-
-
-def require_replay_iterations(
-    size: int,
+def replay_budget(
+    new_trace_count: int,
     requested: int,
     batch_size: int,
     world_size: int,
+    samples_per_new_trace: int,
+    carried_sample_credit: int = 0,
+) -> ReplayBudget:
+    """Convert new traces into replay work without discarding partial batches."""
+    if new_trace_count < 0:
+        raise ValueError("new trace count cannot be negative")
+    if carried_sample_credit < 0:
+        raise ValueError("replay sample credit cannot be negative")
+    if samples_per_new_trace < 1:
+        raise ValueError("replay samples per new trace must be positive")
+    global_batch_size = minimum_replay_size(batch_size, world_size)
+    available = carried_sample_credit + new_trace_count * samples_per_new_trace
+    complete_global_batches = available // global_batch_size
+    iterations = min(requested, complete_global_batches)
+    return ReplayBudget(iterations, available - iterations * global_batch_size)
+
+
+def require_replay_budget(
+    new_trace_count: int,
+    requested: int,
+    batch_size: int,
+    world_size: int,
+    samples_per_new_trace: int,
+    carried_sample_credit: int,
+    replay_size: int,
     label: str = "training",
-) -> int:
-    count = bounded_replay_iterations(size, requested, batch_size, world_size)
-    if count:
-        return count
+) -> ReplayBudget:
+    """Return earned work and its residual credit, requiring a viable replay buffer."""
     required = minimum_replay_size(batch_size, world_size)
-    raise RuntimeError(
-        f"{label} requires at least {required} traces for one duplicate-free global batch"
+    if replay_size < required:
+        raise RuntimeError(f"{label} requires at least {required} replay traces")
+    budget = replay_budget(
+        new_trace_count,
+        requested,
+        batch_size,
+        world_size,
+        samples_per_new_trace,
+        carried_sample_credit,
     )
+    if budget.iterations:
+        return budget
+    raise RuntimeError(f"{label} requires {required} replay-sample credits for one global batch")
 
 
 class ReplaySampler:
