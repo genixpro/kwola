@@ -14,40 +14,53 @@ dependencies = [
   "torchvision==0.22.0+cu126 ; sys_platform == 'linux' and platform_machine == 'x86_64'",
   "torch==2.7.0 ; sys_platform != 'linux' or platform_machine != 'x86_64'",
   "torchvision==0.22.0 ; sys_platform != 'linux' or platform_machine != 'x86_64'",
-  "mitmproxy==11.0.2", "mongoengine==0.29.1", "numpy==2.2.3", "opencv-python==4.11.0.86", "matplotlib==3.10.1",
-  "pandas==2.2.3", "psutil==7.0.0", "questionary==2.1.0", "requests==2.32.3",
+  "mitmproxy==11.0.2", "numpy==2.2.3", "opencv-python==4.11.0.86", "matplotlib==3.10.1",
+  "pandas==2.2.3", "psutil==7.0.0", "requests==2.32.3",
   "scikit-image==0.25.2", "scikit-learn==1.6.1", "scipy==1.15.2", "testtools==2.7.2",
   "filetype==1.2.0", "billiard==4.2.1", "StringDist==1.0.9", "beautifulsoup4==4.13.3",
-  "google-cloud-storage==3.0.0", "Faker==36.1.1", "giturlparse==0.12.0", "edlib==1.3.9.post1", "python-snappy==0.7.3",
+  "Faker==36.1.1", "giturlparse==0.12.0", "edlib==1.3.9.post1",
+  "lmdb>=1.6,<2", "msgpack>=1.1,<2", "pydantic>=2.11,<3", "zstandard>=0.23,<1",
+]
+
+[dependency-groups]
+dev = [
+  "coverage[toml]>=7.8,<8",
+  "mypy>=1.15,<2",
+  "pytest>=8.3,<9",
+  "pytest-cov>=6.1,<7",
+  "ruff>=0.11,<1",
 ]
 
 [project.scripts]
 kwola = "kwola.bin.main:main"
-kwola_init = "kwola.bin.initialize:main"
-kwola_train_agent = "kwola.bin.train_agent:main"
-kwola_run_train_step = "kwola.bin.run_train_step:main"
-kwola_run_test_step = "kwola.bin.run_test_step:main"
-kwola_rapid_local_test_suite = "kwola.bin.rapid_local_test_suite:main"
-kwola_reset = "kwola.bin.reset:main"
-kwola_full_internal_test_suite = "kwola.bin.full_internal_test_suite:main"
-kwola_test_browser = "kwola.bin.test_chromedriver:main"
-kwola_test_chromedriver = "kwola.bin.test_chromedriver:main"
-kwola_test_installation = "kwola.bin.test_installation:main"
-kwola_test_javascript_rewriting = "kwola.bin.test_javascript_rewriting:main"
-kwola_test_ffmpeg = "kwola.bin.test_ffmpeg:main"
-kwola_test_neural_network = "kwola.bin.test_neural_network:main"
-kwola_install_proxy_cert = "kwola.bin.install_proxy_cert:main"
-kwola_website_check = "kwola.bin.website_check:main"
-kwola_regenerate_charts = "kwola.bin.regenerate_charts:main"
-kwola_run_multiple = "kwola.bin.run_multiple:main"
-kwola_create_kros3_experiment = "kwola.bin.create_kros3_experiment:main"
-kwola_benchmark_neural_network = "kwola.bin.benchmark_neural_network:main"
 
 [tool.setuptools.packages.find]
 include = ["kwola*"]
 
 [tool.setuptools.package-data]
-kwola = ["config/prebuilt_configs/*.json", "images/*.png"]
+kwola = ["browser/assets/*.js", "images/*.png"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers --cov=kwola --cov-branch --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["kwola"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C90", "UP", "RUF"]
+mccabe.max-complexity = 10
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["kwola"]
+exclude = ["^kwola/(components|datamodels|diagnostics|tasks)/"]
 
 [tool.uv]
 index-url = "https://pypi.org/simple"

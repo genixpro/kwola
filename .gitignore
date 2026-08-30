@@ -7,3 +7,7 @@ dist
 node_modules
 kwola_run_0**
 build/
+.coverage*
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
