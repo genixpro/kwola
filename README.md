@@ -41,9 +41,11 @@ kwola proxy install-cert
 The built-in profiles are `testing`, `standard`, and `rig`. `rig` is the default and continuously
 feeds both GPUs from ten parallel browser environments. It budgets two CPU threads per browser and
 four per training rank on the 32-thread reference host, uses a measured batch of 32 per GPU, and
-amortizes replay preparation over 900-iteration training steps. It caches decoded screenshots in RAM
-and prefetches CPU batches while the GPUs optimize. `standard` preserves the lower-throughput
-two-rank reference configuration. Pass `--gpu INDEX` for an explicit single-GPU step.
+amortizes replay preparation over 900-iteration training steps. Each fresh trace funds sixteen replay
+samples so browser production keeps the trainers continuously supplied. It caches decoded screenshots
+in RAM, page-locks prefetched batches, and overlaps their preparation with GPU optimization.
+`standard` preserves the lower-throughput two-rank reference configuration. Pass `--gpu INDEX` for
+an explicit single-GPU step.
 
 ## Learning behavior
 

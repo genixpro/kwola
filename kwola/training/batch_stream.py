@@ -9,6 +9,7 @@ import torch
 from .ddp import DistributedCoordinator
 from .replay import ReplaySampler
 from .samples import RecordedSampleAssembler, TrainingBatch
+from .spool import pin_batch
 
 
 def batches(
@@ -20,6 +21,7 @@ def batches(
     sampler: ReplaySampler,
     impossible_reward: float,
     prefetch: bool,
+    pin_memory: bool = False,
 ) -> Iterator[tuple[TrainingBatch, float]]:
     if not prefetch:
         for iteration in range(count):
@@ -33,6 +35,7 @@ def batches(
                     batch_size,
                     sampler,
                     impossible_reward,
+                    pin_memory,
                 )
         return
     yield from _prefetched(
@@ -43,6 +46,7 @@ def batches(
         batch_size,
         sampler,
         impossible_reward,
+        pin_memory,
     )
 
 
@@ -54,6 +58,7 @@ def _prefetched(
     batch_size: int,
     sampler: ReplaySampler,
     impossible_reward: float,
+    pin_memory: bool,
 ) -> Iterator[tuple[TrainingBatch, float]]:
     future: Future[tuple[TrainingBatch, float]] | None = None
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="kwola-batch") as executor:
@@ -66,6 +71,7 @@ def _prefetched(
                 batch_size,
                 sampler,
                 impossible_reward,
+                pin_memory,
             )
         for iteration in range(count):
             if iteration == 0 and initial is not None:
@@ -82,6 +88,7 @@ def _prefetched(
                     batch_size,
                     sampler,
                     impossible_reward,
+                    pin_memory,
                 )
             yield batch
 
@@ -93,6 +100,7 @@ def _assemble(
     batch_size: int,
     sampler: ReplaySampler,
     impossible_reward: float,
+    pin_memory: bool,
 ) -> tuple[TrainingBatch, float]:
     started = time.perf_counter()
     batch = assembler.assemble(
@@ -101,4 +109,6 @@ def _assemble(
         impossible_reward=impossible_reward,
         sample_indexes=sampler.batch_indexes(iteration),
     )
+    if pin_memory:
+        batch = pin_batch(batch)
     return batch, time.perf_counter() - started

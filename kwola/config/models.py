@@ -283,6 +283,7 @@ class TrainingConfig(StrictModel):
     use_shared_memory_spool: bool = True
     cpu_threads_per_rank: int = Field(default=0, ge=0, le=32)
     batch_prefetch: bool = False
+    pin_memory: bool = False
     decoded_image_cache_size: int = Field(default=0, ge=0)
     telemetry_every_iterations: int = Field(default=10, ge=1)
     checkpoint_every_iterations: int = Field(default=1, ge=1)

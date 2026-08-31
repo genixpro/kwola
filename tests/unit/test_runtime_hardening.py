@@ -70,7 +70,9 @@ def test_replay_budget_retains_work_limited_by_the_scheduled_cap() -> None:
     assert budget.remaining_sample_credit == 792
 
 
-def test_batch_stream_offsets_initial_batch_and_prefetch_failures() -> None:
+def test_batch_stream_offsets_initial_batch_and_prefetch_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     coordinator = SimpleNamespace(settings=SimpleNamespace(rank=1))
     direct = FakeAssembler()
     sampler = ReplaySampler(100, 4, 2, 1, seed=1, training_step=0)
@@ -86,6 +88,14 @@ def test_batch_stream_offsets_initial_batch_and_prefetch_failures() -> None:
         batch_stream.batches(prefetched, coordinator, 3, 99, 4, sampler, -10.0, True)
     )
     assert [batch for batch, _duration in prefetched_batches] == [99, *expected[1:]]
+
+    monkeypatch.setattr(batch_stream, "pin_batch", lambda batch: batch + 1000)
+    pinned = FakeAssembler()
+    sampler = ReplaySampler(100, 4, 2, 1, seed=1, training_step=0)
+    pinned_batches = list(
+        batch_stream.batches(pinned, coordinator, 1, None, 4, sampler, -10.0, True, True)
+    )
+    assert pinned_batches[0][0] == expected[0] + 1000
 
     sampler = ReplaySampler(100, 4, 2, 1, seed=1, training_step=0)
     failing = FakeAssembler(failure_offset=sampler.batch_indexes(0)[0])

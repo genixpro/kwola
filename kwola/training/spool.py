@@ -32,6 +32,17 @@ def batch_to_device(batch: TrainingBatch, device: torch.device) -> TrainingBatch
     return _map_tensors(batch, transfer)
 
 
+def pin_batch(batch: TrainingBatch) -> TrainingBatch:
+    """Copy CPU tensor storage into page-locked memory for asynchronous CUDA transfer."""
+
+    def pin(tensor: Tensor) -> Tensor:
+        if tensor.is_cuda or tensor.is_pinned():
+            return tensor
+        return tensor.contiguous().pin_memory()
+
+    return _map_tensors(batch, pin)
+
+
 def _map_tensors[T](value: T, transform: Any) -> T:
     if isinstance(value, Tensor):
         return cast(T, transform(value))

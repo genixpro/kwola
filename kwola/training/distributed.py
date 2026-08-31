@@ -254,6 +254,7 @@ def _rank_iterations(
             sampler,
             config.policy.rewards.impossible_action,
             config.training.batch_prefetch,
+            config.training.pin_memory,
         )
         for iteration, (cpu_batch, assembly_duration) in enumerate(batch_stream):
             assembly_seconds += assembly_duration

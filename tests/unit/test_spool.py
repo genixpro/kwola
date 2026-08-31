@@ -1,14 +1,17 @@
 import platform
 from dataclasses import replace
 
+import pytest
 import torch
 
 from kwola.training.batches import diagnostic_batch
 from kwola.training.samples import TrainingBatch
-from kwola.training.spool import batch_to_device, share_batch
+from kwola.training.spool import batch_to_device, pin_batch, share_batch
 
 
-def test_batch_spool_uses_shared_tensor_storage() -> None:
+def test_batch_spool_uses_shared_and_contiguous_pinned_tensor_storage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = diagnostic_batch(
         batch_size=1,
         num_actions=2,
@@ -37,3 +40,7 @@ def test_batch_spool_uses_shared_tensor_storage() -> None:
     )
     expanded = batch_to_device(compact, torch.device("cpu"))
     assert expanded.request.pixel_action_maps.dtype is torch.float32
+    monkeypatch.setattr(torch.Tensor, "pin_memory", lambda tensor: tensor)
+    overlapping = replace(batch, present_rewards=torch.ones(1).expand(2))
+    pinned = pin_batch(overlapping)
+    assert pinned.present_rewards.is_contiguous()

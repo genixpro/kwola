@@ -84,10 +84,12 @@ _PROFILES: dict[ProfileName, dict[str, Any]] = {
             "world_size": 2,
             "cpu_threads_per_rank": 4,
             "batch_prefetch": True,
+            "pin_memory": True,
             "decoded_image_cache_size": 4096,
             "telemetry_every_iterations": 8,
             "checkpoint_every_iterations": 1,
             "sample_cache_workers": 8,
+            "replay_samples_per_new_trace": 16,
         },
         "storage": {"codec_compression_level": 0},
         "reporting": {

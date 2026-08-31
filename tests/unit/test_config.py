@@ -22,11 +22,12 @@ def test_profiles_are_fresh_and_preserve_expected_topologies() -> None:
     assert rig.orchestration.browser_workers == 10
     assert rig.policy.testing_sequence_length == 50
     assert rig.training.batch_prefetch
+    assert rig.training.pin_memory
     assert rig.training.batch_size == 32
     assert rig.training.batches_per_iteration == 900
     assert rig.training.min_batches_per_iteration == 900
     assert rig.training.max_batches_per_iteration == 900
-    assert rig.training.replay_samples_per_new_trace == 8
+    assert rig.training.replay_samples_per_new_trace == 16
     assert rig.training.next_crop_width == rig.training.crop_width
     assert rig.training.next_crop_height == rig.training.crop_height
     assert rig.training.cpu_threads_per_rank == 4
